@@ -1,0 +1,254 @@
+# Liquidity Monitor Configuration
+# This file contains all configurable parameters for the system
+
+data:
+  # Asset universe
+  banks:
+    - 'JPM'
+    - 'BAC'
+    - 'WFC'
+    - 'C'
+    - 'GS'
+    - 'MS'
+    - 'DB'
+    - 'UBS'
+    - 'CS'
+    - 'BCS'
+    - 'HSBC'
+    - 'SAN'
+    - 'BMO'
+    - 'RY'
+    - 'TD'
+  
+  insurance:
+    - 'AIG'
+    - 'PRU'
+    - 'MET'
+    - 'BRK-A'
+    - 'BRK-B'
+    - 'ALL'
+    - 'TRV'
+    - 'CB'
+    - 'CINF'
+    - 'AFL'
+  
+  asset_managers:
+    - 'BLK'
+    - 'IVZ'
+    - 'AMG'
+    - 'EVR'
+    - 'LM'
+    - 'NTRS'
+    - 'STT'
+    - 'BEN'
+  
+  tech_stocks:
+    - 'AAPL'
+    - 'MSFT'
+    - 'GOOGL'
+    - 'AMZN'
+    - 'META'
+    - 'NVDA'
+    - 'TSLA'
+    - 'ADBE'
+    - 'CRM'
+    - 'ORCL'
+  
+  energy_stocks:
+    - 'XOM'
+    - 'CVX'
+    - 'COP'
+    - 'EOG'
+    - 'SLB'
+    - 'HAL'
+    - 'BP'
+    - 'SHEL'
+    - 'TTE'
+    - 'ENB'
+  
+  etfs:
+    - 'SPY'
+    - 'QQQ'
+    - 'IWM'
+    - 'DIA'
+    - 'VTI'
+    - 'VOO'
+    - 'GLD'
+    - 'SLV'
+    - 'TLT'
+    - 'HYG'
+    - 'LQD'
+    - 'SHY'
+    - 'IEF'
+  
+  crypto:
+    - 'BTC-USD'
+    - 'ETH-USD'
+  
+  market_indicators:
+    - '^VIX'
+    - '^VVIX'
+    - '^MOVE'
+    - '^TYX'
+    - '^FVX'
+    - '^TNX'
+    - '^IRX'
+  
+  # Global assets
+  european_banks:
+    - 'HSBA.L'
+    - 'BARC.L'
+    - 'LLOY.L'
+    - 'BNP.PA'
+    - 'SAN.PA'
+    - 'GLE.PA'
+    - 'INGA.AS'
+    - 'DBK.DE'
+    - 'CBK.DE'
+    - 'UBS.S'
+    - 'CSGN.S'
+    - 'ISP.MI'
+    - 'UCG.MI'
+    - 'BBVA.MC'
+    - 'CA.MC'
+  
+  asian_banks:
+    - '0005.HK'
+    - '3988.HK'
+    - '2318.HK'
+    - '1299.HK'
+    - '2800.HK'
+    - '7203.T'
+    - '8306.T'
+    - '8316.T'
+    - '9304.T'
+    - '6586.T'
+    - '005930.KS'
+    - '051910.KS'
+    - '000660.KS'
+    - '373220.KS'
+    - '600519.SS'
+    - '000001.SZ'
+    - '600036.SS'
+    - '601318.SS'
+    - '000858.SZ'
+  
+  global_etfs:
+    - 'EWU'
+    - 'EWG'
+    - 'EWQ'
+    - 'EWA'
+    - 'EWC'
+    - 'EWH'
+    - 'EWJ'
+    - 'EWS'
+    - 'EWM'
+    - 'EWW'
+    - 'EWZ'
+    - 'EEM'
+    - 'EFA'
+    - 'VTI'
+    - 'VEA'
+    - 'VWO'
+    - 'VNQ'
+    - 'BNDX'
+    - 'VXUS'
+    - 'AVDE'
+    - 'SPDW'
+    - 'DNL'
+    - 'DWM'
+    - 'DTH'
+    - 'DLS'
+    - 'DGS'
+    - 'DEM'
+    - 'DRR'
+    - 'DDM'
+  
+  # Data parameters
+  start_date_days: 7300  # 20 years of data
+  look_back: 30
+  correlation_threshold: 0.5
+  rolling_correlation_window: 90
+  graph_update_frequency: 30  # days
+  numerical_stability_epsilon: 1e-9
+  cache_enabled: true  # Enable data caching
+  cache_format: "parquet"  # Format for cached data (parquet, feather, csv)
+  
+  # Economic indicators from FRED
+  economic_indicators:
+    # US indicators
+    - "GDP"
+    - "CPIAUCSL"
+    - "UNRATE"
+    - "PAYEMS"
+    - "INDPRO"
+    - "HOUST"
+    - "UMCSENT"
+    - "DGS10"
+    - "DGS2"
+    - "DGS1MO"
+    - "DGS30"
+    - "TREAST"
+    - "WALCL"
+    - "RRPONTSYD"
+    - "BAA10Y"
+    - "AAA10Y"
+    - "TEDRATE"
+    - "DPRIME"
+    - "DFF"
+    - "TB3MS"
+    - "DTWEXBGS"
+    # Global indicators
+    - "DEXUSEU"
+    - "DEXUSUK"
+    - "DEXJPUS"
+    - "DEXCHUS"
+    - "DEXUSAL"
+    - "DEXUSCA"
+    - "DEXSZUS"
+    - "DEXKOUS"
+    - "DEXINUS"
+
+model:
+  # Model architecture
+  hidden_dim: 64
+  heads: 8
+  num_funds: 10  # Configurable number of funds for embeddings
+  
+  # Training parameters
+  epochs: 100
+  batch_size: 16
+  learning_rate: 0.0001
+  dropout_rate: 0.3
+  lstm_hidden_size: 256
+  gradient_clip_norm: 1.0
+
+simulation:
+  low_liquidity_threshold: 0.2
+
+funds:
+  major_funds:
+    - name: "BlackRock"
+      cik: "0001067983"
+    - name: "Vanguard"
+      cik: "0000102909"
+    - name: "Fidelity"
+      cik: "0000031453"
+    - name: "State Street"
+      cik: "0000036115"
+    - name: "JPMorgan"
+      cik: "0000019617"
+    - name: "Goldman Sachs"
+      cik: "0000088498"
+    - name: "Morgan Stanley"
+      cik: "0000070858"
+    - name: "Bank of America"
+      cik: "0000070858"
+    - name: "Charles Schwab"
+      cik: "0000034196"
+    - name: "BNY Mellon"
+      cik: "0000016232"
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

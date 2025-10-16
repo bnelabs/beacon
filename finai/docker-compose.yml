@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  liquidity-monitor:
+    build: .
+    container_name: liquidity-monitor
+    # Important change: Ensure all necessary persistent directories are explicitly volume-mounted 
+    # into the container if they don't reside in the project root of the build context, 
+    # though since we build from Finai, relative pathing works for the project structure created *inside* the container.
+    # Mounting data/logs/models ensures persistence across container restarts/rebuilds.
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - ./results:/app/results
+    environment:
+      # Pass env vars through to the container environment
+      - FRED_API_KEY=${FRED_API_KEY}
+      - SEC_API_KEY=${SEC_API_KEY}
+    # Set restart policy for production reliability
+    restart: on-failure
