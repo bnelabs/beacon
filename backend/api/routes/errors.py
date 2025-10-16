@@ -51,6 +51,7 @@ class ErrorStatsResponse(BaseModel):
     most_common: List[dict]
 
 
+@router.get("", response_model=List[ErrorLogResponse])
 @router.get("/", response_model=List[ErrorLogResponse])
 async def list_errors(
     limit: int = 100,

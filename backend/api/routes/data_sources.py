@@ -19,6 +19,7 @@ from services.error_logger import ErrorLogger
 router = APIRouter()
 
 
+@router.get("", response_model=List[DataSourceResponse])
 @router.get("/", response_model=List[DataSourceResponse])
 async def list_data_sources(
     enabled_only: bool = False,
@@ -76,6 +77,7 @@ async def get_data_source(
         )
 
 
+@router.post("", response_model=DataSourceResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=DataSourceResponse, status_code=status.HTTP_201_CREATED)
 async def create_data_source(
     data_source: DataSourceCreate,

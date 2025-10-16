@@ -19,6 +19,7 @@ from services.error_logger import ErrorLogger
 router = APIRouter()
 
 
+@router.get("", response_model=List[AssetResponse])
 @router.get("/", response_model=List[AssetResponse])
 async def list_assets(
     enabled_only: bool = False,
@@ -83,6 +84,7 @@ async def get_asset(
         )
 
 
+@router.post("", response_model=AssetResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=AssetResponse, status_code=status.HTTP_201_CREATED)
 async def create_asset(
     asset: AssetCreate,

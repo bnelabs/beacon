@@ -17,6 +17,7 @@ from services.error_logger import ErrorLogger
 router = APIRouter()
 
 
+@router.get("", response_model=List[JobResponse])
 @router.get("/", response_model=List[JobResponse])
 async def list_jobs(
     job_type: str = None,
@@ -83,6 +84,7 @@ async def get_job(
         )
 
 
+@router.post("", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
 async def create_job(
     job: JobCreate,

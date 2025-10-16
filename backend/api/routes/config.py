@@ -16,6 +16,7 @@ from services.error_logger import ErrorLogger
 router = APIRouter()
 
 
+@router.get("", response_model=SystemConfigResponse)
 @router.get("/", response_model=SystemConfigResponse)
 async def get_system_config(db: Session = Depends(get_db)):
     """
