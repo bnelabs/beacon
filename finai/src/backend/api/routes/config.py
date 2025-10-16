@@ -11,7 +11,7 @@ from ...schemas.config import (
     TrainingParamsUpdate
 )
 from ...services.config_service import ConfigService
-from ...services.error_translator import translate_error
+from ...services.error_logger import ErrorLogger
 
 router = APIRouter()
 
@@ -28,10 +28,11 @@ async def get_system_config(db: Session = Depends(get_db)):
         service = ConfigService(db)
         return service.get_system_config()
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="retrieving configuration")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="retrieving configuration", endpoint="/api/v1/config", method="GET")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -54,16 +55,18 @@ async def update_model_params(
         service = ConfigService(db)
         return service.update_model_params(params)
     except ValueError as e:
-        user_friendly_msg = translate_error(e, context="updating model settings")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="updating model settings", endpoint="/api/v1/config/model", method="PUT", request_data=params.dict())
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="updating model settings")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="updating model settings", endpoint="/api/v1/config/model", method="PUT", request_data=params.dict())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -84,16 +87,18 @@ async def update_data_params(
         service = ConfigService(db)
         return service.update_data_params(params)
     except ValueError as e:
-        user_friendly_msg = translate_error(e, context="updating data settings")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="updating data settings", endpoint="/api/v1/config/data", method="PUT", request_data=params.dict())
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="updating data settings")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="updating data settings", endpoint="/api/v1/config/data", method="PUT", request_data=params.dict())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -115,14 +120,16 @@ async def update_training_params(
         service = ConfigService(db)
         return service.update_training_params(params)
     except ValueError as e:
-        user_friendly_msg = translate_error(e, context="updating training settings")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="updating training settings", endpoint="/api/v1/config/training", method="PUT", request_data=params.dict())
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="updating training settings")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="updating training settings", endpoint="/api/v1/config/training", method="PUT", request_data=params.dict())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )

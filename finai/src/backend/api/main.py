@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 
-from .routes import data_sources, assets, jobs, config, system
+from .routes import data_sources, assets, jobs, config, system, errors
 from ..database import init_db, close_db
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,7 @@ app.include_router(assets.router, prefix="/api/v1/assets", tags=["Assets"])
 app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["Jobs"])
 app.include_router(config.router, prefix="/api/v1/config", tags=["Configuration"])
 app.include_router(system.router, prefix="/api/v1/system", tags=["System"])
+app.include_router(errors.router, prefix="/api/v1/errors", tags=["Error Logging"])
 
 
 @app.get("/")

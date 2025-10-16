@@ -14,7 +14,7 @@ from ...schemas.asset import (
     AssetBulkResponse
 )
 from ...services.asset_service import AssetService
-from ...services.error_translator import translate_error
+from ...services.error_logger import ErrorLogger
 
 router = APIRouter()
 
@@ -42,10 +42,11 @@ async def list_assets(
             region=region
         )
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="listing assets")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="listing assets", endpoint="/api/v1/assets", method="GET")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -74,10 +75,11 @@ async def get_asset(
     except HTTPException:
         raise
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="retrieving asset")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="retrieving asset", endpoint=f"/api/v1/assets/{asset_id}", method="GET")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -96,16 +98,18 @@ async def create_asset(
         service = AssetService(db)
         return service.create_asset(asset)
     except ValueError as e:
-        user_friendly_msg = translate_error(e, context="adding asset")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="adding asset", endpoint="/api/v1/assets", method="POST", request_data=asset.dict())
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="adding asset")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="adding asset", endpoint="/api/v1/assets", method="POST", request_data=asset.dict())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -124,10 +128,11 @@ async def create_assets_bulk(
         service = AssetService(db)
         return service.create_assets_bulk(bulk_create.assets)
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="adding multiple assets")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="adding multiple assets", endpoint="/api/v1/assets/bulk", method="POST", request_data={"asset_count": len(bulk_create.assets)})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -158,10 +163,11 @@ async def update_asset(
     except HTTPException:
         raise
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="updating asset")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="updating asset", endpoint=f"/api/v1/assets/{asset_id}", method="PUT", request_data=asset_update.dict())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -190,8 +196,9 @@ async def delete_asset(
     except HTTPException:
         raise
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="removing asset")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="removing asset", endpoint=f"/api/v1/assets/{asset_id}", method="DELETE")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )

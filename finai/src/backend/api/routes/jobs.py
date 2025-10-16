@@ -12,7 +12,7 @@ from ...schemas.job import (
     JobListFilter
 )
 from ...services.job_service import JobService
-from ...services.error_translator import translate_error
+from ...services.error_logger import ErrorLogger
 
 router = APIRouter()
 
@@ -41,10 +41,11 @@ async def list_jobs(
             offset=offset
         )
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="listing jobs")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="listing jobs", endpoint="/api/v1/jobs", method="GET")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -74,10 +75,11 @@ async def get_job(
     except HTTPException:
         raise
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="retrieving job")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="retrieving job", endpoint=f"/api/v1/jobs/{job_id}", method="GET")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -102,16 +104,18 @@ async def create_job(
         service = JobService(db)
         return service.create_job(job)
     except ValueError as e:
-        user_friendly_msg = translate_error(e, context="starting job")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="starting job", endpoint="/api/v1/jobs", method="POST", request_data=job.dict())
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="starting job")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="starting job", endpoint="/api/v1/jobs", method="POST", request_data=job.dict())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -140,8 +144,9 @@ async def cancel_job(
     except HTTPException:
         raise
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="cancelling job")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="cancelling job", endpoint=f"/api/v1/jobs/{job_id}", method="DELETE")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )

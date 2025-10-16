@@ -22,6 +22,7 @@ import {
   Work as WorkIcon,
   Settings as SettingsIcon,
   Computer as ComputerIcon,
+  ErrorOutline as ErrorIcon,
 } from '@mui/icons-material'
 
 const drawerWidth = 240
@@ -33,6 +34,7 @@ const menuItems = [
   { text: 'Jobs', icon: <WorkIcon />, path: '/jobs' },
   { text: 'Configuration', icon: <SettingsIcon />, path: '/configuration' },
   { text: 'System Status', icon: <ComputerIcon />, path: '/system' },
+  { text: 'Error Analytics', icon: <ErrorIcon />, path: '/errors' },
 ]
 
 export default function Layout({ children }) {

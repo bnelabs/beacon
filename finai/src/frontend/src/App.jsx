@@ -7,6 +7,7 @@ import Assets from './pages/Assets'
 import Jobs from './pages/Jobs'
 import Configuration from './pages/Configuration'
 import SystemStatus from './pages/SystemStatus'
+import ErrorAnalytics from './pages/ErrorAnalytics'
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
           <Route path="/jobs" element={<Jobs />} />
           <Route path="/configuration" element={<Configuration />} />
           <Route path="/system" element={<SystemStatus />} />
+          <Route path="/errors" element={<ErrorAnalytics />} />
         </Routes>
       </Layout>
     </Box>

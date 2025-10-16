@@ -6,7 +6,7 @@ import psutil
 import torch
 
 from ...database import get_db
-from ...services.error_translator import translate_error
+from ...services.error_logger import ErrorLogger
 
 router = APIRouter()
 
@@ -81,10 +81,11 @@ async def get_system_status(db: Session = Depends(get_db)):
             }
         }
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="checking system status")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="checking system status", endpoint="/api/v1/system/status", method="GET")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -154,8 +155,9 @@ async def get_resource_recommendations(db: Session = Depends(get_db)):
             "recommendations": recommendations
         }
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="generating recommendations")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="generating recommendations", endpoint="/api/v1/system/resources/recommendations", method="GET")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )

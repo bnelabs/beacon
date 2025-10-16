@@ -14,7 +14,7 @@ from ...schemas.data_source import (
     DataSourceTestResponse
 )
 from ...services.data_source_service import DataSourceService
-from ...services.error_translator import translate_error
+from ...services.error_logger import ErrorLogger
 
 router = APIRouter()
 
@@ -35,10 +35,11 @@ async def list_data_sources(
         service = DataSourceService(db)
         return service.list_data_sources(enabled_only=enabled_only)
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="listing data sources")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="listing data sources", endpoint="/api/v1/data-sources", method="GET")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -67,10 +68,11 @@ async def get_data_source(
     except HTTPException:
         raise
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="retrieving data source")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="retrieving data source", endpoint=f"/api/v1/data-sources/{data_source_id}", method="GET")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -90,17 +92,18 @@ async def create_data_source(
         service = DataSourceService(db)
         return service.create_data_source(data_source)
     except ValueError as e:
-        # Business logic errors (e.g., duplicate name)
-        user_friendly_msg = translate_error(e, context="creating data source")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="creating data source", endpoint="/api/v1/data-sources", method="POST", request_data=data_source.dict())
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="creating data source")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="creating data source", endpoint="/api/v1/data-sources", method="POST", request_data=data_source.dict())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -131,10 +134,11 @@ async def update_data_source(
     except HTTPException:
         raise
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="updating data source")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="updating data source", endpoint=f"/api/v1/data-sources/{data_source_id}", method="PUT", request_data=data_source_update.dict())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -163,10 +167,11 @@ async def delete_data_source(
     except HTTPException:
         raise
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="deleting data source")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="deleting data source", endpoint=f"/api/v1/data-sources/{data_source_id}", method="DELETE")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
 
 
@@ -185,9 +190,10 @@ async def test_data_source(
         service = DataSourceService(db)
         return service.test_data_source(test_request)
     except Exception as e:
-        user_friendly_msg = translate_error(e, context="testing data source")
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="testing data source", endpoint="/api/v1/data-sources/test", method="POST", request_data=test_request.dict())
         return DataSourceTestResponse(
             success=False,
-            message=user_friendly_msg,
-            details={"technical_error": str(e)}
+            message=error_log.user_message,
+            details={"technical_error": error_log.technical_message}
         )

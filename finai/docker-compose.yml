@@ -4,26 +4,28 @@ services:
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
-    container_name: liquidity_monitor_postgres
+    container_name: finai-postgres
     environment:
-      POSTGRES_DB: liquidity_monitor
-      POSTGRES_USER: liquidity
-      POSTGRES_PASSWORD: liquidity
+      POSTGRES_DB: finai_db
+      POSTGRES_USER: finai_user
+      POSTGRES_PASSWORD: finai_password
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U liquidity"]
+      test: ["CMD-SHELL", "pg_isready -U finai_user"]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: always
+    networks:
+      - finai-network
+    restart: unless-stopped
 
-  # Redis Cache & Message Broker
+  # Redis for Celery and caching
   redis:
     image: redis:7-alpine
-    container_name: liquidity_monitor_redis
+    container_name: finai-redis
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -34,78 +36,112 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: always
+    networks:
+      - finai-network
+    restart: unless-stopped
 
-  # FastAPI Backend
+  # Backend API (FastAPI) with CUDA support
   backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    container_name: liquidity_monitor_backend
-    command: uvicorn src.backend.api.main:app --host 0.0.0.0 --port 8000 --reload
-    environment:
-      DATABASE_URL: postgresql://liquidity:liquidity@postgres:5432/liquidity_monitor
-      REDIS_URL: redis://redis:6379/0
-      PYTHONPATH: /app
-      FRED_API_KEY: ${FRED_API_KEY:-}
-      SEC_API_KEY: ${SEC_API_KEY:-}
-    volumes:
-      - .:/app
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./models:/app/models
-      - ./results:/app/results
+    container_name: finai-backend
     ports:
-      - "8000:8000"
+      - "3456:3456"
+    environment:
+      DATABASE_URL: postgresql://finai_user:finai_password@postgres:5432/finai_db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      PYTHONPATH: /app
+      PORT: 3456
+      FRED_API_KEY: ${FRED_API_KEY:-}
+      ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
+    volumes:
+      - ./configs:/app/configs
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./logs:/app/logs
+      - ./results:/app/results
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    restart: always
+    networks:
+      - finai-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: uvicorn src.backend.api.main:app --host 0.0.0.0 --port 3456
 
-  # Celery Worker
-  celery_worker:
+  # Celery Worker for background tasks
+  celery-worker:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    container_name: liquidity_monitor_celery
-    command: celery -A src.backend.tasks.celery_app worker --loglevel=info --concurrency=2
+    container_name: finai-celery-worker
     environment:
-      DATABASE_URL: postgresql://liquidity:liquidity@postgres:5432/liquidity_monitor
+      DATABASE_URL: postgresql://finai_user:finai_password@postgres:5432/finai_db
       REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
       PYTHONPATH: /app
       FRED_API_KEY: ${FRED_API_KEY:-}
-      SEC_API_KEY: ${SEC_API_KEY:-}
+      ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
     volumes:
-      - .:/app
+      - ./configs:/app/configs
       - ./data:/app/data
-      - ./logs:/app/logs
       - ./models:/app/models
+      - ./logs:/app/logs
       - ./results:/app/results
     depends_on:
-      - postgres
-      - redis
-      - backend
-    restart: always
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    networks:
+      - finai-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: celery -A src.backend.tasks.celery_app worker --loglevel=info --concurrency=2
 
-  # React Frontend
+  # Frontend (React with Vite)
   frontend:
     build:
       context: ./src/frontend
       dockerfile: Dockerfile
-    container_name: liquidity_monitor_frontend
-    environment:
-      VITE_API_BASE_URL: http://localhost:8000
+      args:
+        VITE_API_BASE_URL: http://localhost:3456
+    container_name: finai-frontend
     ports:
-      - "3000:3000"
-    volumes:
-      - ./src/frontend:/app
-      - /app/node_modules
+      - "6789:6789"
+    environment:
+      PORT: 6789
+      VITE_API_BASE_URL: http://localhost:3456
     depends_on:
       - backend
-    restart: always
+    networks:
+      - finai-network
+    restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  finai-network:
+    driver: bridge
