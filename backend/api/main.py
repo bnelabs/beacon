@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
+import os
 
 from .routes import data_sources, assets, jobs, config, system, errors
 from database import init_db, close_db
@@ -32,17 +33,25 @@ app = FastAPI(
 )
 
 # CORS middleware for frontend access
+# In production, set ALLOWED_ORIGINS environment variable
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",") if os.getenv("ALLOWED_ORIGINS") else [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:6789",
+    "http://127.0.0.1:6789",
+]
+
+# For Docker deployments, allow all origins (less secure, but necessary for dynamic IPs)
+if os.getenv("ENVIRONMENT", "development") == "development":
+    allowed_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:6789",  # Docker frontend
-        "http://127.0.0.1:6789"
-    ],
-    allow_credentials=True,
+    allow_origins=allowed_origins,
+    allow_credentials=False if "*" in allowed_origins else True,  # Can't use credentials with wildcard
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Include routers
