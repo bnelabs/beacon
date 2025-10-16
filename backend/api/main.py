@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from .routes import data_sources, assets, jobs, config, system, errors
-from ..database import init_db, close_db
+from database import init_db, close_db
 
 logger = logging.getLogger(__name__)
 
