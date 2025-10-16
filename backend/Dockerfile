@@ -29,7 +29,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p /app/data /app/results /app/logs /app/models
+RUN mkdir -p /app/data /app/results /app/logs /app/saved_models
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
