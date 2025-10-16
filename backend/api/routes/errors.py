@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 
-from ...database import get_db
-from ...models.error_log import ErrorLog
-from ...services.error_logger import ErrorLogger
+from database import get_db
+from models.error_log import ErrorLog
+from services.error_logger import ErrorLogger
 
 router = APIRouter()
 
