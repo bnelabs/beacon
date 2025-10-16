@@ -168,6 +168,7 @@ data:
   start_date_days: 7300  # 20 years of data
   look_back: 30
   correlation_threshold: 0.5
+  api_rate_limit_seconds: 2.0  # Sleep time between API batch requests
   rolling_correlation_window: 90
   graph_update_frequency: 30  # days
   numerical_stability_epsilon: 1e-9

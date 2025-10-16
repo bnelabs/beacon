@@ -160,7 +160,9 @@ class LiquidityMonitorPipeline:
                 self._create_visualizations(results, graph_data, common_assets, asset_to_idx_map, train_start, test_end)
             
             # Step 10: Save results (In backtesting mode, this is handled separately)
-            if save_results and not any(k.startswith('20') for k in [train_start, test_end]): # Simple heuristic to differentiate single run vs backtest run structure
+            # Use explicit flag check instead of heuristic
+            is_backtest_mode = getattr(self, '_is_backtest_mode', False)
+            if save_results and not is_backtest_mode:
                 self._save_single_run_results(results, train_start, test_end)
             
             logger.info("Pipeline run completed successfully")
@@ -469,9 +471,9 @@ class LiquidityMonitorPipeline:
         # Visualize graph performance dashboard
         graph_viz_path = results_dir / "performance_dashboard.html"
         self.dashboard_generator.create_performance_dashboard(
-            results.get("predictions", []), # Passing empty list if not captured, will be fixed below if needed
-            results.get("targets", []),     # Passing empty list if not captured, will be fixed below if needed
-            [], # Dates are hard to reconstruct reliably here, skip for now
+            results.get("predictions", []),
+            results.get("targets", []),
+            [], # Dates are hard to reconstruct without additional tracking
             common_assets,
             asset_to_idx_map,
             str(graph_viz_path)
@@ -583,7 +585,10 @@ class LiquidityMonitorPipeline:
         start_year = start_year or self.config.get("backtesting.start_year")
         end_year = end_year or self.config.get("backtesting.end_year")
         logger.info(f"Starting walk-forward backtesting from {start_year} to {end_year}")
-        
+
+        # Set backtest mode flag
+        self._is_backtest_mode = True
+
         all_backtest_results = []
         
         # Identify the largest possible clean asset universe available for consistency across runs

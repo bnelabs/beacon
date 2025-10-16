@@ -220,18 +220,20 @@ class Trainer:
         
         # Calculate metrics
         from sklearn.metrics import mean_squared_error, mean_absolute_error
-        
+
         results = {}
         if all_predictions and all_targets:
             results["mse"] = mean_squared_error(all_targets, all_predictions)
             results["mae"] = mean_absolute_error(all_targets, all_predictions)
             results["rmse"] = results["mse"] ** 0.5
-            
+            results["predictions"] = all_predictions  # Include predictions for visualization
+            results["targets"] = all_targets  # Include targets for visualization
+
             logger.info(f"Evaluation complete - MSE: {results['mse']:.6f}, MAE: {results['mae']:.6f}")
         else:
             logger.warning("No valid predictions for evaluation")
-            results = {"mse": float("nan"), "mae": float("nan"), "rmse": float("nan")}
-        
+            results = {"mse": float("nan"), "mae": float("nan"), "rmse": float("nan"), "predictions": [], "targets": []}
+
         return results
     
     def _find_closest_graph_date(

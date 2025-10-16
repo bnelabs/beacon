@@ -30,14 +30,32 @@ class DataCollector:
     def __init__(self, config: Config):
         """
         Initialize data collector.
-        
+
         Args:
             config: Configuration object
+
+        Raises:
+            ValueError: If required API keys are not configured
         """
         self.config = config
         self._fred_client = None
         self._sec_client = None
         self.cache = DataCache(config)
+
+        # Validate API keys at initialization
+        try:
+            fred_key = self.config.get_api_key("FRED")
+            if not fred_key or fred_key == "":
+                logger.warning("FRED_API_KEY not set. FRED data collection will fail.")
+        except Exception as e:
+            logger.warning(f"FRED_API_KEY validation failed: {e}")
+
+        try:
+            sec_key = self.config.get_api_key("SEC")
+            if not sec_key or sec_key == "":
+                logger.warning("SEC_API_KEY not set. SEC data collection will fail.")
+        except Exception as e:
+            logger.warning(f"SEC_API_KEY validation failed: {e}")
     
     @property
     def fred_client(self) -> Fred:
@@ -105,16 +123,17 @@ class DataCollector:
                     continue
                 
                 # Process and validate data
-                # We need to handle single ticker download result having only one level index
-                if len(batch_assets) == 1 and isinstance(batch_data.columns, pd.MultiIndex):
-                    # If yfinance returns MultiIndex even for single ticker, we need to adjust
-                    # This case is complex, assuming standard multi-index output for robustness
-                    pass
-                elif len(batch_assets) == 1 and not isinstance(batch_data.columns, pd.MultiIndex):
-                     # If only one asset, yfinance returns single index. Rename to match MultiIndex expectations (e.g., ['Close', 'AAPL'])
-                     batch_data = batch_data.copy()
-                     batch_data.columns = pd.MultiIndex.from_product([['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']], names=['", "Asset'])
-
+                # Handle single vs multi-ticker download structure
+                if len(batch_assets) == 1:
+                    # Single ticker: yfinance may return simple columns without MultiIndex
+                    if not isinstance(batch_data.columns, pd.MultiIndex):
+                        # Convert to MultiIndex format for consistent processing
+                        batch_data = batch_data.copy()
+                        batch_data.columns = pd.MultiIndex.from_product(
+                            [batch_data.columns, batch_assets],
+                            names=['Metric', 'Asset']
+                        )
+                        logger.debug(f"Converted single asset data to MultiIndex format")
 
                 # Check if batch_data has a MultiIndex before stacking.
                 if isinstance(batch_data.columns, pd.MultiIndex):
@@ -133,9 +152,10 @@ class DataCollector:
                     batch_data = batch_data[[col for col in batch_data.columns if col in required_cols]]
                     
                 else:
-                    # Fallback if batch_data is not MultiIndex (e.g., single asset download structure we didn't expect)
-                    # This path is brittle if yfinance output consistency is low. Sticking to expected structure handling via MultiIndex.
-                    logger.warning(f"Unexpected column structure for batch {i//batch_size + 1}. Attempting to skip validation.")
+                    # Fallback if batch_data is not MultiIndex after conversion attempts
+                    logger.error(f"Unexpected column structure for batch {i//batch_size + 1}: {batch_data.columns.tolist()}")
+                    logger.error(f"Batch assets: {batch_assets}, Data shape: {batch_data.shape}")
+                    logger.warning(f"Skipping batch {i//batch_size + 1} due to incompatible data structure")
                     continue
 
 
@@ -152,8 +172,11 @@ class DataCollector:
                 continue
             
             # CRITICAL FIX: Introduce rate limiting (Supervisor Feedback)
+            # Make rate limiting configurable via config
             if i + batch_size < len(assets):
-                time.sleep(2)
+                sleep_time = self.config.get("data.api_rate_limit_seconds", 2.0)
+                logger.debug(f"Rate limiting: sleeping for {sleep_time} seconds")
+                time.sleep(sleep_time)
         
         if not all_data:
             raise ValueError("No asset data was successfully downloaded")

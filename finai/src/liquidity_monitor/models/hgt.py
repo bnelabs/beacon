@@ -93,16 +93,25 @@ class HeteroLiquidityHGT(nn.Module):
     ) -> torch.Tensor:
         """
         Forward pass of the model.
-        
+
+        Expected tensor shapes:
+            - x_dict['asset']: [B, N_sys, L, F]
+                B: Batch size
+                N_sys: Total number of assets in system (from graph metadata)
+                L: Sequence length (look_back window)
+                F: Number of features per asset
+            - x_dict['fund']: [B, N_fund] (optional, fund indices)
+            - edge_index_dict: Dictionary of edge indices by edge type
+
         Args:
-            x_dict: Dictionary of node features by type. x_dict['asset'] shape is [B*N_asset, F] where N_asset is the number of assets *in the batch*.
+            x_dict: Dictionary of node features by type. x_dict['asset'] shape is [B, N_sys, L, F]
             edge_index_dict: Dictionary of edge indices by type (uses global indexing N_total)
             batch_size: Batch size (B)
             seq_len: Sequence length (L, look_back)
             num_assets_in_batch: Number of assets (N_asset) accounted for in this specific batch sample sequence
-            
+
         Returns:
-            Predicted liquidity scores: [B, N_assets_system] (Note: N_assets_system is derived from `data[asset].x.shape[0]` when model was built)
+            Predicted liquidity scores: [B, N_assets_in_batch]
         """
         
         # 1. Project input features (F -> H)
@@ -129,16 +138,17 @@ class HeteroLiquidityHGT(nn.Module):
                 
                 if x_dict['asset'].dim() == 4: # [B, N_system_assets, L, F]
                     B, N_sys, L, F = x_dict['asset'].shape
-                    
-                    # Reshape asset features for time step processing: [B*N_sys, F] (if we assume HGTconv works on features across all nodes in the batch snapshot)
-                    # Since HGTConv requires all nodes of a specific type to be concatenated for aggregation over ONE time step:
-                    
-                    # Prepare input for iteration: asset_x_time_stacked shape becomes [L, B*N_sys, F]
-                    
-                    # We need to iterate L times. In each iteration t, we select the features for all N_sys assets at time t.
+
+                    # Shape assertions for debugging
+                    assert B == batch_size, f"Batch size mismatch: expected {batch_size}, got {B}"
+                    assert L == seq_len, f"Sequence length mismatch: expected {seq_len}, got {L}"
+
+                    # Reshape asset features for time step processing: [L, B*N_sys, F]
+                    # HGTConv requires all nodes of a specific type to be concatenated for aggregation
+                    # We iterate L times, selecting features for all N_sys assets at time t
                     asset_features_at_time_t = x_dict['asset'][:, :, :, :].permute(2, 0, 1, 3).reshape(L, B * N_sys, F)
                     projected_raw_x['asset'] = asset_features_at_time_t
-                    
+
                 else:
                     raise ValueError(f"Unexpected shape for asset features: {x_dict['asset'].shape}. Expected [B, N_sys, L, F].")
             
@@ -213,6 +223,9 @@ class HeteroLiquidityHGT(nn.Module):
             
             # Extract asset embeddings for this time step t
             # hgt_out['asset'] should be [B*N_sys, H_out]
+            expected_nodes = batch_size * num_assets_in_batch
+            assert hgt_out["asset"].shape[0] == expected_nodes, \
+                f"HGT output shape mismatch at time {t}: expected {expected_nodes} nodes, got {hgt_out['asset'].shape[0]}"
             asset_embedding = hgt_out["asset"].view(batch_size, num_assets_in_batch, self.hidden_dim)
             t_step_outputs.append(asset_embedding) # [B, N_asset_batch, H]
         
