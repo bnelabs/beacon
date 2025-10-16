@@ -198,6 +198,7 @@ The system provides:
      - **Yahoo Finance**: No API key needed (free, built-in)
      - **FRED**: Get free key from https://fred.stlouisfed.org/
      - **Alpha Vantage**: Get free key from https://www.alphavantage.co/
+     - **SEC Edgar**: Get free key from https://sec-api.io (100 requests/month free)
    - Or upload CSV files with your own data
 
 2. **Add Assets to Monitor**
@@ -295,7 +296,22 @@ All long-running tasks are processed asynchronously:
 - **Paid Tiers**: Available for higher limits
 - **Get API Key**: https://www.alphavantage.co/support/#api-key
 
-### 4. CSV Upload
+### 4. SEC Edgar (sec-api.io)
+- **Cost**: Free tier: 100 requests/month
+- **Data**:
+  - Company financials (10-K, 10-Q filings)
+  - Institutional holdings (13F filings)
+  - Insider trading (Form 4)
+  - Proxy statements (DEF 14A)
+  - Company facts and metrics
+- **Paid Tiers**:
+  - Starter: $49/month (1,000 requests)
+  - Pro: $99/month (10,000 requests)
+  - Enterprise: Custom pricing
+- **Get API Key**: https://sec-api.io
+- **Usage**: Access SEC Edgar filings data for fundamental analysis
+
+### 5. CSV Upload
 - **Cost**: Free
 - **Format Requirements**:
   ```csv
@@ -304,7 +320,7 @@ All long-running tasks are processed asynchronously:
   ```
 - **Usage**: Custom data or offline datasets
 
-### 5. Custom API
+### 6. Custom API
 - **Cost**: Depends on your API
 - **Setup**: Configure endpoint, authentication in GUI
 - **Usage**: Connect to proprietary data sources

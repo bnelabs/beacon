@@ -57,6 +57,7 @@ services:
       PORT: 3456
       FRED_API_KEY: ${FRED_API_KEY:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
+      SEC_API_KEY: ${SEC_API_KEY:-}
     volumes:
       - ./configs:/app/configs
       - ./data:/app/data
@@ -94,6 +95,7 @@ services:
       PYTHONPATH: /app
       FRED_API_KEY: ${FRED_API_KEY:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
+      SEC_API_KEY: ${SEC_API_KEY:-}
     volumes:
       - ./configs:/app/configs
       - ./data:/app/data

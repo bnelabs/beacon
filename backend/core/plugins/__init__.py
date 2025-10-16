@@ -17,6 +17,7 @@ from .fred_plugin import FREDPlugin
 from .alpha_vantage_plugin import AlphaVantagePlugin
 from .csv_plugin import CSVPlugin
 from .custom_api_plugin import CustomAPIPlugin
+from .sec_plugin import SECPlugin
 
 __all__ = [
     "DataSourcePlugin",
@@ -27,5 +28,6 @@ __all__ = [
     "FREDPlugin",
     "AlphaVantagePlugin",
     "CSVPlugin",
-    "CustomAPIPlugin"
+    "CustomAPIPlugin",
+    "SECPlugin"
 ]
