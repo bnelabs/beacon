@@ -42,8 +42,8 @@ import {
   Warning as WarningIcon,
   Info as InfoIcon
 } from '@mui/icons-material';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import apiClient from '../services/apiClient';
+import { useQuery, useMutation, useQueryClient } from 'react-query';
+import apiClient from '../api/client';
 
 const ErrorAnalytics = () => {
   const queryClient = useQueryClient();
