@@ -41,6 +41,7 @@ export default function DataSources() {
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingSource, setEditingSource] = useState(null)
+  const [error, setError] = useState(null)
   const [formData, setFormData] = useState({
     name: '',
     plugin_type: 'yfinance',
@@ -62,6 +63,10 @@ export default function DataSources() {
       onSuccess: () => {
         queryClient.invalidateQueries('dataSources')
         handleCloseDialog()
+        setError(null)
+      },
+      onError: (err) => {
+        setError(err.userFriendlyMessage || err.message || 'Failed to create data source')
       }
     }
   )
@@ -73,6 +78,10 @@ export default function DataSources() {
       onSuccess: () => {
         queryClient.invalidateQueries('dataSources')
         handleCloseDialog()
+        setError(null)
+      },
+      onError: (err) => {
+        setError(err.userFriendlyMessage || err.message || 'Failed to update data source')
       }
     }
   )
@@ -113,6 +122,7 @@ export default function DataSources() {
   const handleCloseDialog = () => {
     setDialogOpen(false)
     setEditingSource(null)
+    setError(null)
   }
 
   const handleSubmit = () => {
@@ -249,6 +259,11 @@ export default function DataSources() {
           {editingSource ? 'Edit Data Source' : 'Add Data Source'}
         </DialogTitle>
         <DialogContent>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+              {error}
+            </Alert>
+          )}
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <TextField
               label="Name"
