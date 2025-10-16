@@ -27,7 +27,7 @@ Base = declarative_base()
 
 def init_db():
     """Initialize database tables."""
-    from .models import data_source, asset, job  # Import all models
+    from models import data_source, asset, job, error_log  # Import all models
     Base.metadata.create_all(bind=engine)
 
 
