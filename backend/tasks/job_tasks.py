@@ -8,9 +8,9 @@ import psutil
 import os
 
 from .celery_app import celery_app
-from ..database import SessionLocal
-from ..services.job_service import JobService
-from ..services.error_translator import translate_error
+from database import SessionLocal
+from services.job_service import JobService
+from services.enhanced_error_translator import translate_error_enhanced as translate_error
 
 logger = logging.getLogger(__name__)
 
