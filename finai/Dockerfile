@@ -15,6 +15,7 @@ COPY requirements.txt .
 
 # Install any needed packages specified in requirements.txt
 # FIX: Updated to use --no-cache-dir for smaller image size and avoiding intermediate files
+RUN pip install pandas
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of your application's code
