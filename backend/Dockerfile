@@ -21,11 +21,11 @@ RUN ln -sf /usr/bin/python3.10 /usr/bin/python && \
 # Upgrade pip
 RUN python -m pip install --upgrade pip
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
+# Copy requirements from parent directory
+COPY ../requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy backend application code
 COPY . .
 
 # Create necessary directories
@@ -40,4 +40,4 @@ ENV CUDA_VISIBLE_DEVICES=0
 EXPOSE 3456
 
 # Default command (can be overridden in docker-compose)
-CMD ["uvicorn", "src.backend.api.main:app", "--host", "0.0.0.0", "--port", "3456"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "3456"]

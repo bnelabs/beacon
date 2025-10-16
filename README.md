@@ -176,7 +176,7 @@ The system provides:
 
 2. **Run the startup script**
    ```bash
-   ./start.sh
+   ./scripts/start.sh
    ```
 
    The script will:
@@ -561,7 +561,7 @@ docker-compose restart backend
 
 # Full reset (deletes data!)
 docker-compose down -v
-./start.sh
+./scripts/start.sh
 ```
 
 ### Error Analytics

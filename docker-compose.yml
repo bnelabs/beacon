@@ -43,8 +43,8 @@ services:
   # Backend API (FastAPI) with CUDA support
   backend:
     build:
-      context: .
-      dockerfile: Dockerfile.backend
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: finai-backend
     ports:
       - "3456:3456"
@@ -78,13 +78,13 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    command: uvicorn src.backend.api.main:app --host 0.0.0.0 --port 3456
+    command: uvicorn api.main:app --host 0.0.0.0 --port 3456
 
   # Celery Worker for background tasks
   celery-worker:
     build:
-      context: .
-      dockerfile: Dockerfile.backend
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: finai-celery-worker
     environment:
       DATABASE_URL: postgresql://finai_user:finai_password@postgres:5432/finai_db
@@ -117,12 +117,12 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    command: celery -A src.backend.tasks.celery_app worker --loglevel=info --concurrency=2
+    command: celery -A tasks.celery_app worker --loglevel=info --concurrency=2
 
   # Frontend (React with Vite)
   frontend:
     build:
-      context: ./src/frontend
+      context: ./frontend
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: http://localhost:3456

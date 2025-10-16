@@ -11,7 +11,7 @@ celery_app = Celery(
     "liquidity_monitor",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["src.backend.tasks.job_tasks"]
+    include=["tasks.job_tasks"]
 )
 
 # Celery configuration
