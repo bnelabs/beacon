@@ -2,8 +2,9 @@
 
 # FinAI - Financial Liquidity Risk Monitoring System
 # Startup script for Docker environment
+# Improved: robust docker-compose detection, retries for health checks, safer curl usage
 
-set -e
+set -euo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -11,42 +12,48 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
-
 echo -e "${BLUE}================================${NC}"
 echo -e "${BLUE}  FinAI - Liquidity Monitor${NC}"
 echo -e "${BLUE}================================${NC}\n"
 
 # Check if Docker is installed
-if ! command -v docker &> /dev/null; then
-    echo -e "${RED}Error: Docker is not installed${NC}"
-    echo "Please install Docker from: https://docs.docker.com/get-docker/"
-    exit 1
+if ! command -v docker &>/dev/null; then
+echo -e "${RED}Error: Docker is not installed${NC}"
+echo "Please install Docker from: https://docs.docker.com/get-docker/"
+exit 1
 fi
 
-# Check if Docker Compose is installed
-if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null 2>&1; then
-    echo -e "${RED}Error: Docker Compose is not installed${NC}"
-    echo "Please install Docker Compose from: https://docs.docker.com/compose/install/"
-    exit 1
-fi
-
-# Check if NVIDIA Docker runtime is available (for GPU support)
-if command -v nvidia-smi &> /dev/null; then
-    echo -e "${GREEN}✓ NVIDIA GPU detected${NC}"
-    if docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi &> /dev/null; then
-        echo -e "${GREEN}✓ NVIDIA Docker runtime configured${NC}"
-        GPU_AVAILABLE=true
-    else
-        echo -e "${YELLOW}⚠ NVIDIA Docker runtime not configured${NC}"
-        echo -e "${YELLOW}  GPU acceleration will not be available${NC}"
-        echo -e "${YELLOW}  To enable GPU support, install nvidia-docker2${NC}"
-        GPU_AVAILABLE=false
-    fi
+# Detect docker-compose command (legacy or v2 subcommand)
+DC_CMD=""
+if command -v docker-compose &>/dev/null; then
+DC_CMD="docker-compose"
+elif docker compose version &>/dev/null 2>&1; then
+DC_CMD="docker compose"
 else
-    echo -e "${YELLOW}⚠ No NVIDIA GPU detected - using CPU only${NC}"
-    GPU_AVAILABLE=false
+echo -e "${RED}Error: Docker Compose is not installed${NC}"
+echo "Please install Docker Compose (either docker-compose or the 'docker compose' plugin)."
+exit 1
 fi
+echo -e "${GREEN}Using compose command: ${DC_CMD}${NC}"
 
+# Check if NVIDIA GPU runtime is available (for GPU support)
+GPU_AVAILABLE=false
+if command -v nvidia-smi &>/dev/null; then
+echo -e "${GREEN}✓ NVIDIA GPU detected${NC}"
+# Quick check for GPU accessibility via docker; prefer checking docker runtimes to avoid pulling large images
+if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q nvidia || docker run --rm --gpus all --entrypoint nvidia-smi nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi &>/dev/null; then
+echo -e "${GREEN}✓ NVIDIA Docker runtime configured${NC}"
+GPU_AVAILABLE=true
+else
+echo -e "${YELLOW}⚠ NVIDIA Docker runtime not configured${NC}"
+echo -e "${YELLOW}  GPU acceleration will not be available${NC}"
+echo -e "${YELLOW}  To enable GPU support, install and configure nvidia-docker2 / nvidia-container-toolkit${NC}"
+GPU_AVAILABLE=false
+fi
+else
+echo -e "${YELLOW}⚠ No NVIDIA GPU detected - using CPU only${NC}"
+GPU_AVAILABLE=false
+fi
 echo ""
 
 # Create necessary directories
@@ -55,8 +62,8 @@ mkdir -p data logs models results
 
 # Check for .env file
 if [ ! -f .env ]; then
-    echo -e "${YELLOW}⚠ No .env file found. Creating default .env file...${NC}"
-    cat > .env << EOF
+echo -e "${YELLOW}⚠ No .env file found. Creating default .env file...${NC}"
+cat > .env <<'EOF'
 # API Keys (Optional - can be configured via GUI)
 FRED_API_KEY=
 ALPHA_VANTAGE_API_KEY=
@@ -66,71 +73,55 @@ POSTGRES_DB=finai_db
 POSTGRES_USER=finai_user
 POSTGRES_PASSWORD=finai_password
 EOF
-    echo -e "${GREEN}✓ Created .env file${NC}"
-    echo -e "${YELLOW}  You can add API keys now or configure them later via the GUI${NC}"
+chmod 600 .env || true
+echo -e "${GREEN}✓ Created .env file${NC}"
+echo -e "${YELLOW}  You can add API keys now or configure them later via the GUI${NC}"
 fi
-
 echo ""
 echo -e "${BLUE}Building Docker images...${NC}"
 echo -e "${YELLOW}This may take several minutes on first run${NC}\n"
 
-# Build images
-if [ "$GPU_AVAILABLE" = true ]; then
-    docker-compose build
-else
-    echo -e "${YELLOW}Building without GPU support${NC}"
-    # Remove GPU configuration from docker-compose temporarily
-    docker-compose build
-fi
-
+# Build images (use configured compose command)
+$DC_CMD build
 echo ""
 echo -e "${BLUE}Starting services...${NC}\n"
 
 # Start services
-if [ "$GPU_AVAILABLE" = true ]; then
-    docker-compose up -d
-else
-    # Start without GPU requirements
-    docker-compose up -d
-fi
+$DC_CMD up -d
 
-# Wait for services to be healthy
+# Function: wait_for_cmd <description> <max_seconds> <cmd...>
+wait_for_cmd() {
+description="$1"; shift
+timeout="$1"; shift
+cmd=( "$@" )
+
+echo -e "${BLUE}Waiting up to ${timeout}s for ${description}...${NC}"
+start_ts=$(date +%s)
+while true; do
+if "${cmd[@]}" &>/dev/null; then
+echo -e "${GREEN}✓ ${description} ready${NC}"
+return 0
+fi
+now=$(date +%s)
+elapsed=$((now - start_ts))
+if [ "$elapsed" -ge "$timeout" ]; then
+echo -e "${RED}✗ Timeout waiting for ${description}${NC}"
+return 1
+fi
+sleep 2
+done
+}
+
+# Wait for containers to be up and healthy with retries
 echo -e "${BLUE}Waiting for services to be ready...${NC}"
-sleep 10
 
-# Check service health
-echo ""
-echo -e "${BLUE}Checking service status...${NC}"
+# Examples of checks. Adjust names/ports if your compose uses different service names.
+wait_for_cmd "PostgreSQL container startup (pg_isready)" 60 docker exec finai-postgres pg_isready -U finai_user || echo -e "${YELLOW}Postgres may not be ready yet (check logs)${NC}"
+wait_for_cmd "Redis container (redis-cli ping)" 30 docker exec finai-redis redis-cli ping || echo -e "${YELLOW}Redis may not be ready yet (check logs)${NC}"
 
-# Check PostgreSQL
-if docker exec finai-postgres pg_isready -U finai_user &> /dev/null; then
-    echo -e "${GREEN}✓ PostgreSQL is ready${NC}"
-else
-    echo -e "${RED}✗ PostgreSQL is not ready${NC}"
-fi
-
-# Check Redis
-if docker exec finai-redis redis-cli ping &> /dev/null; then
-    echo -e "${GREEN}✓ Redis is ready${NC}"
-else
-    echo -e "${RED}✗ Redis is not ready${NC}"
-fi
-
-# Check Backend
-if curl -s http://localhost:3456/health &> /dev/null; then
-    echo -e "${GREEN}✓ Backend API is ready${NC}"
-else
-    echo -e "${YELLOW}⚠ Backend API is starting...${NC}"
-    echo -e "${YELLOW}  It may take a few more seconds${NC}"
-fi
-
-# Check Frontend
-if curl -s http://localhost:6789 &> /dev/null; then
-    echo -e "${GREEN}✓ Frontend is ready${NC}"
-else
-    echo -e "${YELLOW}⚠ Frontend is starting...${NC}"
-    echo -e "${YELLOW}  It may take a minute to compile${NC}"
-fi
+# HTTP endpoint health checks — use curl --fail so non-2xx/3xx are treated as failures
+wait_for_cmd "Backend API (http://localhost:3456/health)" 60 curl -fsS --max-time 5 http://localhost:3456/health || echo -e "${YELLOW}⚠ Backend API did not respond successfully to /health within timeout${NC}"
+wait_for_cmd "Frontend (http://localhost:6789/)" 60 curl -fsS --max-time 5 http://localhost:6789/ || echo -e "${YELLOW}⚠ Frontend did not respond within timeout${NC}"
 
 echo ""
 echo -e "${GREEN}================================${NC}"
@@ -143,17 +134,16 @@ echo -e "  • Backend API:  ${GREEN}http://localhost:3456${NC}"
 echo -e "  • API Docs:     ${GREEN}http://localhost:3456/docs${NC}\n"
 
 echo -e "${BLUE}Useful commands:${NC}"
-echo -e "  • View logs:           ${YELLOW}docker-compose logs -f${NC}"
-echo -e "  • View backend logs:   ${YELLOW}docker-compose logs -f backend${NC}"
-echo -e "  • View frontend logs:  ${YELLOW}docker-compose logs -f frontend${NC}"
-echo -e "  • Stop services:       ${YELLOW}docker-compose down${NC}"
-echo -e "  • Restart services:    ${YELLOW}docker-compose restart${NC}\n"
+echo -e "  • View logs:           ${YELLOW}${DC_CMD} logs -f${NC}"
+echo -e "  • View backend logs:   ${YELLOW}${DC_CMD} logs -f backend${NC}"
+echo -e "  • View frontend logs:  ${YELLOW}${DC_CMD} logs -f frontend${NC}"
+echo -e "  • Stop services:       ${YELLOW}${DC_CMD} down${NC}"
+echo -e "  • Restart services:    ${YELLOW}${DC_CMD} restart${NC}\n"
 
 if [ "$GPU_AVAILABLE" = false ]; then
-    echo -e "${YELLOW}Note: Running in CPU-only mode. Training may be slower.${NC}"
-    echo -e "${YELLOW}      Consider using smaller model parameters via the Configuration page.${NC}\n"
+echo -e "${YELLOW}Note: Running in CPU-only mode. Training may be slower.${NC}"
+echo -e "${YELLOW}      Consider using smaller model parameters via the Configuration page.${NC}\n"
 fi
-
 echo -e "${BLUE}Getting Started:${NC}"
 echo -e "  1. Open ${GREEN}http://localhost:6789${NC} in your browser"
 echo -e "  2. Configure data sources (add API keys or upload CSV files)"
@@ -161,5 +151,4 @@ echo -e "  3. Add assets to monitor"
 echo -e "  4. Start data collection job"
 echo -e "  5. Train the model"
 echo -e "  6. View predictions and analytics\n"
-
-echo -e "${GREEN}System started successfully!${NC}"
+echo -e "${GREEN}System started (or is starting). Check logs for progress.${NC}"
