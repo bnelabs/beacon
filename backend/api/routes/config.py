@@ -3,15 +3,15 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from ...database import get_db
-from ...schemas.config import (
+from database import get_db
+from schemas.config import (
     SystemConfigResponse,
     ModelParamsUpdate,
     DataParamsUpdate,
     TrainingParamsUpdate
 )
-from ...services.config_service import ConfigService
-from ...services.error_logger import ErrorLogger
+from services.config_service import ConfigService
+from services.error_logger import ErrorLogger
 
 router = APIRouter()
 

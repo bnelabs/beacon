@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 import psutil
 import torch
 
-from ...database import get_db
-from ...services.error_logger import ErrorLogger
+from database import get_db
+from services.error_logger import ErrorLogger
 
 router = APIRouter()
 

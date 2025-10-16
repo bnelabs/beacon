@@ -4,17 +4,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 
-from ...database import get_db
-from ...models.asset import Asset
-from ...schemas.asset import (
+from database import get_db
+from models.asset import Asset
+from schemas.asset import (
     AssetCreate,
     AssetUpdate,
     AssetResponse,
     AssetBulkCreate,
     AssetBulkResponse
 )
-from ...services.asset_service import AssetService
-from ...services.error_logger import ErrorLogger
+from services.asset_service import AssetService
+from services.error_logger import ErrorLogger
 
 router = APIRouter()
 
