@@ -12,9 +12,15 @@ SRC_PATH = PROJECT_ROOT / "src"
 sys.path.insert(0, str(SRC_PATH))
 
 from liquidity_monitor.pipeline import LiquidityMonitorPipeline
+from liquidity_monitor.utils.config import Config
 from liquidity_monitor.utils.logger import setup_logger
 
-logger = setup_logger("main")
+# Load configuration globally to set logging parameters
+CONFIG = Config()
+LOG_LEVEL = CONFIG.get("logging.level", "INFO")
+LOG_DIR = "logs" # Target 'logs' directory for file persistence, per docker-compose volume mapping
+
+logger = setup_logger("main", log_dir=LOG_DIR, level=LOG_LEVEL)
 
 
 def parse_arguments():

@@ -353,6 +353,7 @@ class DataCollector:
             logger.warning("FRED data validation failed")
             return result
     
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=8, max=30))
     def download_balance_sheet_data(
         self,
         institutions: List[str],
@@ -428,6 +429,7 @@ class DataCollector:
         
         return balance_sheet_data
     
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=8, max=30))
     def download_holdings_data(
         self,
         major_funds: List[Dict[str, str]],

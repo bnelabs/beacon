@@ -35,6 +35,13 @@ class LiquidityMonitorPipeline:
             config_path: Path to configuration file (relative to CWD)
         """
         self.config = Config(config_path)
+        
+        # FIX I.4: Configure pipeline logger based on loaded config
+        log_level = self.config.get("logging.level", "INFO")
+        log_dir = "logs" 
+        # Reconfigure logger named 'pipeline' to ensure file persistence and correct log level
+        setup_logger("pipeline", log_dir=log_dir, level=log_level)
+        
         # Determine project root dynamically
         self.project_root = Path(__file__).parent.parent.parent.parent
         
@@ -397,7 +404,9 @@ class LiquidityMonitorPipeline:
         # Create dataset and dataloader
         look_back = self.config.get("data.look_back", 30)
         batch_size = self.config.get("model.batch_size", 16)
-        num_assets_system = len(assets)
+        # FIX II.3: Use size derived from STATIC graph metadata (N_sys) for feature tensor dimension, 
+        # allowing batch items to map to their absolute index, leaving others zeroed.
+        num_assets_system = len(graph_data["node_to_idx"])
         
         # Create the custom collate function instance for the specific data shapes
         custom_collate = lambda batch: collate_fn(
@@ -576,12 +585,12 @@ class LiquidityMonitorPipeline:
         assets: List[str],
         features: List[str]
     ) -> Dict[str, Any]:
-        """Evaluate model and capture raw predictions/targets for visualization."""
-        logger.info("Evaluating model")
+        """Step 8: Evaluate the model."""
+        logger.info("Step 8: Evaluating model on test set")
         
         # Create dataset and dataloader
         look_back = self.config.get("data.look_back", 30)
-        num_assets_system = len(assets)
+        num_assets_system = len(graph_data["node_to_idx"]) # Use size derived from STATIC graph metadata
 
         custom_collate = lambda batch: collate_fn(
             batch, look_back, num_assets_system, graph_data["node_to_idx"]

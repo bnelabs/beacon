@@ -18,4 +18,4 @@ services:
       - FRED_API_KEY=${FRED_API_KEY}
       - SEC_API_KEY=${SEC_API_KEY}
     # Set restart policy for production reliability
-    restart: on-failure
+    restart: always

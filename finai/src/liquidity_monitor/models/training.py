@@ -239,21 +239,31 @@ class Trainer:
         target_date: datetime,
         graph_dates: List[datetime]
     ) -> datetime:
-        """Find the closest graph date to target date, prioritizing dates <= target_date if possible."""
+        """Find the closest graph date to target date, prioritizing dates <= target_date if possible, 
+        but relaxing causality if the closest causal date is excessively stale."""
         if not graph_dates:
             return None
         
         target_date = pd.to_datetime(target_date).normalize()
+        MAX_STALE_DAYS_TO_TOLERATE = 60 # Allow up to 60 days gap between sequence end and graph structure date
         
-        # Filter dates that are on or before the target date (for causality)
+        # 1. Filter dates that are on or before the target date (causal dates)
         causal_dates = [d for d in graph_dates if d.normalize() <= target_date]
         
         if causal_dates:
-            # Find the latest date equal to or before the target date
-            return max(causal_dates, key=lambda x: x.toordinal())
+            latest_causal_date = max(causal_dates, key=lambda x: x.toordinal())
+            time_diff = (target_date - latest_causal_date).days
+            
+            if time_diff <= MAX_STALE_DAYS_TO_TOLERATE:
+                # Causal date is recent enough, use it.
+                return latest_causal_date
+            else:
+                # Context is stale (gap > tolerance). Switch to finding the absolute closest date 
+                # to utilize a more temporally recent graph structure, even if slightly in the future.
+                logger.warning(f"Causal graph date {latest_causal_date.date()} is potentially stale relative to target {target_date.date()} ({time_diff} days). Switching to closest overall date.")
+                return min(graph_dates, key=lambda x: abs(x - target_date))
         else:
-            # If all graph dates are after the target date (e.g., for very early test samples)
-            # revert to finding the minimum absolute difference, which effectively selects the earliest graph date.
+            # Fallback: If no causal date exists, take the closest overall date (which will be future).
             return min(graph_dates, key=lambda x: abs(x - target_date))
 </final_file_content>
 
