@@ -5,8 +5,8 @@ from typing import List, Optional
 import logging
 from datetime import datetime
 
-from ..models.job import Job
-from ..schemas.job import JobCreate
+from models.job import Job
+from schemas.job import JobCreate
 
 logger = logging.getLogger(__name__)
 

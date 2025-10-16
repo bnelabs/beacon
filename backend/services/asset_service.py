@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 
-from ..models.asset import Asset
-from ..schemas.asset import AssetCreate, AssetUpdate, AssetBulkResponse
+from models.asset import Asset
+from schemas.asset import AssetCreate, AssetUpdate, AssetBulkResponse
 
 logger = logging.getLogger(__name__)
 

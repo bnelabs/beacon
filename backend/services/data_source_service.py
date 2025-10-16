@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 
-from ..models.data_source import DataSource
-from ..schemas.data_source import (
+from models.data_source import DataSource
+from schemas.data_source import (
     DataSourceCreate,
     DataSourceUpdate,
     DataSourceTestRequest,

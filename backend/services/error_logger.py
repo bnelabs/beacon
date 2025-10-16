@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy.orm import Session
 
-from ..models.error_log import ErrorLog
+from models.error_log import ErrorLog
 from .enhanced_error_translator import EnhancedErrorTranslator
 
 logger = logging.getLogger(__name__)
