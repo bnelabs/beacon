@@ -209,9 +209,7 @@ class LiquidityMonitorPipeline:
         
         # Download balance sheet data (Requires SEC API Key)
         institutions = self.config.get("data.banks", []) + self.config.get("data.insurance", [])
-        financial_facts = [
-            "Assets", "StockholdersEquity", "ShortTermDebt", "LongTermDebt", "CashAndCashEquivalentsAtCarryingValue"
-        ] # Reduced financial facts list to core ones to minimize API calls/complexity
+        financial_facts = self.config.get("data.financial_facts", [])
         
         balance_sheet_data = {}
         try:
@@ -255,9 +253,7 @@ class LiquidityMonitorPipeline:
         logger.info("Step 2: Processing raw data & Engineering features")
         
         institutions = self.config.get("data.banks", []) + self.config.get("data.insurance", [])
-        financial_facts = [
-            "Assets", "StockholdersEquity", "ShortTermDebt", "LongTermDebt", "CashAndCashEquivalentsAtCarryingValue"
-        ]
+        financial_facts = self.config.get("data.financial_facts", [])
         economic_indicators = self.config.get("data.economic_indicators", [])
         
         processed_data, features, num_features = self.data_processor.engineer_features(
@@ -451,51 +447,7 @@ class LiquidityMonitorPipeline:
         logger.info("Model training complete")
         return trained_model
     
-    def _evaluate_model(
-        self,
-        model: Any,
-        test_sequences: Dict,
-        graph_data: Dict,
-        assets: List[str],
-        features: List[str]
-    ) -> Dict[str, Any]:
-        """Step 8: Evaluate the model."""
-        logger.info("Step 8: Evaluating model on test set")
-        
-        # Create dataset and dataloader
-        look_back = self.config.get("data.look_back", 30)
-        num_assets_system = len(assets)
 
-        # Create the custom collate function instance for the specific data shapes
-        custom_collate = lambda batch: collate_fn(
-            batch, look_back, num_assets_system, graph_data["node_to_idx"]
-        )
-        
-        test_dataset = LiquidityDataset(test_sequences, assets, graph_data["node_to_idx"], look_back)
-        
-        test_loader = DataLoader(
-            test_dataset,
-            batch_size=1, # Use batch size 1 for evaluation stability, though it should handle small batches
-            shuffle=False,
-            collate_fn=custom_collate
-        )
-
-        if len(test_loader) == 0:
-            logger.warning("Test DataLoader is empty. Cannot perform evaluation.")
-            return {"mse": float("nan"), "mae": float("nan"), "rmse": float("nan")}
-        
-        # Evaluate
-        results = self.trainer.evaluate_model(
-            model,
-            test_loader,
-            graph_data["graph_date_to_hetero_data"],
-            graph_data["graph_dates"],
-            assets,
-            len(features)
-        )
-        
-        logger.info("Model evaluation complete")
-        return results
     
     def _create_visualizations(
         self,
@@ -626,8 +578,10 @@ class LiquidityMonitorPipeline:
         logger.info("Model evaluation complete")
         return results
     
-    def run_backtesting(self, start_year: int = 2010, end_year: int = 2023):
+    def run_backtesting(self, start_year: int = None, end_year: int = None):
         """Run walk-forward backtesting."""
+        start_year = start_year or self.config.get("backtesting.start_year")
+        end_year = end_year or self.config.get("backtesting.end_year")
         logger.info(f"Starting walk-forward backtesting from {start_year} to {end_year}")
         
         all_backtest_results = []

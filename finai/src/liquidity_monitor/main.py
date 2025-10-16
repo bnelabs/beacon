@@ -75,11 +75,7 @@ def run_backtesting(pipeline: LiquidityMonitorPipeline):
     """Run walk-forward backtesting."""
     logger.info("Starting walk-forward backtesting execution.")
     
-    # Default periods as suggested in the original implementation review
-    start_year = 2010
-    end_year = 2023
-    
-    pipeline.run_backtesting(start_year, end_year)
+    pipeline.run_backtesting()
 
 
 def run_single_pipeline(pipeline: LiquidityMonitorPipeline, args):
