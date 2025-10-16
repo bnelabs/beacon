@@ -13,11 +13,19 @@ from .base import (
 
 # Import all plugins to register them
 from .yfinance_plugin import YFinancePlugin
+from .fred_plugin import FREDPlugin
+from .alpha_vantage_plugin import AlphaVantagePlugin
+from .csv_plugin import CSVPlugin
+from .custom_api_plugin import CustomAPIPlugin
 
 __all__ = [
     "DataSourcePlugin",
     "register_plugin",
     "get_plugin",
     "list_plugins",
-    "YFinancePlugin"
+    "YFinancePlugin",
+    "FREDPlugin",
+    "AlphaVantagePlugin",
+    "CSVPlugin",
+    "CustomAPIPlugin"
 ]
