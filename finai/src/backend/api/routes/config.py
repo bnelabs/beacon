@@ -1,0 +1,128 @@
+"""API routes for system configuration."""
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from ...database import get_db
+from ...schemas.config import (
+    SystemConfigResponse,
+    ModelParamsUpdate,
+    DataParamsUpdate,
+    TrainingParamsUpdate
+)
+from ...services.config_service import ConfigService
+from ...services.error_translator import translate_error
+
+router = APIRouter()
+
+
+@router.get("/", response_model=SystemConfigResponse)
+async def get_system_config(db: Session = Depends(get_db)):
+    """
+    Get current system configuration.
+
+    **For non-technical users:** View all the current settings for the system,
+    including model parameters, data collection settings, and training options.
+    """
+    try:
+        service = ConfigService(db)
+        return service.get_system_config()
+    except Exception as e:
+        user_friendly_msg = translate_error(e, context="retrieving configuration")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+        )
+
+
+@router.put("/model", response_model=SystemConfigResponse)
+async def update_model_params(
+    params: ModelParamsUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Update model parameters.
+
+    **For non-technical users:** Change how the AI model works.
+    - **Hidden Dimension**: Model complexity (higher = more powerful but slower)
+    - **Num Heads**: How many perspectives the model uses
+    - **Num Layers**: Model depth (more layers = better patterns but slower)
+    - **Dropout**: Helps prevent overfitting (0.0 to 0.9)
+    - **Learning Rate**: How fast the model learns (0.00001 to 0.1)
+    """
+    try:
+        service = ConfigService(db)
+        return service.update_model_params(params)
+    except ValueError as e:
+        user_friendly_msg = translate_error(e, context="updating model settings")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+        )
+    except Exception as e:
+        user_friendly_msg = translate_error(e, context="updating model settings")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+        )
+
+
+@router.put("/data", response_model=SystemConfigResponse)
+async def update_data_params(
+    params: DataParamsUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Update data collection parameters.
+
+    **For non-technical users:** Change how data is collected.
+    - **Look Back**: How many days of history to use (1-365)
+    - **Correlation Threshold**: Minimum similarity between assets (0.0-1.0)
+    - **API Rate Limit**: Wait time between API calls to avoid hitting limits
+    """
+    try:
+        service = ConfigService(db)
+        return service.update_data_params(params)
+    except ValueError as e:
+        user_friendly_msg = translate_error(e, context="updating data settings")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+        )
+    except Exception as e:
+        user_friendly_msg = translate_error(e, context="updating data settings")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+        )
+
+
+@router.put("/training", response_model=SystemConfigResponse)
+async def update_training_params(
+    params: TrainingParamsUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Update training parameters.
+
+    **For non-technical users:** Change how the model is trained.
+    - **Batch Size**: Number of examples processed at once (higher = faster but more memory)
+    - **Num Epochs**: How many times to go through the data (more = better but slower)
+    - **Early Stopping Patience**: Stop if no improvement after N epochs
+    - **Validation Split**: Portion of data used for validation (0.1-0.5)
+    """
+    try:
+        service = ConfigService(db)
+        return service.update_training_params(params)
+    except ValueError as e:
+        user_friendly_msg = translate_error(e, context="updating training settings")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+        )
+    except Exception as e:
+        user_friendly_msg = translate_error(e, context="updating training settings")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"technical": str(e), "user_friendly": user_friendly_msg}
+        )

@@ -1,21 +1,111 @@
 version: '3.8'
 
 services:
-  liquidity-monitor:
-    build: .
-    container_name: liquidity-monitor
-    # Important change: Ensure all necessary persistent directories are explicitly volume-mounted 
-    # into the container if they don't reside in the project root of the build context, 
-    # though since we build from Finai, relative pathing works for the project structure created *inside* the container.
-    # Mounting data/logs/models ensures persistence across container restarts/rebuilds.
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: liquidity_monitor_postgres
+    environment:
+      POSTGRES_DB: liquidity_monitor
+      POSTGRES_USER: liquidity
+      POSTGRES_PASSWORD: liquidity
     volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U liquidity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  # Redis Cache & Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: liquidity_monitor_redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: liquidity_monitor_backend
+    command: uvicorn src.backend.api.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      DATABASE_URL: postgresql://liquidity:liquidity@postgres:5432/liquidity_monitor
+      REDIS_URL: redis://redis:6379/0
+      PYTHONPATH: /app
+      FRED_API_KEY: ${FRED_API_KEY:-}
+      SEC_API_KEY: ${SEC_API_KEY:-}
+    volumes:
+      - .:/app
       - ./data:/app/data
       - ./logs:/app/logs
       - ./models:/app/models
       - ./results:/app/results
-    environment:
-      # Pass env vars through to the container environment
-      - FRED_API_KEY=${FRED_API_KEY}
-      - SEC_API_KEY=${SEC_API_KEY}
-    # Set restart policy for production reliability
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: always
+
+  # Celery Worker
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: liquidity_monitor_celery
+    command: celery -A src.backend.tasks.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      DATABASE_URL: postgresql://liquidity:liquidity@postgres:5432/liquidity_monitor
+      REDIS_URL: redis://redis:6379/0
+      PYTHONPATH: /app
+      FRED_API_KEY: ${FRED_API_KEY:-}
+      SEC_API_KEY: ${SEC_API_KEY:-}
+    volumes:
+      - .:/app
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - ./results:/app/results
+    depends_on:
+      - postgres
+      - redis
+      - backend
+    restart: always
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile
+    container_name: liquidity_monitor_frontend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./src/frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    restart: always
+
+volumes:
+  postgres_data:
+  redis_data:
