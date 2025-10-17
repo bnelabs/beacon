@@ -36,7 +36,6 @@ import {
   ShowChart as ChartIcon
 } from '@mui/icons-material'
 import { api } from '../api/client'
-import apiClient from '../api/client'
 
 function CategoryIcon({ category }) {
   const icons = {
@@ -110,18 +109,23 @@ export default function Catalogue() {
         sector: categoryFilter || 'Financial',
         region: catalogueItem.region,
         liquidity_threshold: 0.5,
-        enabled: true
+        enabled: true,
+        data_source_id: catalogueItem.data_source_id
       }
-      await apiClient.post('/assets', assetData)
+      return await api.assets.create(assetData)
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['assets'])
       setSnackbar({ open: true, message: 'Added to monitoring successfully!', severity: 'success' })
     },
     onError: (error) => {
+      const errorMsg = error.response?.data?.detail?.user_friendly ||
+                       error.response?.data?.detail ||
+                       error.userFriendlyMessage ||
+                       'Failed to add to monitoring'
       setSnackbar({
         open: true,
-        message: error.response?.data?.detail || 'Failed to add to monitoring',
+        message: errorMsg,
         severity: 'error'
       })
     }
