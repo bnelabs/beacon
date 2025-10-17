@@ -41,6 +41,7 @@ class RiskType(str, enum.Enum):
     FUNDING_LIQUIDITY = "funding_liquidity"
     SYSTEMIC_RISK = "systemic_risk"
     OPERATIONAL_RISK = "operational_risk"
+    CREDIT_RISK = "credit_risk"
 
 
 class DataCatalogueItem(Base):
