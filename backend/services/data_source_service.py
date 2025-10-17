@@ -111,7 +111,7 @@ class DataSourceService:
         """Test a data source configuration."""
         try:
             # Import plugin system
-            from core.plugins.base import get_plugin
+            from plugins.base import get_plugin
 
             # Get the appropriate plugin
             plugin_class = get_plugin(test_request.plugin_type)
