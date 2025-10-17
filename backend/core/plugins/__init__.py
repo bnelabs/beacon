@@ -18,6 +18,7 @@ from .alpha_vantage_plugin import AlphaVantagePlugin
 from .csv_plugin import CSVPlugin
 from .custom_api_plugin import CustomAPIPlugin
 from .sec_plugin import SECPlugin
+from .ecb_plugin import ECBPlugin
 
 __all__ = [
     "DataSourcePlugin",
@@ -29,5 +30,6 @@ __all__ = [
     "AlphaVantagePlugin",
     "CSVPlugin",
     "CustomAPIPlugin",
-    "SECPlugin"
+    "SECPlugin",
+    "ECBPlugin"
 ]

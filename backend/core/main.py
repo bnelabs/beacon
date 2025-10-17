@@ -132,8 +132,8 @@ def run_single_pipeline(pipeline: LiquidityMonitorPipeline, args):
 def main():
     """Main function."""
     args = parse_arguments()
-    
-    # Initialize pipeline (config_path will be relative to CWD /Users/barisnacierzeren/Downloads/Finai)
+
+    # Initialize pipeline
     pipeline = LiquidityMonitorPipeline(args.config)
     
     if args.backtest:
