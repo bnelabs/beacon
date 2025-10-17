@@ -60,7 +60,7 @@ const ErrorAnalytics = () => {
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['error-statistics'],
     queryFn: async () => {
-      const response = await apiClient.get('/api/v1/errors/statistics');
+      const response = await apiClient.get('/errors/statistics');
       return response.data;
     },
     refetchInterval: 120000 // Refresh every 2 minutes
@@ -75,7 +75,7 @@ const ErrorAnalytics = () => {
       if (filters.category) params.append('category', filters.category);
       if (filters.resolved !== '') params.append('resolved', filters.resolved);
 
-      const response = await apiClient.get(`/api/v1/errors/?${params.toString()}`);
+      const response = await apiClient.get(`/errors/?${params.toString()}`);
       return response.data;
     },
     refetchInterval: 60000 // Refresh every minute
@@ -84,7 +84,7 @@ const ErrorAnalytics = () => {
   // Resolve error mutation
   const resolveMutation = useMutation({
     mutationFn: async ({ errorId, notes }) => {
-      await apiClient.post(`/api/v1/errors/${errorId}/resolve`, null, {
+      await apiClient.post(`/errors/${errorId}/resolve`, null, {
         params: { resolution_notes: notes }
       });
     },

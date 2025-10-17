@@ -1,5 +1,5 @@
-# Use NVIDIA CUDA base image for GPU support
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+# Use NVIDIA CUDA base image for GPU support (updated to non-deprecated version)
+FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04
 
 # Set working directory
 WORKDIR /app
@@ -31,10 +31,19 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p /app/data /app/results /app/logs /app/saved_models
 
+# Create non-root user for security
+RUN groupadd -r beacon && useradd -r -g beacon -u 1000 beacon
+
+# Set ownership
+RUN chown -R beacon:beacon /app
+
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 ENV CUDA_VISIBLE_DEVICES=0
+
+# Switch to non-root user
+USER beacon
 
 # Expose port
 EXPOSE 3456

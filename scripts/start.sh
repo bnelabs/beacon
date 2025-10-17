@@ -135,7 +135,7 @@ wait_for_cmd() {
 # Wait for containers to be up and healthy with retries
 echo -e "${BLUE}Waiting for services to be ready...${NC}"
 
-wait_for_cmd "PostgreSQL container startup" 60 docker exec beacon-postgres pg_isready -U beacon_user || echo -e "${YELLOW}⚠ Postgres may not be ready yet (check logs)${NC}"
+wait_for_cmd "PostgreSQL container startup" 60 docker exec beacon-postgres pg_isready -U beacon_user -d beacon_db || echo -e "${YELLOW}⚠ Postgres may not be ready yet (check logs)${NC}"
 wait_for_cmd "Redis container" 30 docker exec beacon-redis redis-cli ping || echo -e "${YELLOW}⚠ Redis may not be ready yet (check logs)${NC}"
 
 # HTTP endpoint health checks

@@ -102,11 +102,12 @@ class JobService:
         if result:
             db_job.result = result
 
-        # Update timestamps
+        # Update timestamps (use timezone-aware datetime)
+        from datetime import timezone
         if status == "running" and not db_job.started_at:
-            db_job.started_at = datetime.utcnow()
+            db_job.started_at = datetime.now(timezone.utc)
         elif status in ["completed", "failed"]:
-            db_job.completed_at = datetime.utcnow()
+            db_job.completed_at = datetime.now(timezone.utc)
             if db_job.started_at:
                 elapsed = (db_job.completed_at - db_job.started_at).total_seconds()
                 db_job.execution_time_seconds = elapsed

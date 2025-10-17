@@ -12,7 +12,7 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U beacon_user"]
+      test: ["CMD-SHELL", "pg_isready -U beacon_user -d beacon_db"]
       interval: 10s
       timeout: 5s
       retries: 5

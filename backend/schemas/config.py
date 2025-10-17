@@ -6,6 +6,8 @@ from typing import Optional, Dict, Any
 
 class SystemConfigResponse(BaseModel):
     """Schema for system configuration response."""
+    model_config = {"protected_namespaces": ()}  # Allow model_ prefix
+
     model_params: Dict[str, Any] = Field(..., description="Model hyperparameters")
     data_params: Dict[str, Any] = Field(..., description="Data collection parameters")
     training_params: Dict[str, Any] = Field(..., description="Training parameters")
