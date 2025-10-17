@@ -187,9 +187,9 @@ BEACON uses a modular **DATA → ENGINE → RESULTS** pipeline for complete obse
 ### Prerequisites
 
 - **Docker** (20.10+) and **Docker Compose** (2.0+)
-- **NVIDIA GPU** (optional, for acceleration)
-- **8GB RAM minimum** (16GB+ recommended)
-- **10GB disk space**
+- **NVIDIA GPU** (24GB desired for acceleration)
+- **16GB RAM minimum** (32GB+ recommended)
+- **50GB disk space**
 
 ### Installation
 
