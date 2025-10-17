@@ -117,8 +117,8 @@ done
 echo -e "${BLUE}Waiting for services to be ready...${NC}"
 
 # Examples of checks. Adjust names/ports if your compose uses different service names.
-wait_for_cmd "PostgreSQL container startup (pg_isready)" 60 docker exec finai-postgres pg_isready -U finai_user || echo -e "${YELLOW}Postgres may not be ready yet (check logs)${NC}"
-wait_for_cmd "Redis container (redis-cli ping)" 30 docker exec finai-redis redis-cli ping || echo -e "${YELLOW}Redis may not be ready yet (check logs)${NC}"
+wait_for_cmd "PostgreSQL container startup (pg_isready)" 60 docker exec beacon-postgres pg_isready -U beacon_user || echo -e "${YELLOW}Postgres may not be ready yet (check logs)${NC}"
+wait_for_cmd "Redis container (redis-cli ping)" 30 docker exec beacon-redis redis-cli ping || echo -e "${YELLOW}Redis may not be ready yet (check logs)${NC}"
 
 # HTTP endpoint health checks — use curl --fail so non-2xx/3xx are treated as failures
 wait_for_cmd "Backend API (http://localhost:3456/health)" 60 curl -fsS --max-time 5 http://localhost:3456/health || echo -e "${YELLOW}⚠ Backend API did not respond successfully to /health within timeout${NC}"

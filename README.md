@@ -195,7 +195,7 @@ BEACON uses a modular **DATA → ENGINE → RESULTS** pipeline for complete obse
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/your-username/beacon.git
+git clone https://github.com/rahatimrahat/beacon.git
 cd beacon
 
 # 2. Start services
@@ -509,3 +509,5 @@ Copyright © 2025 BNE (Banking Network Engine). All rights reserved.
 **ML Models**: HGT, GNN, Transformers
 **Data Sources**: 50+ (ECB, FRED, Yahoo, Alpha Vantage, SEC)
 **Coverage**: Global (US, Europe, Asia)
+**Repository**: https://github.com/rahatimrahat/beacon
+**License**: Copyright © 2025 BNE (Banking Network Engine). All rights reserved.
