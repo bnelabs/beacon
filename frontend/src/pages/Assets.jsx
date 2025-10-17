@@ -19,16 +19,14 @@ import {
   DialogContent,
   DialogActions,
   TextField,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
-  Switch,
-  FormControlLabel,
   Alert,
   CircularProgress,
-  Tabs,
-  Tab,
+  Switch,
+  FormControlLabel,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material'
 import {
   Add as AddIcon,
@@ -38,28 +36,18 @@ import {
   FilterList as FilterIcon,
 } from '@mui/icons-material'
 import { api } from '../api/client'
+import SmartAssetDialog from '../components/SmartAssetDialog'
 
 export default function Assets() {
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
   const [editingAsset, setEditingAsset] = useState(null)
-  const [activeTab, setActiveTab] = useState(0)
   const [filters, setFilters] = useState({
     enabled_only: false,
     asset_type: '',
     sector: '',
     region: ''
-  })
-  const [formData, setFormData] = useState({
-    symbol: '',
-    name: '',
-    asset_type: 'stock',
-    sector: '',
-    region: '',
-    liquidity_threshold: 0.5,
-    enabled: true,
-    data_source_id: null
   })
   const [bulkText, setBulkText] = useState('')
 
@@ -81,7 +69,8 @@ export default function Assets() {
     {
       onSuccess: () => {
         queryClient.invalidateQueries('assets')
-        handleCloseDialog()
+        setDialogOpen(false)
+        setEditingAsset(null)
       }
     }
   )
@@ -92,7 +81,8 @@ export default function Assets() {
     {
       onSuccess: () => {
         queryClient.invalidateQueries('assets')
-        handleCloseDialog()
+        setDialogOpen(false)
+        setEditingAsset(null)
       }
     }
   )
@@ -120,31 +110,7 @@ export default function Assets() {
   )
 
   const handleOpenDialog = (asset = null) => {
-    if (asset) {
-      setEditingAsset(asset)
-      setFormData({
-        symbol: asset.symbol,
-        name: asset.name || '',
-        asset_type: asset.asset_type || 'stock',
-        sector: asset.sector || '',
-        region: asset.region || '',
-        liquidity_threshold: asset.liquidity_threshold || 0.5,
-        enabled: asset.enabled,
-        data_source_id: asset.data_source_id
-      })
-    } else {
-      setEditingAsset(null)
-      setFormData({
-        symbol: '',
-        name: '',
-        asset_type: 'stock',
-        sector: '',
-        region: '',
-        liquidity_threshold: 0.5,
-        enabled: true,
-        data_source_id: dataSources?.[0]?.id || null
-      })
-    }
+    setEditingAsset(asset)
     setDialogOpen(true)
   }
 
@@ -153,7 +119,7 @@ export default function Assets() {
     setEditingAsset(null)
   }
 
-  const handleSubmit = () => {
+  const handleSubmitAsset = (formData) => {
     if (editingAsset) {
       updateMutation.mutate({ id: editingAsset.id, data: formData })
     } else {
@@ -363,107 +329,14 @@ export default function Assets() {
         </CardContent>
       </Card>
 
-      {/* Add/Edit Dialog */}
-      <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          {editingAsset ? 'Edit Asset' : 'Add Asset'}
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <TextField
-              label="Symbol"
-              fullWidth
-              value={formData.symbol}
-              onChange={(e) => setFormData({ ...formData, symbol: e.target.value.toUpperCase() })}
-              helperText="Ticker symbol (e.g., AAPL, JPM, MSFT)"
-              disabled={!!editingAsset}
-            />
-
-            <TextField
-              label="Name"
-              fullWidth
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              helperText="Full company name (optional)"
-            />
-
-            <FormControl fullWidth>
-              <InputLabel>Asset Type</InputLabel>
-              <Select
-                value={formData.asset_type}
-                label="Asset Type"
-                onChange={(e) => setFormData({ ...formData, asset_type: e.target.value })}
-              >
-                <MenuItem value="stock">Stock</MenuItem>
-                <MenuItem value="bond">Bond</MenuItem>
-                <MenuItem value="etf">ETF</MenuItem>
-                <MenuItem value="crypto">Cryptocurrency</MenuItem>
-                <MenuItem value="commodity">Commodity</MenuItem>
-                <MenuItem value="forex">Forex</MenuItem>
-              </Select>
-            </FormControl>
-
-            <TextField
-              label="Sector"
-              fullWidth
-              value={formData.sector}
-              onChange={(e) => setFormData({ ...formData, sector: e.target.value })}
-              helperText="e.g., Financial Services, Technology"
-            />
-
-            <TextField
-              label="Region"
-              fullWidth
-              value={formData.region}
-              onChange={(e) => setFormData({ ...formData, region: e.target.value })}
-              helperText="e.g., North America, Europe, Asia"
-            />
-
-            <TextField
-              label="Liquidity Threshold"
-              type="number"
-              fullWidth
-              value={formData.liquidity_threshold}
-              onChange={(e) => setFormData({ ...formData, liquidity_threshold: parseFloat(e.target.value) })}
-              helperText="Alert threshold for liquidity risk (0.0 to 1.0)"
-              inputProps={{ min: 0, max: 1, step: 0.1 }}
-            />
-
-            <FormControl fullWidth>
-              <InputLabel>Data Source</InputLabel>
-              <Select
-                value={formData.data_source_id || ''}
-                label="Data Source"
-                onChange={(e) => setFormData({ ...formData, data_source_id: e.target.value })}
-              >
-                {dataSources && dataSources.map(ds => (
-                  <MenuItem key={ds.id} value={ds.id}>{ds.name}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={formData.enabled}
-                  onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
-                />
-              }
-              label="Enable Monitoring"
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseDialog}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={handleSubmit}
-            disabled={!formData.symbol || !formData.data_source_id || createMutation.isLoading || updateMutation.isLoading}
-          >
-            {editingAsset ? 'Update' : 'Add'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* Smart Add/Edit Dialog */}
+      <SmartAssetDialog
+        open={dialogOpen}
+        onClose={handleCloseDialog}
+        onSubmit={handleSubmitAsset}
+        dataSources={dataSources}
+        editingAsset={editingAsset}
+      />
 
       {/* Bulk Add Dialog */}
       <Dialog open={bulkDialogOpen} onClose={() => setBulkDialogOpen(false)} maxWidth="sm" fullWidth>
