@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3456'
 
 // Create axios instance
 const apiClient = axios.create({
@@ -106,6 +106,15 @@ export const api = {
     get: (id) => apiClient.get(`/catalogue/${id}`),
     categories: () => apiClient.get('/catalogue/categories'),
     regions: () => apiClient.get('/catalogue/regions'),
+  },
+
+  // Error Logging & Analytics
+  errors: {
+    list: (params = {}) => apiClient.get('/errors', { params }),
+    get: (id) => apiClient.get(`/errors/${id}`),
+    statistics: () => apiClient.get('/errors/statistics'),
+    resolve: (id, notes) => apiClient.post(`/errors/${id}/resolve`, null, { params: { resolution_notes: notes } }),
+    delete: (id) => apiClient.delete(`/errors/${id}`),
   },
 }
 
