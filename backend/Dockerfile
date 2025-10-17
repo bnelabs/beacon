@@ -21,8 +21,8 @@ RUN ln -sf /usr/bin/python3.10 /usr/bin/python && \
 # Upgrade pip
 RUN python -m pip install --upgrade pip
 
-# Copy requirements from parent directory
-COPY ../requirements.txt .
+# Copy requirements file first (for better Docker layer caching)
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend application code
