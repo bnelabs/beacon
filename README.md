@@ -4,7 +4,7 @@
 
 > *"Your early warning system for systemic liquidity risk"*
 
-**Production-grade systemic liquidity risk analysis system using state-of-the-art ML and comprehensive data catalogue covering US, Europe, and Asia markets.**
+**Systemic liquidity risk analysis system using state-of-the-art ML and comprehensive data catalogue covering US, Europe, and Asia markets.**
 
 ## 🎯 What is BEACON?
 
