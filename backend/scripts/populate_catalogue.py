@@ -27,6 +27,10 @@ def populate_catalogue():
             {"name": "FRED", "plugin_type": "fred", "description": "Federal Reserve Economic Data"},
             {"name": "Yahoo Finance", "plugin_type": "yfinance", "description": "Yahoo Finance"},
             {"name": "Alpha Vantage", "plugin_type": "alpha_vantage", "description": "Alpha Vantage"},
+            {"name": "SEC EDGAR", "plugin_type": "sec_edgar", "description": "SEC Company Filings"},
+            {"name": "World Bank", "plugin_type": "world_bank", "description": "World Bank Open Data"},
+            {"name": "BIS", "plugin_type": "bis", "description": "Bank for International Settlements"},
+            {"name": "IMF", "plugin_type": "imf", "description": "International Monetary Fund Data"},
         ]:
             source = db.query(DataSource).filter(DataSource.name == source_data["name"]).first()
             if not source:
@@ -579,6 +583,298 @@ def populate_catalogue():
                 "default_selected": True,
                 "priority": 80,
                 "tags": ["commodities", "precious_metals", "safe_haven"]
+            },
+
+            # ============================================
+            # SEC EDGAR - BANKING SECTOR
+            # ============================================
+            {
+                "code": "SEC_BANK_FINANCIALS",
+                "name": "Major Bank Financial Statements",
+                "description": "10-K/10-Q filings for major US banks (JPM, BAC, C, WFC, GS, MS)",
+                "category": DataCategory.BANKING,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["SEC EDGAR"].id,
+                "endpoint": "filings",
+                "frequency": "quarterly",
+                "granularity": "micro",
+                "unit": "USD",
+                "default_selected": True,
+                "priority": 95,
+                "tags": ["banks", "financials", "10-k", "10-q", "balance_sheet"]
+            },
+            {
+                "code": "SEC_INSTITUTIONAL_HOLDINGS",
+                "name": "Institutional Holdings (13F)",
+                "description": "13F filings showing institutional investor holdings in banks and financial stocks",
+                "category": DataCategory.BANKING,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.MARKET_LIQUIDITY.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["SEC EDGAR"].id,
+                "endpoint": "filings",
+                "frequency": "quarterly",
+                "granularity": "meso",
+                "unit": "USD",
+                "default_selected": True,
+                "priority": 85,
+                "tags": ["institutional", "13f", "holdings", "ownership"]
+            },
+
+            # ============================================
+            # BIS - BANK FOR INTERNATIONAL SETTLEMENTS
+            # ============================================
+            {
+                "code": "BIS_GLOBAL_LIQUIDITY",
+                "name": "BIS Global Liquidity Indicators",
+                "description": "Global liquidity indicators tracking cross-border credit flows",
+                "category": DataCategory.BANKING,
+                "region": DataRegion.GLOBAL,
+                "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["BIS"].id,
+                "endpoint": "gli",
+                "frequency": "quarterly",
+                "granularity": "macro",
+                "unit": "USD billions",
+                "default_selected": True,
+                "priority": 90,
+                "tags": ["global", "cross_border", "credit_flows"]
+            },
+            {
+                "code": "BIS_CREDIT_TO_GDP",
+                "name": "BIS Credit-to-GDP Gap",
+                "description": "Credit-to-GDP gap indicator for systemic risk assessment",
+                "category": DataCategory.CREDIT_MARKETS,
+                "region": DataRegion.GLOBAL,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.CREDIT_RISK.value],
+                "data_source_id": sources["BIS"].id,
+                "endpoint": "credit_to_gdp",
+                "frequency": "quarterly",
+                "granularity": "macro",
+                "unit": "percentage_points",
+                "default_selected": True,
+                "priority": 95,
+                "tags": ["credit_gap", "early_warning", "systemic"]
+            },
+            {
+                "code": "BIS_DEBT_SERVICE_RATIO",
+                "name": "BIS Debt Service Ratio",
+                "description": "Debt service ratio tracking debt sustainability",
+                "category": DataCategory.CREDIT_MARKETS,
+                "region": DataRegion.GLOBAL,
+                "risk_types": [RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["BIS"].id,
+                "endpoint": "dsr",
+                "frequency": "quarterly",
+                "granularity": "macro",
+                "unit": "percentage",
+                "default_selected": True,
+                "priority": 85,
+                "tags": ["debt_sustainability", "household_debt"]
+            },
+
+            # ============================================
+            # IMF - INTERNATIONAL MONETARY FUND
+            # ============================================
+            {
+                "code": "IMF_FSI",
+                "name": "IMF Financial Soundness Indicators",
+                "description": "Banking sector financial soundness indicators",
+                "category": DataCategory.BANKING,
+                "region": DataRegion.GLOBAL,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.CREDIT_RISK.value],
+                "data_source_id": sources["IMF"].id,
+                "endpoint": "fsi",
+                "frequency": "quarterly",
+                "granularity": "macro",
+                "unit": "percentage",
+                "default_selected": True,
+                "priority": 90,
+                "tags": ["financial_stability", "banking_health", "capital_adequacy"]
+            },
+            {
+                "code": "IMF_IFS_RESERVES",
+                "name": "IMF International Financial Statistics - Reserves",
+                "description": "Foreign exchange reserves and reserve assets",
+                "category": DataCategory.CENTRAL_BANK,
+                "region": DataRegion.GLOBAL,
+                "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["IMF"].id,
+                "endpoint": "ifs",
+                "frequency": "monthly",
+                "granularity": "macro",
+                "unit": "USD millions",
+                "default_selected": True,
+                "priority": 85,
+                "tags": ["reserves", "forex", "central_bank"]
+            },
+
+            # ============================================
+            # WORLD BANK - DEVELOPMENT DATA
+            # ============================================
+            {
+                "code": "WB_BANK_CAPITAL_RATIO",
+                "name": "World Bank Bank Capital to Assets Ratio",
+                "description": "Bank regulatory capital to risk-weighted assets",
+                "category": DataCategory.BANKING,
+                "region": DataRegion.GLOBAL,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.CREDIT_RISK.value],
+                "data_source_id": sources["World Bank"].id,
+                "endpoint": "FB.BNK.CAPA.ZS",
+                "frequency": "annual",
+                "granularity": "macro",
+                "unit": "percentage",
+                "default_selected": True,
+                "priority": 80,
+                "tags": ["capital_adequacy", "regulatory_capital"]
+            },
+            {
+                "code": "WB_BANK_NPL",
+                "name": "World Bank Bank Non-Performing Loans",
+                "description": "Bank nonperforming loans to gross loans ratio",
+                "category": DataCategory.CREDIT_MARKETS,
+                "region": DataRegion.GLOBAL,
+                "risk_types": [RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["World Bank"].id,
+                "endpoint": "FB.AST.NPER.ZS",
+                "frequency": "annual",
+                "granularity": "macro",
+                "unit": "percentage",
+                "default_selected": True,
+                "priority": 90,
+                "tags": ["credit_quality", "npl", "loan_quality"]
+            },
+            {
+                "code": "WB_DOMESTIC_CREDIT",
+                "name": "World Bank Domestic Credit to Private Sector",
+                "description": "Domestic credit provided by financial sector",
+                "category": DataCategory.CREDIT_MARKETS,
+                "region": DataRegion.GLOBAL,
+                "risk_types": [RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["World Bank"].id,
+                "endpoint": "FS.AST.PRVT.GD.ZS",
+                "frequency": "annual",
+                "granularity": "macro",
+                "unit": "percentage_of_gdp",
+                "default_selected": True,
+                "priority": 80,
+                "tags": ["domestic_credit", "private_sector"]
+            },
+
+            # ============================================
+            # ADDITIONAL FRED INDICATORS
+            # ============================================
+            {
+                "code": "FRED_REPO_RATE",
+                "name": "US Overnight Repo Rate",
+                "description": "Overnight repurchase agreement rate",
+                "category": DataCategory.MONEY_MARKET,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.MARKET_LIQUIDITY.value],
+                "data_source_id": sources["FRED"].id,
+                "endpoint": "RRPONTSYD",
+                "frequency": "daily",
+                "granularity": "macro",
+                "unit": "percentage",
+                "default_selected": True,
+                "priority": 90,
+                "tags": ["repo", "money_market", "funding"]
+            },
+            {
+                "code": "FRED_BANK_ASSETS",
+                "name": "US Total Bank Assets",
+                "description": "Total assets of all commercial banks",
+                "category": DataCategory.BANKING,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["FRED"].id,
+                "endpoint": "TLAACBW027SBOG",
+                "frequency": "weekly",
+                "granularity": "macro",
+                "unit": "USD billions",
+                "default_selected": True,
+                "priority": 85,
+                "tags": ["banking", "assets", "size"]
+            },
+            {
+                "code": "FRED_FED_BALANCE_SHEET",
+                "name": "Federal Reserve Balance Sheet",
+                "description": "Total assets of the Federal Reserve",
+                "category": DataCategory.CENTRAL_BANK,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.FUNDING_LIQUIDITY.value],
+                "data_source_id": sources["FRED"].id,
+                "endpoint": "WALCL",
+                "frequency": "weekly",
+                "granularity": "macro",
+                "unit": "USD billions",
+                "default_selected": True,
+                "priority": 95,
+                "tags": ["central_bank", "balance_sheet", "qe"]
+            },
+            {
+                "code": "FRED_LIBOR_OIS_SPREAD",
+                "name": "LIBOR-OIS Spread (Historical)",
+                "description": "3-month LIBOR minus OIS spread - credit risk indicator",
+                "category": DataCategory.MONEY_MARKET,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["FRED"].id,
+                "endpoint": "THREEFYTP03",
+                "frequency": "daily",
+                "granularity": "macro",
+                "unit": "percentage_points",
+                "default_selected": False,
+                "priority": 60,
+                "tags": ["spread", "credit_risk", "historical"]
+            },
+            {
+                "code": "FRED_COMMERCIAL_PAPER",
+                "name": "US Commercial Paper Outstanding",
+                "description": "Total commercial paper outstanding",
+                "category": DataCategory.MONEY_MARKET,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.MARKET_LIQUIDITY.value],
+                "data_source_id": sources["FRED"].id,
+                "endpoint": "COMPOUT",
+                "frequency": "weekly",
+                "granularity": "macro",
+                "unit": "USD billions",
+                "default_selected": True,
+                "priority": 85,
+                "tags": ["commercial_paper", "short_term_funding"]
+            },
+            {
+                "code": "FRED_FINANCIAL_STRESS",
+                "name": "St. Louis Fed Financial Stress Index",
+                "description": "Weekly financial stress indicator",
+                "category": DataCategory.ECONOMIC_INDICATORS,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.MARKET_LIQUIDITY.value],
+                "data_source_id": sources["FRED"].id,
+                "endpoint": "STLFSI2",
+                "frequency": "weekly",
+                "granularity": "macro",
+                "unit": "index",
+                "default_selected": True,
+                "priority": 100,
+                "tags": ["stress_index", "systemic_risk", "early_warning"]
+            },
+            {
+                "code": "FRED_MOVE_INDEX",
+                "name": "MOVE Index (Bond Market Volatility)",
+                "description": "Merrill Lynch Option Volatility Estimate Index - bond market volatility",
+                "category": DataCategory.BONDS,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.MARKET_LIQUIDITY.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["FRED"].id,
+                "endpoint": "MOVE",
+                "frequency": "daily",
+                "granularity": "macro",
+                "unit": "index",
+                "default_selected": True,
+                "priority": 90,
+                "tags": ["volatility", "bonds", "risk"]
             },
         ]
 
