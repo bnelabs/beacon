@@ -479,7 +479,7 @@ This is a production system. For contributions:
 
 ## 📜 License
 
-Copyright © 2024 FinAI. All rights reserved.
+Copyright © 2025 FinAI-BNE. All rights reserved.
 
 ---
 
