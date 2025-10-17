@@ -198,18 +198,21 @@ BEACON uses a modular **DATA → ENGINE → RESULTS** pipeline for complete obse
 git clone https://github.com/rahatimrahat/beacon.git
 cd beacon
 
-# 2. Start services
+# 2. Start services (RECOMMENDED - handles everything automatically)
 ./scripts/start.sh
+
 # OR manually:
 docker-compose up --build -d
 
-# 3. Populate data catalogue
+# 3. Populate data catalogue (after services are running)
 docker-compose exec backend python scripts/populate_catalogue.py
 
 # 4. Access application
 # Frontend: http://localhost:6789
 # API Docs: http://localhost:3456/docs
 ```
+
+**Important**: Always run `./scripts/start.sh` from the project root directory (`beacon/`), not from within the `scripts/` directory.
 
 ### Running Complete Pipeline
 
