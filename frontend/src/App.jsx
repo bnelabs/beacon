@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import { Box } from '@mui/material'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
+import Catalogue from './pages/Catalogue'
 import DataSources from './pages/DataSources'
 import Assets from './pages/Assets'
 import Jobs from './pages/Jobs'
@@ -16,6 +17,7 @@ function App() {
       <Layout>
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/catalogue" element={<Catalogue />} />
           <Route path="/data-sources" element={<DataSources />} />
           <Route path="/assets" element={<Assets />} />
           <Route path="/jobs" element={<Jobs />} />

@@ -17,6 +17,7 @@ import {
 import {
   Menu as MenuIcon,
   Dashboard as DashboardIcon,
+  LibraryBooks as CatalogueIcon,
   Storage as StorageIcon,
   ShowChart as ShowChartIcon,
   Work as WorkIcon,
@@ -30,6 +31,7 @@ const drawerWidth = 240
 
 const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
+  { text: 'Data Catalogue', icon: <CatalogueIcon />, path: '/catalogue' },
   { text: 'Data Sources', icon: <StorageIcon />, path: '/data-sources' },
   { text: 'Assets', icon: <ShowChartIcon />, path: '/assets' },
   { text: 'Jobs', icon: <WorkIcon />, path: '/jobs' },
