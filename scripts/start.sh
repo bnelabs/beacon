@@ -2,7 +2,7 @@
 
 # BEACON - Banking Early Alert Comprehensive Observation Network
 # Powered by BNE (Banking Network Engine)
-# Startup script for Docker environment
+# Advanced startup script with rebuild options and auto-setup
 # Copyright © 2025 BNE. All rights reserved.
 
 set -euo pipefail
@@ -12,6 +12,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}============================================${NC}"
@@ -33,35 +34,33 @@ if ! command -v docker &>/dev/null; then
     exit 1
 fi
 
-# Detect docker-compose command (legacy or v2 subcommand)
+# Detect docker compose command (v2 plugin or legacy)
 DC_CMD=""
-if command -v docker-compose &>/dev/null; then
-    DC_CMD="docker-compose"
-elif docker compose version &>/dev/null 2>&1; then
+if docker compose version &>/dev/null 2>&1; then
     DC_CMD="docker compose"
+elif command -v docker-compose &>/dev/null; then
+    DC_CMD="docker-compose"
 else
     echo -e "${RED}Error: Docker Compose is not installed${NC}"
-    echo "Please install Docker Compose (either docker-compose or the 'docker compose' plugin)."
+    echo "Please install Docker Compose plugin or legacy docker-compose."
     exit 1
 fi
 echo -e "${GREEN}✓ Using compose command: ${DC_CMD}${NC}"
 
-# Check if NVIDIA GPU runtime is available (for GPU support)
+# Check if NVIDIA GPU runtime is available
 GPU_AVAILABLE=false
 if command -v nvidia-smi &>/dev/null; then
     echo -e "${GREEN}✓ NVIDIA GPU detected${NC}"
-    # Quick check for GPU accessibility via docker
     if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q nvidia; then
         echo -e "${GREEN}✓ NVIDIA Docker runtime configured${NC}"
         GPU_AVAILABLE=true
     else
         echo -e "${YELLOW}⚠ NVIDIA Docker runtime not configured${NC}"
-        echo -e "${YELLOW}  GPU acceleration will not be available${NC}"
-        echo -e "${YELLOW}  To enable GPU support, install and configure nvidia-docker2 / nvidia-container-toolkit${NC}"
+        echo -e "${YELLOW}  GPU acceleration unavailable${NC}"
         GPU_AVAILABLE=false
     fi
 else
-    echo -e "${YELLOW}⚠ No NVIDIA GPU detected - using CPU only${NC}"
+    echo -e "${YELLOW}⚠ No NVIDIA GPU detected - CPU only${NC}"
     GPU_AVAILABLE=false
 fi
 echo ""
@@ -97,19 +96,109 @@ else
 fi
 echo ""
 
-echo -e "${BLUE}Building Docker images...${NC}"
-echo -e "${YELLOW}This may take several minutes on first run${NC}\n"
+# Check if services are already running
+SERVICES_RUNNING=false
+if $DC_CMD ps | grep -q "Up"; then
+    SERVICES_RUNNING=true
+    echo -e "${CYAN}Services are currently running${NC}"
+    echo ""
+fi
 
-# Build images (use configured compose command)
-$DC_CMD build
+# Ask user about rebuild
+REBUILD_OPTION=""
+NO_CACHE=""
+
+if [ "$SERVICES_RUNNING" = true ]; then
+    echo -e "${YELLOW}Do you want to rebuild the containers?${NC}"
+    echo "  1) No, just restart existing containers (fast)"
+    echo "  2) Yes, rebuild with cache (faster, may miss some updates)"
+    echo "  3) Yes, rebuild without cache (slower, ensures fresh build)"
+    echo "  4) Stop services and exit"
+    echo ""
+    read -p "Enter choice [1-4] (default: 1): " -r
+    REBUILD_CHOICE="${REPLY:-1}"
+else
+    echo -e "${YELLOW}Initial setup detected. Build options:${NC}"
+    echo "  1) Build with cache (faster, recommended for first run)"
+    echo "  2) Build without cache (slower, ensures clean build)"
+    echo ""
+    read -p "Enter choice [1-2] (default: 1): " -r
+    REBUILD_CHOICE="${REPLY:-1}"
+fi
 
 echo ""
-echo -e "${BLUE}Starting services...${NC}\n"
+
+case "$REBUILD_CHOICE" in
+    1)
+        if [ "$SERVICES_RUNNING" = true ]; then
+            echo -e "${BLUE}Restarting existing containers...${NC}"
+            $DC_CMD restart
+            REBUILD_OPTION="restart"
+        else
+            echo -e "${BLUE}Building with cache...${NC}"
+            REBUILD_OPTION="build"
+        fi
+        ;;
+    2)
+        if [ "$SERVICES_RUNNING" = true ]; then
+            echo -e "${BLUE}Stopping services...${NC}"
+            $DC_CMD down
+            echo -e "${BLUE}Rebuilding with cache...${NC}"
+            REBUILD_OPTION="build"
+        else
+            echo -e "${BLUE}Rebuilding without cache (clean build)...${NC}"
+            REBUILD_OPTION="build"
+            NO_CACHE="--no-cache"
+        fi
+        ;;
+    3)
+        if [ "$SERVICES_RUNNING" = true ]; then
+            echo -e "${BLUE}Stopping services...${NC}"
+            $DC_CMD down
+            echo -e "${BLUE}Rebuilding without cache (clean build)...${NC}"
+            REBUILD_OPTION="build"
+            NO_CACHE="--no-cache"
+        else
+            echo -e "${RED}Invalid choice${NC}"
+            exit 1
+        fi
+        ;;
+    4)
+        if [ "$SERVICES_RUNNING" = true ]; then
+            echo -e "${BLUE}Stopping services...${NC}"
+            $DC_CMD down
+            echo -e "${GREEN}Services stopped${NC}"
+            exit 0
+        else
+            echo -e "${RED}Invalid choice${NC}"
+            exit 1
+        fi
+        ;;
+    *)
+        echo -e "${RED}Invalid choice. Exiting.${NC}"
+        exit 1
+        ;;
+esac
+
+echo ""
+
+# Build if needed
+if [ "$REBUILD_OPTION" = "build" ]; then
+    echo -e "${BLUE}Building Docker images...${NC}"
+    echo -e "${YELLOW}This may take several minutes${NC}\n"
+    $DC_CMD build $NO_CACHE
+    echo ""
+fi
 
 # Start services
-$DC_CMD up -d
+if [ "$REBUILD_OPTION" != "restart" ]; then
+    echo -e "${BLUE}Starting services...${NC}\n"
+    $DC_CMD up -d
+else
+    echo -e "${GREEN}✓ Services restarted${NC}\n"
+fi
 
-# Function: wait_for_cmd <description> <max_seconds> <cmd...>
+# Function: wait_for_cmd
 wait_for_cmd() {
     description="$1"; shift
     timeout="$1"; shift
@@ -132,15 +221,39 @@ wait_for_cmd() {
     done
 }
 
-# Wait for containers to be up and healthy with retries
+# Wait for services
 echo -e "${BLUE}Waiting for services to be ready...${NC}"
 
-wait_for_cmd "PostgreSQL container startup" 60 docker exec beacon-postgres pg_isready -U beacon_user -d beacon_db || echo -e "${YELLOW}⚠ Postgres may not be ready yet (check logs)${NC}"
-wait_for_cmd "Redis container" 30 docker exec beacon-redis redis-cli ping || echo -e "${YELLOW}⚠ Redis may not be ready yet (check logs)${NC}"
+wait_for_cmd "PostgreSQL" 60 docker exec beacon-postgres pg_isready -U beacon_user -d beacon_db || echo -e "${YELLOW}⚠ Postgres may not be ready (check logs)${NC}"
+wait_for_cmd "Redis" 30 docker exec beacon-redis redis-cli ping || echo -e "${YELLOW}⚠ Redis may not be ready (check logs)${NC}"
+wait_for_cmd "Backend API" 90 curl -fsS --max-time 5 http://localhost:3456/health || echo -e "${YELLOW}⚠ Backend API not responding (check logs)${NC}"
+wait_for_cmd "Frontend" 90 curl -fsS --max-time 5 http://localhost:6789/ || echo -e "${YELLOW}⚠ Frontend not responding (check logs)${NC}"
 
-# HTTP endpoint health checks
-wait_for_cmd "Backend API" 60 curl -fsS --max-time 5 http://localhost:3456/health || echo -e "${YELLOW}⚠ Backend API did not respond successfully within timeout${NC}"
-wait_for_cmd "Frontend" 60 curl -fsS --max-time 5 http://localhost:6789/ || echo -e "${YELLOW}⚠ Frontend did not respond within timeout${NC}"
+echo ""
+
+# Check and populate catalogue if needed
+echo -e "${BLUE}Checking data catalogue...${NC}"
+CATALOGUE_CHECK=$(curl -fsS http://localhost:3456/api/v1/catalogue/stats 2>/dev/null || echo '{"total":0}')
+CATALOGUE_COUNT=$(echo "$CATALOGUE_CHECK" | grep -o '"total":[0-9]*' | grep -o '[0-9]*' || echo "0")
+
+if [ "$CATALOGUE_COUNT" -eq 0 ]; then
+    echo -e "${YELLOW}⚠ Data catalogue is empty (0 items)${NC}"
+    echo -e "${CYAN}The catalogue will be auto-populated on first backend startup${NC}"
+    echo -e "${CYAN}This includes 48 data sources: ECB, FRED, SEC, BIS, IMF, World Bank${NC}"
+    echo ""
+    echo -e "${BLUE}Waiting for catalogue auto-population...${NC}"
+    sleep 10
+    CATALOGUE_CHECK=$(curl -fsS http://localhost:3456/api/v1/catalogue/stats 2>/dev/null || echo '{"total":0}')
+    CATALOGUE_COUNT=$(echo "$CATALOGUE_CHECK" | grep -o '"total":[0-9]*' | grep -o '[0-9]*' || echo "0")
+    if [ "$CATALOGUE_COUNT" -gt 0 ]; then
+        echo -e "${GREEN}✓ Catalogue populated: $CATALOGUE_COUNT items available${NC}"
+    else
+        echo -e "${YELLOW}⚠ Catalogue not yet populated. Check backend logs:${NC}"
+        echo -e "${YELLOW}  ${DC_CMD} logs backend | grep -i catalogue${NC}"
+    fi
+else
+    echo -e "${GREEN}✓ Catalogue ready: $CATALOGUE_COUNT items available${NC}"
+fi
 
 echo ""
 echo -e "${GREEN}============================================${NC}"
@@ -152,23 +265,26 @@ echo -e "  • Frontend GUI: ${GREEN}http://localhost:6789${NC}"
 echo -e "  • Backend API:  ${GREEN}http://localhost:3456${NC}"
 echo -e "  • API Docs:     ${GREEN}http://localhost:3456/docs${NC}\n"
 
+echo -e "${BLUE}Quick Start Guide:${NC}"
+echo -e "  1. Open ${GREEN}http://localhost:6789${NC} in your browser"
+echo -e "  2. Navigate to ${CYAN}Data Catalogue${NC} to browse 48 data sources"
+echo -e "  3. Click ${CYAN}Add to Monitoring${NC} on items you want to track"
+echo -e "  4. Go to ${CYAN}Jobs${NC} and create a ${CYAN}Data Collection${NC} job"
+echo -e "  5. View results in ${CYAN}Results & Reports${NC}\n"
+
 echo -e "${BLUE}Useful commands (run from project root):${NC}"
-echo -e "  • View logs:           ${YELLOW}${DC_CMD} logs -f${NC}"
-echo -e "  • View backend logs:   ${YELLOW}${DC_CMD} logs -f backend${NC}"
-echo -e "  • View frontend logs:  ${YELLOW}${DC_CMD} logs -f frontend${NC}"
-echo -e "  • Stop services:       ${YELLOW}${DC_CMD} down${NC}"
-echo -e "  • Restart services:    ${YELLOW}${DC_CMD} restart${NC}\n"
+echo -e "  • View all logs:         ${YELLOW}${DC_CMD} logs -f${NC}"
+echo -e "  • View backend logs:     ${YELLOW}${DC_CMD} logs -f backend${NC}"
+echo -e "  • View frontend logs:    ${YELLOW}${DC_CMD} logs -f frontend${NC}"
+echo -e "  • View celery logs:      ${YELLOW}${DC_CMD} logs -f celery-worker${NC}"
+echo -e "  • Stop services:         ${YELLOW}${DC_CMD} down${NC}"
+echo -e "  • Restart all:           ${YELLOW}${DC_CMD} restart${NC}"
+echo -e "  • Restart backend:       ${YELLOW}${DC_CMD} restart backend${NC}"
+echo -e "  • Restart frontend:      ${YELLOW}${DC_CMD} restart frontend${NC}\n"
 
 if [ "$GPU_AVAILABLE" = false ]; then
     echo -e "${YELLOW}Note: Running in CPU-only mode. Training may be slower.${NC}"
-    echo -e "${YELLOW}      Consider using smaller model parameters via the Configuration page.${NC}\n"
+    echo -e "${YELLOW}      Consider using smaller model parameters via Configuration page.${NC}\n"
 fi
 
-echo -e "${BLUE}Getting Started:${NC}"
-echo -e "  1. Open ${GREEN}http://localhost:6789${NC} in your browser"
-echo -e "  2. Configure data sources (add API keys or upload CSV files)"
-echo -e "  3. Add assets to monitor"
-echo -e "  4. Start data collection job"
-echo -e "  5. Train the model"
-echo -e "  6. View predictions and analytics\n"
-echo -e "${GREEN}✓ BEACON is ready! Check logs for detailed progress.${NC}"
+echo -e "${GREEN}✓ BEACON is ready! Visit ${CYAN}http://localhost:6789${GREEN} to get started.${NC}"

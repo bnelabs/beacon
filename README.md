@@ -4,11 +4,11 @@
 
 > *"Your early warning system for systemic liquidity risk"*
 
-**Systemic liquidity risk analysis system using state-of-the-art ML and comprehensive data catalogue covering US, Europe, and Asia markets.**
+**Systemic liquidity risk analysis system using state-of-the-art ML and comprehensive data catalogue with 48 sources covering US, Europe, Asia, and global markets.**
 
 ## 🎯 What is BEACON?
 
-BEACON is an intelligent financial risk monitoring system that analyzes **systemic liquidity risk** and **market liquidity risk** across global financial markets. Using advanced machine learning and a comprehensive data catalogue of 50+ financial indicators, BEACON provides actionable insights for:
+BEACON is an intelligent financial risk monitoring system that analyzes **systemic liquidity risk** and **market liquidity risk** across global financial markets. Using advanced machine learning and a comprehensive data catalogue of 48 financial data sources (ECB, FRED, SEC, BIS, IMF, World Bank, Yahoo Finance, Alpha Vantage), BEACON provides actionable insights for:
 
 - **Regulators**: Capital requirements, stress tests, macroprudential policy
 - **Banks**: Liquidity management, diversification strategies, contingency planning
@@ -45,7 +45,7 @@ BEACON uses a modular **DATA → ENGINE → RESULTS** pipeline for complete obse
 **Purpose**: Acquire, clean, validate, and prepare financial data
 
 **Features**:
-- ✅ Catalogue-driven selection (50+ pre-configured sources)
+- ✅ Catalogue-driven selection (48 pre-configured sources across 8 providers)
 - ✅ Automatic anomaly detection
 - ✅ Data quality scoring (0-100)
 - ✅ "Fit-for-engine" certification
@@ -194,25 +194,31 @@ BEACON uses a modular **DATA → ENGINE → RESULTS** pipeline for complete obse
 ### Installation
 
 ```bash
-# 1. Clone repository
+# Clone repository
 git clone https://github.com/rahatimrahat/beacon.git
 cd beacon
 
-# 2. Start services (RECOMMENDED - handles everything automatically)
+# Start services (interactive setup with rebuild options)
 ./scripts/start.sh
-
-# OR manually:
-docker-compose up --build -d
-
-# 3. Populate data catalogue (after services are running)
-docker-compose exec backend python scripts/populate_catalogue.py
-
-# 4. Access application
-# Frontend: http://localhost:6789
-# API Docs: http://localhost:3456/docs
 ```
 
-**Important**: Always run `./scripts/start.sh` from the project root directory (`beacon/`), not from within the `scripts/` directory.
+The start script will:
+- ✅ Detect if Docker Compose v2 (plugin) or legacy is available
+- ✅ Check for GPU support (NVIDIA)
+- ✅ Create necessary directories
+- ✅ Generate .env file if missing
+- ✅ Ask if you want to rebuild (with/without cache)
+- ✅ Build and start all services
+- ✅ Wait for services to be healthy
+- ✅ Auto-populate data catalogue (48 sources)
+- ✅ Show you access URLs and quick start guide
+
+**Access Points**:
+- Frontend GUI: http://localhost:6789
+- Backend API: http://localhost:3456
+- API Docs: http://localhost:3456/docs
+
+**Note**: Script uses `docker compose` (no hyphen) if available, falls back to `docker-compose` (legacy).
 
 ### Running Complete Pipeline
 
