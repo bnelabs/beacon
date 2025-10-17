@@ -9,8 +9,8 @@ from torch.utils.data import Dataset, DataLoader
 
 from sklearn.preprocessing import MinMaxScaler
 
-from ..utils.config import Config
-from ..utils.logger import get_logger
+from core.utils.config import Config
+from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 import logging
 import os
 
-from .routes import data_sources, assets, jobs, config, system, errors
+from .routes import data_sources, assets, jobs, config, system, errors, catalogue
 from database import init_db, close_db
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(catalogue.router, prefix="/api/v1/catalogue", tags=["Data Catalogue"])
 app.include_router(data_sources.router, prefix="/api/v1/data-sources", tags=["Data Sources"])
 app.include_router(assets.router, prefix="/api/v1/assets", tags=["Assets"])
 app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["Jobs"])

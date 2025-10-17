@@ -7,8 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from ..utils.config import Config
-from ..utils.logger import get_logger
+from core.utils.config import Config
+from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

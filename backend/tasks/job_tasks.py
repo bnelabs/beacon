@@ -63,8 +63,8 @@ def run_data_collection(self, job_id: int, parameters: dict):
         service.update_job_status(job_id, status="running", progress=0.0)
 
         # Import the existing data collection system
-        from ...liquidity_monitor.data.collection import DataCollector
-        from ...liquidity_monitor.config import Config
+        from liquidity_monitor.data.collection import DataCollector
+        from liquidity_monitor.config import Config
 
         logger.info(f"Starting data collection for job {job_id}")
 
@@ -151,8 +151,8 @@ def run_training(self, job_id: int, parameters: dict):
         service.update_job_status(job_id, status="running", progress=0.0)
 
         # Import training system
-        from ...liquidity_monitor.pipeline import LiquidityMonitorPipeline
-        from ...liquidity_monitor.config import Config
+        from liquidity_monitor.pipeline import LiquidityMonitorPipeline
+        from liquidity_monitor.config import Config
 
         logger.info(f"Starting training for job {job_id}")
 
@@ -295,8 +295,8 @@ def run_backtest(self, job_id: int, parameters: dict):
         service.update_job_status(job_id, status="running", progress=0.0)
 
         # Import backtesting system
-        from ...liquidity_monitor.pipeline import LiquidityMonitorPipeline
-        from ...liquidity_monitor.config import Config
+        from liquidity_monitor.pipeline import LiquidityMonitorPipeline
+        from liquidity_monitor.config import Config
 
         logger.info(f"Starting backtest for job {job_id}")
 

@@ -9,8 +9,8 @@ from typing import List, Dict, Any, Tuple
 import torch
 from torch_geometric.data import HeteroData
 
-from ..utils.config import Config
-from ..utils.logger import get_logger
+from core.utils.config import Config
+from core.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
