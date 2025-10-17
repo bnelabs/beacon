@@ -72,12 +72,13 @@ export default function Catalogue() {
   const { data: catalogueData, isLoading } = useQuery({
     queryKey: ['catalogue', categoryFilter, regionFilter, sourceFilter],
     queryFn: async () => {
-      const params = {}
+      const params = { enabled_only: false }
       if (categoryFilter) params.category = categoryFilter
       if (regionFilter) params.region = regionFilter
       if (sourceFilter) params.source = sourceFilter
       const response = await api.catalogue.list(params)
-      return response.data
+      // Response is array of items directly
+      return { items: response.data }
     }
   })
 

@@ -195,6 +195,24 @@ async def get_categories():
     ]
 
 
+@router.get("/stats")
+async def get_catalogue_stats(db: Session = Depends(get_db)):
+    """
+    Get catalogue statistics.
+
+    Returns total count and breakdown by category.
+    """
+    total = db.query(DataCatalogueItem).count()
+    enabled = db.query(DataCatalogueItem).filter(DataCatalogueItem.enabled == True).count()
+    default_selected = db.query(DataCatalogueItem).filter(DataCatalogueItem.default_selected == True).count()
+
+    return {
+        "total": total,
+        "enabled": enabled,
+        "default_selected": default_selected
+    }
+
+
 @router.get("/regions", response_model=List[dict])
 async def get_regions():
     """
