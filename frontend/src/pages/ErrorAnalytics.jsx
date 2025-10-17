@@ -99,7 +99,7 @@ const ErrorAnalytics = () => {
   // Delete error mutation
   const deleteMutation = useMutation({
     mutationFn: async (errorId) => {
-      await apiClient.delete(`/api/v1/errors/${errorId}`);
+      await apiClient.delete(`/errors/${errorId}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['error-logs']);

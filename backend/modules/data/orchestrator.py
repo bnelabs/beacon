@@ -1,6 +1,7 @@
 """DATA Module Orchestrator - Coordinates collection, validation, and preparation."""
 
 import logging
+import os
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from dataclasses import dataclass
@@ -290,9 +291,13 @@ class DataOrchestrator:
                           user_id: str) -> DataPackage:
         """Save formatted data and create package."""
 
+        # Create job-specific directory
+        job_dir = f"{self.output_dir}"
+        os.makedirs(job_dir, exist_ok=True)
+
         # Save datasets
-        timeseries_path = f"{self.output_dir}/{self.job_id}/timeseries.parquet"
-        features_path = f"{self.output_dir}/{self.job_id}/features.parquet"
+        timeseries_path = f"{job_dir}/timeseries.parquet"
+        features_path = f"{job_dir}/features.parquet"
 
         data.to_parquet(timeseries_path, compression='snappy')
 
@@ -304,7 +309,7 @@ class DataOrchestrator:
         graph_path = None
         if len(data) > 100:  # Only for sufficient data
             graph = self.formatter.build_graph(data)
-            graph_path = f"{self.output_dir}/{self.job_id}/graph.pkl"
+            graph_path = f"{job_dir}/graph.pkl"
             import pickle
             with open(graph_path, 'wb') as f:
                 pickle.dump(graph, f)

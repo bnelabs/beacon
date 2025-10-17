@@ -1,6 +1,7 @@
 """SQLAlchemy model for background jobs."""
 
-from sqlalchemy import Column, Integer, String, DateTime, JSON, Text, Float
+from sqlalchemy import Column, Integer, String, DateTime, Text, Float
+from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.sql import func
 from database import Base
 

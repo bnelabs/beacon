@@ -23,6 +23,25 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Initializing database...")
     init_db()
+
+    # Populate catalogue if empty
+    from database import SessionLocal
+    from models.data_catalogue import DataCatalogueItem
+    db = SessionLocal()
+    try:
+        count = db.query(DataCatalogueItem).count()
+        if count == 0:
+            logger.info("Catalogue is empty, populating with default items...")
+            from scripts.populate_catalogue import populate_catalogue
+            populate_catalogue()
+            logger.info("Catalogue populated successfully")
+        else:
+            logger.info(f"Catalogue already contains {count} items")
+    except Exception as e:
+        logger.error(f"Failed to check/populate catalogue: {e}")
+    finally:
+        db.close()
+
     logger.info("Application startup complete")
     yield
     # Shutdown
