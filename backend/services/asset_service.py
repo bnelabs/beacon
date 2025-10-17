@@ -49,7 +49,7 @@ class AssetService:
             raise ValueError(f"Asset with symbol '{asset.symbol}' already exists")
 
         # Verify data source exists
-        from ..models.data_source import DataSource
+        from models.data_source import DataSource
         data_source = self.db.query(DataSource).filter(DataSource.id == asset.data_source_id).first()
         if not data_source:
             raise ValueError(f"Data source with ID {asset.data_source_id} not found")
@@ -122,7 +122,7 @@ class AssetService:
             db_asset.enabled = update.enabled
         if update.data_source_id is not None:
             # Verify new data source exists
-            from ..models.data_source import DataSource
+            from models.data_source import DataSource
             data_source = self.db.query(DataSource).filter(DataSource.id == update.data_source_id).first()
             if not data_source:
                 raise ValueError(f"Data source with ID {update.data_source_id} not found")

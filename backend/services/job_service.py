@@ -58,7 +58,7 @@ class JobService:
 
         # Submit to Celery
         try:
-            from ..tasks.celery_app import dispatch_job
+            from tasks.celery_app import dispatch_job
             task = dispatch_job.delay(db_job.id, job.job_type, job.parameters)
 
             # Update with Celery task ID
@@ -124,7 +124,7 @@ class JobService:
         # Revoke Celery task if it exists
         if db_job.celery_task_id:
             try:
-                from ..tasks.celery_app import celery_app
+                from tasks.celery_app import celery_app
                 celery_app.control.revoke(db_job.celery_task_id, terminate=True)
             except Exception as e:
                 logger.warning(f"Failed to revoke Celery task {db_job.celery_task_id}: {e}")

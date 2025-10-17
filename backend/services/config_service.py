@@ -17,10 +17,8 @@ from schemas.config import (
 logger = logging.getLogger(__name__)
 
 # Path to config file
-CONFIG_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-    "liquidity_monitor", "configs", "config.yaml"
-)
+# In Docker, config is mounted at /app/configs/config.yaml
+CONFIG_PATH = os.getenv("CONFIG_PATH", "/app/configs/config.yaml")
 
 
 class ConfigService:
