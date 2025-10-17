@@ -12,9 +12,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
-echo -e "${BLUE}================================${NC}"
-echo -e "${BLUE}  FinAI - Liquidity Monitor${NC}"
-echo -e "${BLUE}================================${NC}\n"
+echo -e "${BLUE}============================================${NC}"
+echo -e "${BLUE}  BEACON - Banking Network Engine${NC}"
+echo -e "${BLUE}  Early Alert & Risk Monitoring${NC}"
+echo -e "${BLUE}============================================${NC}\n"
 
 # Check if Docker is installed
 if ! command -v docker &>/dev/null; then

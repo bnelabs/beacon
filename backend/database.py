@@ -1,4 +1,9 @@
-"""Database connection and session management."""
+"""
+BEACON Database Connection and Session Management
+Part of the BNE (Banking Network Engine)
+
+Copyright © 2025 BNE. All rights reserved.
+"""
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
@@ -7,11 +12,11 @@ from typing import Generator
 import os
 
 # Database configuration
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://liquidity:liquidity@localhost:5432/liquidity_monitor")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://beacon_user:beacon_password@localhost:5432/beacon_db")
 
 # For SQLite fallback in development
 if os.getenv("USE_SQLITE", "false").lower() == "true":
-    DATABASE_URL = "sqlite:///./liquidity_monitor.db"
+    DATABASE_URL = "sqlite:///./beacon.db"
 
 engine = create_engine(
     DATABASE_URL,

@@ -1,8 +1,8 @@
 {
-  "name": "liquidity-monitor-frontend",
+  "name": "beacon-frontend",
   "version": "2.0.0",
   "private": true,
-  "description": "Liquidity Monitor - Production-grade regulatory dashboard",
+  "description": "BEACON - Banking Early Alert Comprehensive Observation Network | Powered by BNE Engine",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

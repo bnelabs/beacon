@@ -1,10 +1,14 @@
-# FinAI - Financial Liquidity Risk Monitoring System
+# BEACON - Banking Early Alert Comprehensive Observation Network
+
+**Powered by BNE (Banking Network Engine)**
+
+> *"Your early warning system for systemic liquidity risk"*
 
 **Production-grade systemic liquidity risk analysis system using state-of-the-art ML and comprehensive data catalogue covering US, Europe, and Asia markets.**
 
-## 🎯 What is FinAI?
+## 🎯 What is BEACON?
 
-FinAI is an intelligent financial risk monitoring system that analyzes **systemic liquidity risk** and **market liquidity risk** across global financial markets. Using advanced machine learning and a comprehensive data catalogue of 50+ financial indicators, FinAI provides actionable insights for:
+BEACON is an intelligent financial risk monitoring system that analyzes **systemic liquidity risk** and **market liquidity risk** across global financial markets. Using advanced machine learning and a comprehensive data catalogue of 50+ financial indicators, BEACON provides actionable insights for:
 
 - **Regulators**: Capital requirements, stress tests, macroprudential policy
 - **Banks**: Liquidity management, diversification strategies, contingency planning
@@ -21,16 +25,16 @@ FinAI is an intelligent financial risk monitoring system that analyzes **systemi
 
 ## 🏗️ Revolutionary Three-Module Architecture
 
-FinAI uses a modular **DATA → ENGINE → RESULTS** pipeline for complete observability and control:
+BEACON uses a modular **DATA → ENGINE → RESULTS** pipeline for complete observability and control:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         FINAI SYSTEM                             │
+│                    BEACON-BNE SYSTEM                             │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                   │
 │  ┌───────────┐      ┌───────────┐      ┌───────────┐           │
-│  │   DATA    │  →   │  ENGINE   │  →   │  RESULTS  │           │
-│  │  MODULE   │      │  MODULE   │      │  MODULE   │           │
+│  │   DATA    │  →   │    BNE    │  →   │  RESULTS  │           │
+│  │  MODULE   │      │  ENGINE   │      │  MODULE   │           │
 │  └───────────┘      └───────────┘      └───────────┘           │
 │                                                                   │
 └─────────────────────────────────────────────────────────────────┘
@@ -55,9 +59,9 @@ FinAI uses a modular **DATA → ENGINE → RESULTS** pipeline for complete obser
 3. Start collection → Monitor progress
 4. Review data quality report
 5. Inspect anomalies and warnings
-6. Approve data for ENGINE
+6. Approve data for BNE ENGINE
 
-### Module 2: ENGINE (ML Processing, Risk Computation)
+### Module 2: BNE ENGINE (Banking Network Engine - ML Processing, Risk Computation)
 
 **Purpose**: Process certified data using state-of-the-art ML models
 
@@ -191,9 +195,12 @@ FinAI uses a modular **DATA → ENGINE → RESULTS** pipeline for complete obser
 
 ```bash
 # 1. Clone repository
-cd finai
+git clone https://github.com/your-username/beacon.git
+cd beacon
 
 # 2. Start services
+./scripts/start.sh
+# OR manually:
 docker-compose up --build -d
 
 # 3. Populate data catalogue
@@ -207,7 +214,7 @@ docker-compose exec backend python scripts/populate_catalogue.py
 ### Running Complete Pipeline
 
 ```bash
-# Start DATA → ENGINE → RESULTS pipeline
+# Start DATA → BNE ENGINE → RESULTS pipeline
 curl -X POST http://localhost:3456/api/v1/pipeline \
   -H "Content-Type: application/json" \
   -d '{
@@ -224,11 +231,16 @@ curl http://localhost:3456/api/v1/pipeline/{job_id}
 # Get DATA quality report
 curl http://localhost:3456/api/v1/pipeline/{job_id}/data
 
-# Get ENGINE metrics
+# Get BNE ENGINE metrics
 curl http://localhost:3456/api/v1/pipeline/{job_id}/engine
 
 # Get RESULTS summary
 curl http://localhost:3456/api/v1/pipeline/{job_id}/results
+
+# Download results (JSON, PDF, or Excel)
+curl http://localhost:3456/api/v1/pipeline/{job_id}/download/json -o report.json
+curl http://localhost:3456/api/v1/pipeline/{job_id}/download/pdf -o report.pdf
+curl http://localhost:3456/api/v1/pipeline/{job_id}/download/excel -o report.xlsx
 ```
 
 ---
@@ -242,7 +254,7 @@ curl http://localhost:3456/api/v1/pipeline/{job_id}/results
 - **Celery** - Distributed task queue
 - **SQLAlchemy** - ORM
 
-### Machine Learning
+### Machine Learning (BNE Engine)
 - **PyTorch 2.5.1** - Deep learning framework
 - **PyTorch Geometric 2.6.1** - Graph neural networks
 - **Model**: Heterogeneous Graph Transformer (HGT)
@@ -278,8 +290,9 @@ curl http://localhost:3456/api/v1/pipeline/{job_id}/results
 POST /api/v1/pipeline              - Start complete pipeline
 GET  /api/v1/pipeline/{job_id}     - Monitor status
 GET  /api/v1/pipeline/{job_id}/data    - DATA quality report
-GET  /api/v1/pipeline/{job_id}/engine  - ENGINE metrics
+GET  /api/v1/pipeline/{job_id}/engine  - BNE ENGINE metrics
 GET  /api/v1/pipeline/{job_id}/results - RESULTS summary
+GET  /api/v1/pipeline/{job_id}/download/{format} - Download results (json/pdf/excel)
 ```
 
 ### Data Catalogue Endpoints
@@ -413,6 +426,7 @@ For complete system architecture, module specifications, and context recovery:
 ## 🎯 Key Features
 
 ✅ **Modular Architecture** - DATA-ENGINE-RESULTS pipeline
+✅ **BNE Engine** - Banking Network Engine with state-of-the-art ML
 ✅ **Comprehensive Catalogue** - 50+ pre-configured sources
 ✅ **Global Coverage** - US, Europe, Asia markets
 ✅ **Risk-Focused** - 4 types of liquidity risk
@@ -458,7 +472,7 @@ For complete system architecture, module specifications, and context recovery:
 
 - **pipeline_jobs** - Main orchestration tracking
 - **data_jobs** - DATA module metrics
-- **engine_jobs** - ENGINE module metrics
+- **engine_jobs** - BNE ENGINE module metrics
 - **result_jobs** - RESULTS module outputs
 - **data_catalogue** - 50+ financial data items
 - **data_sources** - Configured connections
@@ -479,12 +493,19 @@ This is a production system. For contributions:
 
 ## 📜 License
 
-Copyright © 2025 FinAI-BNE. All rights reserved.
+Copyright © 2025 BNE (Banking Network Engine). All rights reserved.
 
 ---
 
+## 🏷️ About
+
+**BEACON** - Banking Early Alert Comprehensive Observation Network
+**Powered by BNE** - Banking Network Engine
+
+*"Your early warning system for systemic liquidity risk"*
+
 **Version**: 2.0.0
-**Architecture**: Modular (DATA-ENGINE-RESULTS)
+**Architecture**: Modular (DATA-BNE ENGINE-RESULTS)
 **ML Models**: HGT, GNN, Transformers
 **Data Sources**: 50+ (ECB, FRED, Yahoo, Alpha Vantage, SEC)
 **Coverage**: Global (US, Europe, Asia)

@@ -1,4 +1,10 @@
-"""FastAPI application entry point for Liquidity Monitor."""
+"""
+BEACON API - Banking Early Alert Comprehensive Observation Network
+Powered by BNE (Banking Network Engine)
+
+FastAPI application entry point for BEACON system.
+Copyright © 2025 BNE (Banking Network Engine). All rights reserved.
+"""
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,8 +32,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Liquidity Monitor API",
-    description="Production-grade financial liquidity risk monitoring system",
+    title="BEACON API - Banking Network Engine",
+    description="Banking Early Alert Comprehensive Observation Network - Production-grade systemic liquidity risk monitoring",
     version="2.0.0",
     lifespan=lifespan
 )
@@ -69,10 +75,13 @@ app.include_router(errors.router, prefix="/api/v1/errors", tags=["Error Logging"
 async def root():
     """Root endpoint with API information."""
     return {
-        "name": "Liquidity Monitor API",
+        "name": "BEACON API - Banking Network Engine",
+        "description": "Banking Early Alert Comprehensive Observation Network",
+        "tagline": "Your early warning system for systemic liquidity risk",
         "version": "2.0.0",
         "status": "operational",
-        "docs": "/docs"
+        "docs": "/docs",
+        "copyright": "© 2025 BNE (Banking Network Engine). All rights reserved."
     }
 
 

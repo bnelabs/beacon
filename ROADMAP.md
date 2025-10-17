@@ -1,15 +1,22 @@
-# FINAI - Financial Liquidity Risk Monitoring System
+# BEACON - Banking Early Alert Comprehensive Observation Network
+
+**Powered by BNE (Banking Network Engine)**
+
+> *"Your early warning system for systemic liquidity risk"*
+
 ## System Architecture Roadmap
+
+**Copyright © 2025 BNE (Banking Network Engine). All rights reserved.**
 
 ### Three-Module Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         FINAI SYSTEM                             │
+│                         BEACON SYSTEM                             │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                   │
 │  ┌───────────┐      ┌───────────┐      ┌───────────┐           │
-│  │   DATA    │  →   │  ENGINE   │  →   │  RESULTS  │           │
+│  │   DATA    │  →   │ BNE ENGINE│  →   │  RESULTS  │           │
 │  │  MODULE   │      │  MODULE   │      │  MODULE   │           │
 │  └───────────┘      └───────────┘      └───────────┘           │
 │                                                                   │
@@ -58,7 +65,7 @@
 
 ---
 
-## MODULE 2: ENGINE (ML Processing, Risk Computation)
+## MODULE 2: BNE ENGINE (Banking Network Engine) (ML Processing, Risk Computation)
 
 **Purpose:** Process prepared data using SOTA ML techniques to compute liquidity risks
 

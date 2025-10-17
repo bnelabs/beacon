@@ -2,28 +2,28 @@ services:
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
-    container_name: finai-postgres
+    container_name: beacon-postgres
     environment:
-      POSTGRES_DB: finai_db
-      POSTGRES_USER: finai_user
-      POSTGRES_PASSWORD: finai_password
+      POSTGRES_DB: beacon_db
+      POSTGRES_USER: beacon_user
+      POSTGRES_PASSWORD: beacon_password
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U finai_user"]
+      test: ["CMD-SHELL", "pg_isready -U beacon_user"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - finai-network
+      - beacon-network
     restart: unless-stopped
 
   # Redis for Celery and caching
   redis:
     image: redis:7-alpine
-    container_name: finai-redis
+    container_name: beacon-redis
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -35,7 +35,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - finai-network
+      - beacon-network
     restart: unless-stopped
 
   # Backend API (FastAPI) with CUDA support
@@ -43,11 +43,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: finai-backend
+    container_name: beacon-backend
     ports:
       - "3456:3456"
     environment:
-      DATABASE_URL: postgresql://finai_user:finai_password@postgres:5432/finai_db
+      DATABASE_URL: postgresql://beacon_user:beacon_password@postgres:5432/beacon_db
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -68,7 +68,7 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - finai-network
+      - beacon-network
     restart: unless-stopped
     deploy:
       resources:
@@ -84,9 +84,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: finai-celery-worker
+    container_name: beacon-celery-worker
     environment:
-      DATABASE_URL: postgresql://finai_user:finai_password@postgres:5432/finai_db
+      DATABASE_URL: postgresql://beacon_user:beacon_password@postgres:5432/beacon_db
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -108,7 +108,7 @@ services:
       backend:
         condition: service_started
     networks:
-      - finai-network
+      - beacon-network
     restart: unless-stopped
     deploy:
       resources:
@@ -126,7 +126,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: http://localhost:3456
-    container_name: finai-frontend
+    container_name: beacon-frontend
     ports:
       - "6789:6789"
     environment:
@@ -135,7 +135,7 @@ services:
     depends_on:
       - backend
     networks:
-      - finai-network
+      - beacon-network
     restart: unless-stopped
 
 volumes:
@@ -143,5 +143,5 @@ volumes:
   redis_data:
 
 networks:
-  finai-network:
+  beacon-network:
     driver: bridge
