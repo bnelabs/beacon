@@ -22,11 +22,11 @@ import {
 import { api } from '../api/client'
 
 export default function SystemStatus() {
-  // Fetch system status with auto-refresh
+  // Fetch system status with reduced refresh (60s is enough for system metrics)
   const { data: status, isLoading: statusLoading } = useQuery(
     'systemStatus',
     () => api.system.status().then(res => res.data),
-    { refetchInterval: 5000 } // Refresh every 5 seconds
+    { refetchInterval: 60000 } // Refresh every 60 seconds
   )
 
   // Fetch recommendations

@@ -18,30 +18,37 @@ import {
 import { api } from '../api/client'
 
 export default function Dashboard() {
-  // Fetch system status
+  // Fetch system status (refresh every 60s, not critical)
   const { data: systemStatus, isLoading: statusLoading } = useQuery(
     'systemStatus',
     () => api.system.status().then(res => res.data),
-    { refetchInterval: 30000 } // Refresh every 30 seconds
+    { refetchInterval: 60000 }
   )
 
-  // Fetch data sources
+  // Fetch data sources (static data, no auto-refresh needed)
   const { data: dataSources, isLoading: dsLoading } = useQuery(
     'dataSources',
     () => api.dataSources.list().then(res => res.data)
   )
 
-  // Fetch assets
+  // Fetch assets (static data, no auto-refresh needed)
   const { data: assets, isLoading: assetsLoading } = useQuery(
     'assets',
     () => api.assets.list().then(res => res.data)
   )
 
-  // Fetch recent jobs
+  // Fetch recent jobs with smart refresh
   const { data: jobs, isLoading: jobsLoading } = useQuery(
     'recentJobs',
     () => api.jobs.list({ limit: 10 }).then(res => res.data),
-    { refetchInterval: 5000 } // Refresh every 5 seconds
+    {
+      // Smart refetch: 3s when jobs running, 30s when idle
+      refetchInterval: (data) => {
+        if (!data || data.length === 0) return 30000
+        const hasRunning = data.some(job => job.status === 'running' || job.status === 'pending')
+        return hasRunning ? 3000 : 30000
+      }
+    }
   )
 
   if (statusLoading || dsLoading || assetsLoading || jobsLoading) {

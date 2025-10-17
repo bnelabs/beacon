@@ -51,11 +51,18 @@ export default function Jobs() {
     status: ''
   })
 
-  // Fetch jobs with auto-refresh
+  // Fetch jobs with smart auto-refresh (only when jobs are running)
   const { data: jobs, isLoading } = useQuery(
     ['jobs', filters],
     () => api.jobs.list(filters).then(res => res.data),
-    { refetchInterval: 3000 } // Refresh every 3 seconds
+    {
+      // Smart refetch: 2s when jobs running, 30s when idle
+      refetchInterval: (data) => {
+        if (!data || data.length === 0) return 30000
+        const hasRunning = data.some(job => job.status === 'running' || job.status === 'pending')
+        return hasRunning ? 2000 : 30000
+      }
+    }
   )
 
   // Create job mutation

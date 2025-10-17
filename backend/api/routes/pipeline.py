@@ -1,11 +1,13 @@
 """Pipeline API - Orchestrates DATA → ENGINE → RESULTS flow."""
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
 import uuid
+import os
 
 from database import get_db
 from models.pipeline_job import PipelineJob, DataJob, EngineJob, ResultJob, PipelineStage, JobStatus
@@ -457,3 +459,96 @@ def _execute_pipeline(
 
     finally:
         db.close()
+
+
+@router.get("/{job_id}/download/{format}")
+async def download_results(
+    job_id: str,
+    format: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Download pipeline results in specified format.
+
+    **Formats**: json, pdf, excel
+
+    **For non-technical users:** Download your complete risk analysis report
+    in your preferred format (JSON for data, PDF for reading, Excel for analysis).
+    """
+    try:
+        # Validate format
+        if format not in ['json', 'pdf', 'excel']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"technical": f"Invalid format: {format}", "user_friendly": "Please choose json, pdf, or excel format."}
+            )
+
+        # Get pipeline job
+        pipeline_job = db.query(PipelineJob).filter(PipelineJob.job_id == job_id).first()
+        if not pipeline_job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"technical": f"Pipeline job {job_id} not found", "user_friendly": "This analysis job doesn't exist."}
+            )
+
+        # Get result job
+        result_job = db.query(ResultJob).filter(ResultJob.pipeline_job_id == pipeline_job.id).first()
+        if not result_job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"technical": "Results not yet generated", "user_friendly": "The analysis results are not ready yet. Please wait for the job to complete."}
+            )
+
+        # Get file path based on format
+        file_path = None
+        media_type = None
+        filename = None
+
+        if format == 'json':
+            file_path = result_job.report_json_path
+            media_type = "application/json"
+            filename = f"{job_id}_report.json"
+        elif format == 'pdf':
+            file_path = result_job.report_pdf_path
+            media_type = "application/pdf"
+            filename = f"{job_id}_report.pdf"
+        elif format == 'excel':
+            file_path = result_job.report_excel_path
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            filename = f"{job_id}_report.xlsx"
+
+        # Check if file exists
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "technical": f"File not found: {file_path}",
+                    "user_friendly": f"The {format.upper()} report file is not available. It may still be generating or failed to generate."
+                }
+            )
+
+        # Return file
+        return FileResponse(
+            path=file_path,
+            media_type=media_type,
+            filename=filename,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Access-Control-Expose-Headers": "Content-Disposition"
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(
+            e,
+            context=f"downloading {format} results",
+            endpoint=f"/api/v1/pipeline/{job_id}/download/{format}",
+            method="GET"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
+        )

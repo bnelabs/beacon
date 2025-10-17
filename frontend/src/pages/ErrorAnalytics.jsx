@@ -56,17 +56,17 @@ const ErrorAnalytics = () => {
     resolved: ''
   });
 
-  // Fetch error statistics
+  // Fetch error statistics (refresh every 2 minutes, not time-critical)
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['error-statistics'],
     queryFn: async () => {
       const response = await apiClient.get('/api/v1/errors/statistics');
       return response.data;
     },
-    refetchInterval: 30000 // Refresh every 30 seconds
+    refetchInterval: 120000 // Refresh every 2 minutes
   });
 
-  // Fetch error logs
+  // Fetch error logs (refresh every minute, not time-critical)
   const { data: errors, isLoading: errorsLoading, refetch } = useQuery({
     queryKey: ['error-logs', filters],
     queryFn: async () => {
@@ -78,7 +78,7 @@ const ErrorAnalytics = () => {
       const response = await apiClient.get(`/api/v1/errors/?${params.toString()}`);
       return response.data;
     },
-    refetchInterval: 10000 // Refresh every 10 seconds
+    refetchInterval: 60000 // Refresh every minute
   });
 
   // Resolve error mutation
