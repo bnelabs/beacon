@@ -20,6 +20,7 @@ import {
   Storage as StorageIcon,
   ShowChart as ShowChartIcon,
   Work as WorkIcon,
+  Assessment as AssessmentIcon,
   Settings as SettingsIcon,
   Computer as ComputerIcon,
   ErrorOutline as ErrorIcon,
@@ -32,6 +33,7 @@ const menuItems = [
   { text: 'Data Sources', icon: <StorageIcon />, path: '/data-sources' },
   { text: 'Assets', icon: <ShowChartIcon />, path: '/assets' },
   { text: 'Jobs', icon: <WorkIcon />, path: '/jobs' },
+  { text: 'Results & Reports', icon: <AssessmentIcon />, path: '/results' },
   { text: 'Configuration', icon: <SettingsIcon />, path: '/configuration' },
   { text: 'System Status', icon: <ComputerIcon />, path: '/system' },
   { text: 'Error Analytics', icon: <ErrorIcon />, path: '/errors' },
@@ -50,7 +52,7 @@ export default function Layout({ children }) {
     <div>
       <Toolbar>
         <Typography variant="h6" noWrap component="div">
-          Liquidity Monitor
+          BEACON
         </Typography>
       </Toolbar>
       <Divider />
@@ -92,7 +94,7 @@ export default function Layout({ children }) {
             <MenuIcon />
           </IconButton>
           <Typography variant="h6" noWrap component="div">
-            Financial Liquidity Risk Monitoring System
+            BEACON - Banking Early Alert Comprehensive Observation Network
           </Typography>
         </Toolbar>
       </AppBar>

@@ -88,6 +88,25 @@ export const api = {
     status: () => apiClient.get('/system/status'),
     recommendations: () => apiClient.get('/system/resources/recommendations'),
   },
+
+  // Results & Reports
+  results: {
+    list: (params = {}) => apiClient.get('/results', { params }),
+    get: (jobId) => apiClient.get(`/results/${jobId}`),
+    executiveSummary: (jobId) => apiClient.get(`/results/${jobId}/executive-summary`),
+    visualizations: (jobId) => apiClient.get(`/results/${jobId}/visualizations`),
+    dataQuality: (jobId) => apiClient.get(`/results/${jobId}/data-quality`),
+    riskScores: (jobId) => apiClient.get(`/results/${jobId}/risk-scores`),
+    delete: (jobId) => apiClient.delete(`/results/${jobId}`),
+  },
+
+  // Data Catalogue
+  catalogue: {
+    list: (params = {}) => apiClient.get('/catalogue', { params }),
+    get: (id) => apiClient.get(`/catalogue/${id}`),
+    categories: () => apiClient.get('/catalogue/categories'),
+    regions: () => apiClient.get('/catalogue/regions'),
+  },
 }
 
 export default apiClient

@@ -8,6 +8,7 @@ import Jobs from './pages/Jobs'
 import Configuration from './pages/Configuration'
 import SystemStatus from './pages/SystemStatus'
 import ErrorAnalytics from './pages/ErrorAnalytics'
+import Results from './pages/Results'
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
           <Route path="/data-sources" element={<DataSources />} />
           <Route path="/assets" element={<Assets />} />
           <Route path="/jobs" element={<Jobs />} />
+          <Route path="/results" element={<Results />} />
           <Route path="/configuration" element={<Configuration />} />
           <Route path="/system" element={<SystemStatus />} />
           <Route path="/errors" element={<ErrorAnalytics />} />
