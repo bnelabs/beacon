@@ -71,7 +71,7 @@ class ECBPlugin(DataSourcePlugin):
         Fetch exchange rate data from ECB.
 
         Args:
-            symbols: List of currency pairs (e.g., ['USD', 'GBP', 'JPY'])
+            symbols: List of endpoints or currency codes (e.g., ['EXR/D.USD.EUR.SP00.A'] or ['USD'])
             start_date: Start date
             end_date: End date
 
@@ -87,11 +87,24 @@ class ECBPlugin(DataSourcePlugin):
 
             all_data = []
 
-            for currency in symbols:
+            for symbol in symbols:
                 try:
-                    # EXR = Exchange Rates, D = Daily, EUR base currency
-                    key = f"D.{currency}.EUR.SP00.A"
-                    url = f"{base_url}/EXR/{key}"
+                    # Check if symbol is a full endpoint path or just a currency code
+                    if '/' in symbol:
+                        # Full endpoint provided (e.g., "EXR/D.USD.EUR.SP00.A")
+                        url = f"{base_url}/{symbol}"
+                        # Extract currency from endpoint for asset name
+                        parts = symbol.split('/')
+                        if len(parts) >= 2:
+                            key_parts = parts[1].split('.')
+                            currency = key_parts[1] if len(key_parts) > 1 else "UNKNOWN"
+                        else:
+                            currency = "UNKNOWN"
+                    else:
+                        # Just currency code provided (e.g., "USD")
+                        currency = symbol
+                        key = f"D.{currency}.EUR.SP00.A"
+                        url = f"{base_url}/EXR/{key}"
 
                     params = {
                         "format": "jsondata",
@@ -121,12 +134,12 @@ class ECBPlugin(DataSourcePlugin):
                     time.sleep(0.5)
 
                 except Exception as e:
-                    logger.warning(f"Failed to fetch {currency} from ECB: {e}")
+                    logger.warning(f"Failed to fetch {symbol} from ECB: {e}")
                     continue
 
             if all_data:
                 result = pd.concat(all_data, ignore_index=True)
-                logger.info(f"Fetched {len(result)} rows for {len(symbols)} currencies from ECB")
+                logger.info(f"Fetched {len(result)} rows for {len(symbols)} symbols from ECB")
                 return result
 
             return None
