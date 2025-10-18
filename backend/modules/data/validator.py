@@ -38,9 +38,17 @@ class DataValidator:
                 continue
             
             # Missing values check
-            missing_pct = df.isnull().sum().sum() / (len(df) * len(df.columns))
-            if missing_pct > 0.3:
-                report.warnings.append({"code": code, "warning": f"{missing_pct*100:.1f}% missing"})
-        
-        report.missing_ratio = sum(df.isnull().sum().sum() for df in data.values()) / sum(len(df) * len(df.columns) for df in data.values()) if data else 0
+            total_cells = len(df) * len(df.columns)
+            if total_cells > 0:
+                missing_pct = df.isnull().sum().sum() / total_cells
+                if missing_pct > 0.3:
+                    report.warnings.append({"code": code, "warning": f"{missing_pct*100:.1f}% missing"})
+
+        # Calculate overall missing ratio with safe division
+        total_cells = sum(len(df) * len(df.columns) for df in data.values() if not df.empty)
+        if total_cells > 0:
+            report.missing_ratio = sum(df.isnull().sum().sum() for df in data.values() if not df.empty) / total_cells
+        else:
+            report.missing_ratio = 0.0
+
         return report

@@ -7,6 +7,9 @@ services:
       POSTGRES_DB: beacon_db
       POSTGRES_USER: beacon_user
       POSTGRES_PASSWORD: beacon_password
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      POSTGRES_INITDB_ARGS: "--auth-scrypt-host --auth=scrypt --lc-collate=C --lc-ctype=C"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -25,6 +28,8 @@ services:
     image: redis:7-alpine
     container_name: beacon-redis
     command: redis-server --appendonly yes
+    sysctls:
+      - net.core.somaxconn=511
     volumes:
       - redis_data:/data
     ports:

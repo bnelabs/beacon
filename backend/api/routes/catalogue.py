@@ -1,7 +1,7 @@
 """API routes for data catalogue management."""
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 
 from database import get_db
@@ -35,7 +35,7 @@ async def list_catalogue_items(
     Filter by category (exchange rates, stocks, etc.), region (US, Europe, Asia), or search by name.
     """
     try:
-        query = db.query(DataCatalogueItem)
+        query = db.query(DataCatalogueItem).options(joinedload(DataCatalogueItem.data_source))
 
         # Apply filters
         if category:
@@ -154,7 +154,9 @@ async def get_default_items(db: Session = Depends(get_db)):
     major markets (US, Europe, Asia) and key liquidity risk indicators. Great starting point!
     """
     try:
-        items = db.query(DataCatalogueItem).filter(
+        items = db.query(DataCatalogueItem).options(
+            joinedload(DataCatalogueItem.data_source)
+        ).filter(
             DataCatalogueItem.default_selected == True,
             DataCatalogueItem.enabled == True
         ).order_by(
@@ -255,7 +257,9 @@ async def get_catalogue_item(
 ):
     """Get details of a specific catalogue item."""
     try:
-        item = db.query(DataCatalogueItem).filter(DataCatalogueItem.id == item_id).first()
+        item = db.query(DataCatalogueItem).options(
+            joinedload(DataCatalogueItem.data_source)
+        ).filter(DataCatalogueItem.id == item_id).first()
 
         if not item:
             raise HTTPException(

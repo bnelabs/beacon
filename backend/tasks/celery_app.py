@@ -26,6 +26,7 @@ celery_app.conf.update(
     task_soft_time_limit=3300,  # Soft limit at 55 minutes
     worker_prefetch_multiplier=1,  # Process one task at a time
     worker_max_tasks_per_child=50,  # Restart worker after 50 tasks (memory cleanup)
+    broker_connection_retry_on_startup=True,  # Retry broker connection on startup
 )
 
 

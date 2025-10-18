@@ -16,8 +16,10 @@ class FREDPlugin(DataSourcePlugin):
 
     def validate_config(self) -> None:
         """Validate FRED configuration."""
-        if not self.config.get('api_key'):
-            raise ValueError("FRED API key is required. Get one free at https://fred.stlouisfed.org/docs/api/api_key.html")
+        api_key = self.config.get('api_key')
+        if not api_key or api_key == '':
+            logger.warning("FRED API key not configured. Set FRED_API_KEY environment variable.")
+            # Don't raise error, just warn - this allows the system to continue
 
     def test_connection(self) -> Dict[str, Any]:
         """Test FRED API connectivity."""
@@ -83,7 +85,11 @@ class FREDPlugin(DataSourcePlugin):
             DataFrame with Date and Value columns
         """
         try:
-            fred = Fred(api_key=self.config['api_key'])
+            api_key = self.config.get('api_key')
+            if not api_key or api_key == '':
+                raise ValueError("FRED API key is required. Get one free at https://fred.stlouisfed.org/docs/api/api_key.html")
+
+            fred = Fred(api_key=api_key)
 
             # Fetch series data
             data = fred.get_series(

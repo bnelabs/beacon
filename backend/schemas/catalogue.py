@@ -6,6 +6,17 @@ from datetime import datetime
 from models.data_catalogue import DataCategory, DataRegion, RiskType
 
 
+class DataSourceInfo(BaseModel):
+    """Data source basic information."""
+    id: int
+    name: str
+    plugin_type: str
+    description: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
 class DataCatalogueItemResponse(BaseModel):
     """Response model for catalogue item."""
 
@@ -19,6 +30,7 @@ class DataCatalogueItemResponse(BaseModel):
     risk_types: List[str]
 
     data_source_id: int
+    data_source: Optional[DataSourceInfo] = None
     endpoint: Optional[str]
     frequency: Optional[str]
     granularity: Optional[str]

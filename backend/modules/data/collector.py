@@ -70,11 +70,14 @@ class DataCollector:
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
         # Fetch data based on item type
+        # Use endpoint from catalogue if available, otherwise use code
+        endpoint = item.endpoint if item.endpoint else item.code
+
         if item.category in ['exchange_rates', 'stocks', 'bonds', 'commodities']:
             # Asset data (price data)
-            df = plugin.fetch_asset_data([item.code], start_dt, end_dt)
+            df = plugin.fetch_asset_data([endpoint], start_dt, end_dt)
         else:
             # Indicator data (economic indicators, interest rates, etc.)
-            df = plugin.fetch_indicator_data(item.code, start_dt, end_dt)
+            df = plugin.fetch_indicator_data(endpoint, start_dt, end_dt)
 
         return df if df is not None else pd.DataFrame()
