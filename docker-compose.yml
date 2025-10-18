@@ -43,11 +43,12 @@ services:
       - beacon-network
     restart: unless-stopped
 
-  # Backend API (FastAPI) with CUDA support
+  # Backend API (FastAPI)
+  # Note: GPU support is configured via docker-compose.gpu.yml overlay
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.cpu  # Default to CPU for compatibility
     container_name: beacon-backend
     ports:
       - "3456:3456"
@@ -75,20 +76,14 @@ services:
     networks:
       - beacon-network
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     command: uvicorn api.main:app --host 0.0.0.0 --port 3456
 
   # Celery Worker for background tasks
+  # Note: GPU support is configured via docker-compose.gpu.yml overlay
   celery-worker:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.cpu  # Default to CPU for compatibility
     container_name: beacon-celery-worker
     environment:
       DATABASE_URL: postgresql://beacon_user:beacon_password@postgres:5432/beacon_db
@@ -115,13 +110,6 @@ services:
     networks:
       - beacon-network
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     command: celery -A tasks.celery_app worker --loglevel=info --concurrency=2
 
   # Frontend (React with Vite)

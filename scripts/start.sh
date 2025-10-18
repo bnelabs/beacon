@@ -47,20 +47,55 @@ else
 fi
 echo -e "${GREEN}✓ Using compose command: ${DC_CMD}${NC}"
 
-# Check if NVIDIA GPU runtime is available
+# Detect platform and configure compose files
+PLATFORM=$(uname -s)
+ARCH=$(uname -m)
+COMPOSE_FILES="-f docker-compose.yml"
 GPU_AVAILABLE=false
-if command -v nvidia-smi &>/dev/null; then
-    echo -e "${GREEN}✓ NVIDIA GPU detected${NC}"
-    if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q nvidia; then
-        echo -e "${GREEN}✓ NVIDIA Docker runtime configured${NC}"
-        GPU_AVAILABLE=true
+
+echo -e "${CYAN}Platform Detection:${NC}"
+echo -e "  OS: ${PLATFORM}"
+echo -e "  Architecture: ${ARCH}"
+
+# Detect Apple Silicon (macOS ARM)
+if [[ "$PLATFORM" == "Darwin" ]]; then
+    if [[ "$ARCH" == "arm64" ]]; then
+        echo -e "${GREEN}✓ Detected: macOS Apple Silicon (M1/M2/M3)${NC}"
+        echo -e "${CYAN}  Using CPU-only configuration (no CUDA support on macOS)${NC}"
+        COMPOSE_FILES="-f docker-compose.yml -f docker-compose.cpu.yml"
+        GPU_AVAILABLE=false
     else
-        echo -e "${YELLOW}⚠ NVIDIA Docker runtime not configured${NC}"
-        echo -e "${YELLOW}  GPU acceleration unavailable${NC}"
+        echo -e "${GREEN}✓ Detected: macOS Intel${NC}"
+        echo -e "${CYAN}  Using CPU-only configuration${NC}"
+        COMPOSE_FILES="-f docker-compose.yml -f docker-compose.cpu.yml"
+        GPU_AVAILABLE=false
+    fi
+# Check for NVIDIA GPU on Linux
+elif [[ "$PLATFORM" == "Linux" ]]; then
+    if command -v nvidia-smi &>/dev/null; then
+        echo -e "${GREEN}✓ NVIDIA GPU detected${NC}"
+        if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q nvidia; then
+            echo -e "${GREEN}✓ NVIDIA Docker runtime configured${NC}"
+            echo -e "${CYAN}  Using GPU-accelerated configuration${NC}"
+            COMPOSE_FILES="-f docker-compose.yml -f docker-compose.gpu.yml"
+            GPU_AVAILABLE=true
+        else
+            echo -e "${YELLOW}⚠ NVIDIA Docker runtime not configured${NC}"
+            echo -e "${YELLOW}  Falling back to CPU-only configuration${NC}"
+            echo -e "${YELLOW}  To enable GPU: Install nvidia-container-toolkit${NC}"
+            COMPOSE_FILES="-f docker-compose.yml -f docker-compose.cpu.yml"
+            GPU_AVAILABLE=false
+        fi
+    else
+        echo -e "${YELLOW}⚠ No NVIDIA GPU detected${NC}"
+        echo -e "${CYAN}  Using CPU-only configuration${NC}"
+        COMPOSE_FILES="-f docker-compose.yml -f docker-compose.cpu.yml"
         GPU_AVAILABLE=false
     fi
 else
-    echo -e "${YELLOW}⚠ No NVIDIA GPU detected - CPU only${NC}"
+    echo -e "${YELLOW}⚠ Unknown platform: ${PLATFORM}${NC}"
+    echo -e "${CYAN}  Using CPU-only configuration${NC}"
+    COMPOSE_FILES="-f docker-compose.yml -f docker-compose.cpu.yml"
     GPU_AVAILABLE=false
 fi
 echo ""
@@ -98,7 +133,7 @@ echo ""
 
 # Check if services are already running
 SERVICES_RUNNING=false
-if $DC_CMD ps | grep -q "Up"; then
+if $DC_CMD $COMPOSE_FILES ps | grep -q "Up"; then
     SERVICES_RUNNING=true
     echo -e "${CYAN}Services are currently running${NC}"
     echo ""
@@ -132,7 +167,7 @@ case "$REBUILD_CHOICE" in
     1)
         if [ "$SERVICES_RUNNING" = true ]; then
             echo -e "${BLUE}Restarting existing containers...${NC}"
-            $DC_CMD restart
+            $DC_CMD $COMPOSE_FILES restart
             REBUILD_OPTION="restart"
         else
             echo -e "${BLUE}Building with cache...${NC}"
@@ -142,7 +177,7 @@ case "$REBUILD_CHOICE" in
     2)
         if [ "$SERVICES_RUNNING" = true ]; then
             echo -e "${BLUE}Stopping services...${NC}"
-            $DC_CMD down
+            $DC_CMD $COMPOSE_FILES down
             echo -e "${BLUE}Rebuilding with cache...${NC}"
             REBUILD_OPTION="build"
         else
@@ -154,7 +189,7 @@ case "$REBUILD_CHOICE" in
     3)
         if [ "$SERVICES_RUNNING" = true ]; then
             echo -e "${BLUE}Stopping services...${NC}"
-            $DC_CMD down
+            $DC_CMD $COMPOSE_FILES down
             echo -e "${BLUE}Rebuilding without cache (clean build)...${NC}"
             REBUILD_OPTION="build"
             NO_CACHE="--no-cache"
@@ -166,7 +201,7 @@ case "$REBUILD_CHOICE" in
     4)
         if [ "$SERVICES_RUNNING" = true ]; then
             echo -e "${BLUE}Stopping services...${NC}"
-            $DC_CMD down
+            $DC_CMD $COMPOSE_FILES down
             echo -e "${GREEN}Services stopped${NC}"
             exit 0
         else
@@ -186,14 +221,14 @@ echo ""
 if [ "$REBUILD_OPTION" = "build" ]; then
     echo -e "${BLUE}Building Docker images...${NC}"
     echo -e "${YELLOW}This may take several minutes${NC}\n"
-    $DC_CMD build $NO_CACHE
+    $DC_CMD $COMPOSE_FILES build $NO_CACHE
     echo ""
 fi
 
 # Start services
 if [ "$REBUILD_OPTION" != "restart" ]; then
     echo -e "${BLUE}Starting services...${NC}\n"
-    $DC_CMD up -d
+    $DC_CMD $COMPOSE_FILES up -d
 else
     echo -e "${GREEN}✓ Services restarted${NC}\n"
 fi
@@ -273,14 +308,14 @@ echo -e "  4. Go to ${CYAN}Jobs${NC} and create a ${CYAN}Data Collection${NC} jo
 echo -e "  5. View results in ${CYAN}Results & Reports${NC}\n"
 
 echo -e "${BLUE}Useful commands (run from project root):${NC}"
-echo -e "  • View all logs:         ${YELLOW}${DC_CMD} logs -f${NC}"
-echo -e "  • View backend logs:     ${YELLOW}${DC_CMD} logs -f backend${NC}"
-echo -e "  • View frontend logs:    ${YELLOW}${DC_CMD} logs -f frontend${NC}"
-echo -e "  • View celery logs:      ${YELLOW}${DC_CMD} logs -f celery-worker${NC}"
-echo -e "  • Stop services:         ${YELLOW}${DC_CMD} down${NC}"
-echo -e "  • Restart all:           ${YELLOW}${DC_CMD} restart${NC}"
-echo -e "  • Restart backend:       ${YELLOW}${DC_CMD} restart backend${NC}"
-echo -e "  • Restart frontend:      ${YELLOW}${DC_CMD} restart frontend${NC}\n"
+echo -e "  • View all logs:         ${YELLOW}${DC_CMD} ${COMPOSE_FILES} logs -f${NC}"
+echo -e "  • View backend logs:     ${YELLOW}${DC_CMD} ${COMPOSE_FILES} logs -f backend${NC}"
+echo -e "  • View frontend logs:    ${YELLOW}${DC_CMD} ${COMPOSE_FILES} logs -f frontend${NC}"
+echo -e "  • View celery logs:      ${YELLOW}${DC_CMD} ${COMPOSE_FILES} logs -f celery-worker${NC}"
+echo -e "  • Stop services:         ${YELLOW}${DC_CMD} ${COMPOSE_FILES} down${NC}"
+echo -e "  • Restart all:           ${YELLOW}${DC_CMD} ${COMPOSE_FILES} restart${NC}"
+echo -e "  • Restart backend:       ${YELLOW}${DC_CMD} ${COMPOSE_FILES} restart backend${NC}"
+echo -e "  • Restart frontend:      ${YELLOW}${DC_CMD} ${COMPOSE_FILES} restart frontend${NC}\n"
 
 if [ "$GPU_AVAILABLE" = false ]; then
     echo -e "${YELLOW}Note: Running in CPU-only mode. Training may be slower.${NC}"

@@ -1,0 +1,16 @@
+# CPU-only configuration for macOS, Linux without GPU
+# Usage: docker compose -f docker-compose.yml -f docker-compose.cpu.yml up
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.cpu  # Use CPU Dockerfile
+    # No GPU resources allocated
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.cpu  # Use CPU Dockerfile
+    # No GPU resources allocated

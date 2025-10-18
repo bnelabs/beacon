@@ -1,0 +1,28 @@
+# GPU-specific configuration for Linux with NVIDIA GPU
+# Usage: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile  # Use GPU Dockerfile
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile  # Use GPU Dockerfile
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
