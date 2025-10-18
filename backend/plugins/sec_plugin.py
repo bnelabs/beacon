@@ -3,7 +3,7 @@
 from typing import Dict, Any, List, Optional
 import pandas as pd
 from datetime import datetime, timedelta
-from .base import DataSourcePlugin
+from .base import DataSourcePlugin, register_plugin
 import logging
 
 logger = logging.getLogger(__name__)
@@ -29,14 +29,15 @@ class SECPlugin(DataSourcePlugin):
     - Enterprise: Custom pricing
     """
 
-    def __init__(self, api_key: str):
+    def __init__(self, config: Dict[str, Any]):
         """
         Initialize SEC API plugin.
 
         Args:
-            api_key: SEC-API.io API key
+            config: Configuration dictionary with 'api_key'
         """
-        self.api_key = api_key
+        self.config = config
+        self.api_key = config.get('api_key', '')
         self._query_api = None
         self._render_api = None
 
@@ -64,7 +65,8 @@ class SECPlugin(DataSourcePlugin):
         """Get plugin description."""
         return "SEC Edgar filings data including 10-K, 10-Q, 13F, and Form 4"
 
-    def get_config_schema(self) -> Dict[str, Any]:
+    @classmethod
+    def get_config_schema(cls) -> Dict[str, Any]:
         """
         Get configuration schema for the UI.
 
@@ -195,19 +197,15 @@ class SECPlugin(DataSourcePlugin):
             logger.error(f"Error fetching SEC data for {ticker}: {e}")
             raise
 
-    def validate_config(self, config: Dict[str, Any]) -> bool:
+    def validate_config(self) -> None:
         """
         Validate plugin configuration.
 
-        Args:
-            config: Configuration to validate
-
-        Returns:
-            True if valid, False otherwise
+        Raises:
+            ValueError: If configuration is invalid
         """
-        if not config.get("api_key"):
-            logger.error("SEC API key is required")
-            return False
+        if not self.api_key:
+            raise ValueError("SEC API key is required")
 
         try:
             # Test API key with a simple query
@@ -217,10 +215,10 @@ class SECPlugin(DataSourcePlugin):
                 "size": "1"
             }
             self.query_api.get_filings(test_query)
-            return True
+            logger.info("SEC API key validation successful")
         except Exception as e:
             logger.error(f"SEC API key validation failed: {e}")
-            return False
+            raise ValueError(f"SEC API key validation failed: {e}")
 
     def get_company_facts(self, ticker: str) -> Dict[str, Any]:
         """
@@ -338,3 +336,20 @@ class SECPlugin(DataSourcePlugin):
                 "success": False,
                 "message": f"SEC API connection failed: {str(e)}"
             }
+
+    @classmethod
+    def get_plugin_info(cls) -> Dict[str, Any]:
+        """Get plugin metadata."""
+        return {
+            "name": "SEC Edgar",
+            "description": "Company filings data from SEC Edgar API - 10-K, 10-Q, 13F, Form 4. Free tier: 100 requests/month.",
+            "version": "1.0.0",
+            "author": "BEACON",
+            "free": False,
+            "registration_required": True,
+            "registration_url": "https://sec-api.io"
+        }
+
+
+# Register the plugin
+register_plugin("sec_edgar", SECPlugin)

@@ -19,6 +19,9 @@ from .csv_plugin import CSVPlugin
 from .custom_api_plugin import CustomAPIPlugin
 from .sec_plugin import SECPlugin
 from .ecb_plugin import ECBPlugin
+from .bis_plugin import BISPlugin
+from .imf_plugin import IMFPlugin
+from .world_bank_plugin import WorldBankPlugin
 
 __all__ = [
     "DataSourcePlugin",
@@ -31,5 +34,8 @@ __all__ = [
     "CSVPlugin",
     "CustomAPIPlugin",
     "SECPlugin",
-    "ECBPlugin"
+    "ECBPlugin",
+    "BISPlugin",
+    "IMFPlugin",
+    "WorldBankPlugin"
 ]
