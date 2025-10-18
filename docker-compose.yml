@@ -53,7 +53,7 @@ services:
     ports:
       - "3456:3456"
     environment:
-      DATABASE_URL: postgresql://beacon_user:beacon_password@postgres:5432/beacon_db
+      DATABASE_URL: postgresql://beacon_user:beacon_password@postgres:5432/beacon_db?client_encoding=utf8
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -89,7 +89,7 @@ services:
       dockerfile: Dockerfile.cpu  # Default to CPU for compatibility
     container_name: beacon-celery-worker
     environment:
-      DATABASE_URL: postgresql://beacon_user:beacon_password@postgres:5432/beacon_db
+      DATABASE_URL: postgresql://beacon_user:beacon_password@postgres:5432/beacon_db?client_encoding=utf8
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
