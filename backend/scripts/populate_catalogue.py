@@ -137,20 +137,20 @@ def populate_catalogue():
             # INTEREST RATES - EUROPE
             # ============================================
             {
-                "code": "IR_EONIA",
-                "name": "EONIA Rate",
-                "description": "Euro OverNight Index Average - Euro area overnight rate",
+                "code": "IR_ESTR",
+                "name": "€STR Rate (Euro Short-Term Rate)",
+                "description": "Euro Short-Term Rate - Euro area overnight rate (replaced EONIA)",
                 "category": DataCategory.INTEREST_RATES,
                 "region": DataRegion.EUROPE,
                 "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.SYSTEMIC_RISK.value],
                 "data_source_id": sources["ECB"].id,
-                "endpoint": "FM/D.U2.EUR.4F.KR.EON.LEV",
+                "endpoint": "EST/B.EU000A2X2A25.WT",
                 "frequency": "daily",
                 "granularity": "macro",
                 "unit": "percentage",
                 "default_selected": True,
                 "priority": 100,
-                "tags": ["money_market", "overnight", "benchmark"]
+                "tags": ["money_market", "overnight", "benchmark", "euro_str"]
             },
             {
                 "code": "IR_EURIBOR_1M",
@@ -160,7 +160,7 @@ def populate_catalogue():
                 "region": DataRegion.EUROPE,
                 "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.MARKET_LIQUIDITY.value],
                 "data_source_id": sources["ECB"].id,
-                "endpoint": "FM/D.U2.EUR.4F.KR.MRR_FR.LEV",
+                "endpoint": "FM/B.U2.EUR.4F.KR.MRR_FR.LEV",
                 "frequency": "daily",
                 "granularity": "macro",
                 "unit": "percentage",
@@ -176,7 +176,7 @@ def populate_catalogue():
                 "region": DataRegion.EUROPE,
                 "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.FUNDING_LIQUIDITY.value],
                 "data_source_id": sources["ECB"].id,
-                "endpoint": "FM/D.U2.EUR.4F.KR.DFR.LEV",
+                "endpoint": "FM/B.U2.EUR.4F.KR.DFR.LEV",
                 "frequency": "daily",
                 "granularity": "macro",
                 "unit": "percentage",
