@@ -77,8 +77,18 @@ def run_data_collection(self, job_id: int, parameters: dict):
         # Run data collection with default catalogue items
         self.update_progress(job_id, 20.0)
 
-        # Get catalogue items from parameters or use defaults
-        catalogue_items = parameters.get('catalogue_items', list(range(1, 11)))
+        # Get catalogue items from parameters
+        catalogue_items = parameters.get('catalogue_items')
+        if not catalogue_items:
+            # No items specified - fetch items marked as default_selected from database
+            from models.data_catalogue import DataCatalogueItem
+            default_items = db.query(DataCatalogueItem).filter(
+                DataCatalogueItem.default_selected == True,
+                DataCatalogueItem.enabled == True
+            ).all()
+            catalogue_items = [item.id for item in default_items]
+            logger.info(f"No items specified, using {len(catalogue_items)} default catalogue items")
+
         start_date = parameters.get('start_date', '2024-01-01')
         end_date = parameters.get('end_date', '2024-12-31')
 

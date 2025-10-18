@@ -200,7 +200,7 @@ def populate_catalogue():
                 "frequency": "daily",
                 "granularity": "macro",
                 "unit": "percentage",
-                "default_selected": True,
+                "default_selected": False,  # FRED requires API key
                 "priority": 100,
                 "tags": ["money_market", "overnight", "benchmark", "us"]
             },
@@ -216,7 +216,7 @@ def populate_catalogue():
                 "frequency": "daily",
                 "granularity": "macro",
                 "unit": "percentage",
-                "default_selected": True,
+                "default_selected": False,  # FRED requires API key
                 "priority": 100,
                 "tags": ["policy_rate", "central_bank", "us"]
             },
