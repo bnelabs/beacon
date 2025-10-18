@@ -1,6 +1,5 @@
 # CPU-only configuration for macOS, Linux without GPU
 # Usage: docker compose -f docker-compose.yml -f docker-compose.cpu.yml up
-version: '3.8'
 
 services:
   backend:

@@ -42,6 +42,9 @@ RUN chown -R beacon:beacon /app
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 ENV CUDA_VISIBLE_DEVICES=0
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV PYTHONIOENCODING=utf-8
 
 # Switch to non-root user
 USER beacon
