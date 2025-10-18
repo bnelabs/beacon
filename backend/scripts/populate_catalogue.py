@@ -590,35 +590,35 @@ def populate_catalogue():
             # ============================================
             {
                 "code": "SEC_BANK_FINANCIALS",
-                "name": "Major Bank Financial Statements",
-                "description": "10-K/10-Q filings for major US banks (JPM, BAC, C, WFC, GS, MS)",
+                "name": "JPMorgan Chase 10-K Filings",
+                "description": "10-K annual filings for JPMorgan Chase",
                 "category": DataCategory.BANKING,
                 "region": DataRegion.NORTH_AMERICA,
                 "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
                 "data_source_id": sources["SEC EDGAR"].id,
-                "endpoint": "filings",
-                "frequency": "quarterly",
+                "endpoint": "JPM.10-K",
+                "frequency": "annual",
                 "granularity": "micro",
-                "unit": "USD",
-                "default_selected": True,
+                "unit": "filings",
+                "default_selected": False,  # SEC requires API key
                 "priority": 95,
-                "tags": ["banks", "financials", "10-k", "10-q", "balance_sheet"]
+                "tags": ["banks", "financials", "10-k", "jpm"]
             },
             {
                 "code": "SEC_INSTITUTIONAL_HOLDINGS",
-                "name": "Institutional Holdings (13F)",
-                "description": "13F filings showing institutional investor holdings in banks and financial stocks",
+                "name": "BlackRock 13F Holdings",
+                "description": "13F filings showing BlackRock institutional holdings",
                 "category": DataCategory.BANKING,
                 "region": DataRegion.NORTH_AMERICA,
                 "risk_types": [RiskType.MARKET_LIQUIDITY.value, RiskType.SYSTEMIC_RISK.value],
                 "data_source_id": sources["SEC EDGAR"].id,
-                "endpoint": "filings",
+                "endpoint": "BLK.13F-HR",
                 "frequency": "quarterly",
                 "granularity": "meso",
-                "unit": "USD",
-                "default_selected": True,
+                "unit": "filings",
+                "default_selected": False,  # SEC requires API key
                 "priority": 85,
-                "tags": ["institutional", "13f", "holdings", "ownership"]
+                "tags": ["institutional", "13f", "holdings", "blackrock"]
             },
 
             # ============================================
