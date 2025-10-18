@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: beacon_password
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
-      POSTGRES_INITDB_ARGS: "--auth-scrypt-host --auth=scrypt --lc-collate=C --lc-ctype=C"
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
