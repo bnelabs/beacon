@@ -27,7 +27,11 @@ COPY . .
 RUN mkdir -p /app/data /app/results /app/logs /app/saved_models
 
 # Create non-root user for security
-RUN groupadd -r beacon && useradd -r -g beacon -u 1000 beacon
+RUN groupadd -r beacon && useradd -r -g beacon -u 1000 -m -d /home/beacon beacon
+
+# Create cache directories for yfinance
+RUN mkdir -p /home/beacon/.cache/py-yfinance && \
+    chown -R beacon:beacon /home/beacon
 
 # Set ownership
 RUN chown -R beacon:beacon /app
