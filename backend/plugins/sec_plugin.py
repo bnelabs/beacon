@@ -65,6 +65,71 @@ class SECPlugin(DataSourcePlugin):
         """Get plugin description."""
         return "SEC Edgar filings data including 10-K, 10-Q, 13F, and Form 4"
 
+    def fetch_asset_data(
+        self,
+        symbols: List[str],
+        start_date: datetime,
+        end_date: datetime
+    ) -> Optional[pd.DataFrame]:
+        """
+        SEC doesn't provide traditional asset price data.
+
+        Args:
+            symbols: Not applicable for SEC
+            start_date: Start date
+            end_date: End date
+
+        Returns:
+            None (SEC is for filings only)
+        """
+        logger.warning("SEC plugin does not support asset price data")
+        return None
+
+    def fetch_indicator_data(
+        self,
+        indicator_id: str,
+        start_date: datetime,
+        end_date: datetime
+    ) -> Optional[pd.DataFrame]:
+        """
+        Fetch SEC filings data as indicator data.
+
+        Args:
+            indicator_id: Format: "TICKER.FILING_TYPE" (e.g., "AAPL.10-K")
+            start_date: Start date
+            end_date: End date
+
+        Returns:
+            DataFrame with date and filing information
+        """
+        try:
+            # Parse indicator_id
+            if '.' not in indicator_id:
+                logger.error(f"Invalid SEC indicator format: {indicator_id}")
+                logger.info("Expected format: TICKER.FILING_TYPE (e.g., AAPL.10-K)")
+                return None
+
+            parts = indicator_id.split('.', 1)
+            ticker = parts[0]
+            filing_type = parts[1] if len(parts) > 1 else "10-K"
+
+            # Use the existing fetch_data method
+            df = self.fetch_data(ticker, start_date, end_date, {"filing_types": [filing_type]})
+
+            if df is not None and not df.empty:
+                # Convert to indicator format (date, value)
+                # For SEC filings, we'll use filing count as value
+                result = df.reset_index()
+                result = result[['date']].copy()
+                result['value'] = 1  # Each row represents one filing
+                return result
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error fetching SEC indicator {indicator_id}: {e}")
+            return None
+
     @classmethod
     def get_config_schema(cls) -> Dict[str, Any]:
         """
