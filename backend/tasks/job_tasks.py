@@ -18,14 +18,19 @@ logger = logging.getLogger(__name__)
 
 
 def error_details_to_json(error_details) -> str:
-    """Convert ErrorDetails dataclass to JSON string for database storage."""
+    """Convert ErrorDetails (dict or dataclass) to JSON string for database storage."""
     try:
-        error_dict = asdict(error_details)
-        # Convert Enum values to strings
-        if 'severity' in error_dict:
-            error_dict['severity'] = error_dict['severity'].value if hasattr(error_dict['severity'], 'value') else str(error_dict['severity'])
-        if 'category' in error_dict:
-            error_dict['category'] = error_dict['category'].value if hasattr(error_dict['category'], 'value') else str(error_dict['category'])
+        # If it's already a dict, use it directly
+        if isinstance(error_details, dict):
+            error_dict = error_details
+        else:
+            # Try to convert dataclass to dict
+            error_dict = asdict(error_details)
+            # Convert Enum values to strings if present
+            if 'severity' in error_dict and hasattr(error_dict['severity'], 'value'):
+                error_dict['severity'] = error_dict['severity'].value
+            if 'category' in error_dict and hasattr(error_dict['category'], 'value'):
+                error_dict['category'] = error_dict['category'].value
         return json.dumps(error_dict)
     except Exception as e:
         logger.error(f"Failed to convert error details to JSON: {e}")
