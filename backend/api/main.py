@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 import logging
 import os
 
-from .routes import data_sources, assets, jobs, config, system, errors, catalogue, pipeline, results
+from .routes import data_sources, assets, jobs, config, system, errors, catalogue, pipeline, results, explainability
 from database import init_db, close_db
 
 logger = logging.getLogger(__name__)
@@ -82,6 +82,7 @@ app.add_middleware(
 # Include routers
 app.include_router(pipeline.router, prefix="/api/v1/pipeline", tags=["Pipeline (DATA-ENGINE-RESULTS)"])
 app.include_router(results.router, prefix="/api/v1/results", tags=["Results & Reports"])
+app.include_router(explainability.router, prefix="/api/v1/explainability", tags=["AI Explainability (EU Compliant)"])
 app.include_router(catalogue.router, prefix="/api/v1/catalogue", tags=["Data Catalogue"])
 app.include_router(data_sources.router, prefix="/api/v1/data-sources", tags=["Data Sources"])
 app.include_router(assets.router, prefix="/api/v1/assets", tags=["Assets"])

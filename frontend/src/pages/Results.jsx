@@ -22,7 +22,12 @@ import {
   LinearProgress,
   IconButton,
   Tooltip,
-  Divider
+  Divider,
+  Button,
+  List,
+  ListItem,
+  ListItemText,
+  Stack
 } from '@mui/material'
 import {
   Assessment as AssessmentIcon,
@@ -33,7 +38,11 @@ import {
   Refresh as RefreshIcon,
   Timeline as TimelineIcon,
   Dashboard as DashboardIcon,
-  Description as DescriptionIcon
+  Description as DescriptionIcon,
+  Download as DownloadIcon,
+  AccountBalance as BankIcon,
+  Lan as NetworkIcon,
+  Info as InfoIcon
 } from '@mui/icons-material'
 import { api } from '../api/client'
 
@@ -125,6 +134,36 @@ export default function Results() {
     enabled: !!selectedJobId
   })
 
+  // EU AI Act Compliant Explainability
+  const { data: explanation } = useQuery({
+    queryKey: ['explanation', selectedJobId],
+    queryFn: async () => {
+      const response = await api.explainability.explanation(selectedJobId)
+      return response.data
+    },
+    enabled: !!selectedJobId && ['training', 'prediction'].includes(selectedResult?.job_type)
+  })
+
+  // Per-Bank Risk Analysis
+  const { data: bankRisks } = useQuery({
+    queryKey: ['bank-risks', selectedJobId],
+    queryFn: async () => {
+      const response = await api.explainability.bankRisks(selectedJobId)
+      return response.data
+    },
+    enabled: !!selectedJobId && ['training', 'prediction'].includes(selectedResult?.job_type)
+  })
+
+  // Contagion Analysis
+  const { data: contagionAnalysis } = useQuery({
+    queryKey: ['contagion-analysis', selectedJobId],
+    queryFn: async () => {
+      const response = await api.explainability.contagionAnalysis(selectedJobId)
+      return response.data
+    },
+    enabled: !!selectedJobId && ['training', 'prediction'].includes(selectedResult?.job_type)
+  })
+
   const { data: executiveSummary } = useQuery({
     queryKey: ['executive-summary', selectedJobId],
     queryFn: async () => {
@@ -141,15 +180,6 @@ export default function Results() {
       return response.data
     },
     enabled: !!selectedJobId && selectedResult?.job_type === 'data_collection'
-  })
-
-  const { data: riskScores } = useQuery({
-    queryKey: ['risk-scores', selectedJobId],
-    queryFn: async () => {
-      const response = await api.results.riskScores(selectedJobId)
-      return response.data
-    },
-    enabled: !!selectedJobId && ['prediction', 'backtest', 'training'].includes(selectedResult?.job_type)
   })
 
   const formatDate = (dateString) => {
@@ -203,10 +233,10 @@ export default function Results() {
         <Box>
           <Typography variant="h4" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <AssessmentIcon fontSize="large" />
-            Results & Reports
+            Results & AI Explainability
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            View comprehensive analysis results and data quality reports
+            EU AI Act compliant - Full transparency, per-bank risk, and contagion analysis
           </Typography>
         </Box>
         <IconButton onClick={() => refetch()} color="primary">
@@ -273,7 +303,7 @@ export default function Results() {
               <CardContent sx={{ textAlign: 'center', py: 8 }}>
                 <AssessmentIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
                 <Typography variant="h6" color="text.secondary">
-                  Select a result to view details
+                  Select a result to view AI explainability and analysis
                 </Typography>
               </CardContent>
             </Card>
@@ -319,12 +349,16 @@ export default function Results() {
               </Card>
 
               <Tabs value={selectedTab} onChange={(e, v) => setSelectedTab(v)} sx={{ mb: 2 }}>
-                <Tab label="Executive Summary" />
+                <Tab label="Summary" />
+                {selectedResult?.job_type === 'training' && <Tab label="Training Metrics" />}
+                {['training', 'prediction'].includes(selectedResult?.job_type) && <Tab label="AI Explainability" />}
+                {['training', 'prediction'].includes(selectedResult?.job_type) && <Tab label="Per-Bank Risk" />}
+                {['training', 'prediction'].includes(selectedResult?.job_type) && <Tab label="Contagion Analysis" />}
                 {selectedResult?.job_type === 'data_collection' && <Tab label="Data Quality" />}
-                {['prediction', 'backtest', 'training'].includes(selectedResult?.job_type) && <Tab label="Risk Scores" />}
                 <Tab label="Raw Result" />
               </Tabs>
 
+              {/* Summary Tab */}
               <TabPanel value={selectedTab} index={0}>
                 <Card>
                   <CardContent>
@@ -334,8 +368,8 @@ export default function Results() {
                     <Divider sx={{ my: 2 }} />
                     {executiveSummary ? (
                       <Box>
-                        <Typography variant="body1" paragraph>
-                          {executiveSummary.message || 'Summary not available'}
+                        <Typography variant="body1" paragraph sx={{ whiteSpace: 'pre-line' }}>
+                          {executiveSummary.message || executiveSummary.summary || 'Summary not available'}
                         </Typography>
                         {executiveSummary.key_metrics && (
                           <Grid container spacing={2} sx={{ mt: 2 }}>
@@ -346,7 +380,8 @@ export default function Results() {
                                     {key.replace(/_/g, ' ').toUpperCase()}
                                   </Typography>
                                   <Typography variant="h6">
-                                    {typeof value === 'boolean' ? (value ? 'Yes' : 'No') : value}
+                                    {typeof value === 'boolean' ? (value ? 'Yes' : 'No') :
+                                     typeof value === 'number' ? value.toFixed(4) : value}
                                   </Typography>
                                 </Paper>
                               </Grid>
@@ -361,8 +396,437 @@ export default function Results() {
                 </Card>
               </TabPanel>
 
-              {selectedResult?.job_type === 'data_collection' && (
+              {/* Training Metrics Tab */}
+              {selectedResult?.job_type === 'training' && (
                 <TabPanel value={selectedTab} index={1}>
+                  <Grid container spacing={3}>
+                    {/* Training Visualizations */}
+                    <Grid item xs={12}>
+                      <Card>
+                        <CardContent>
+                          <Typography variant="h6" gutterBottom>Training Metrics & Loss Curves</Typography>
+                          <Divider sx={{ my: 2 }} />
+                          <Grid container spacing={2}>
+                            {['loss_curves', 'predictions_vs_actual', 'error_distribution', 'residuals', 'summary_table'].map((vizName) => (
+                              <Grid item xs={12} md={6} key={vizName}>
+                                <Paper sx={{ p: 2 }}>
+                                  <Typography variant="subtitle2" gutterBottom>
+                                    {vizName.replace(/_/g, ' ').toUpperCase()}
+                                  </Typography>
+                                  <Box
+                                    component="img"
+                                    src={api.explainability.visualization(selectedJobId, vizName)}
+                                    alt={vizName}
+                                    sx={{ width: '100%', height: 'auto', borderRadius: 1 }}
+                                    onError={(e) => {
+                                      e.target.style.display = 'none'
+                                      e.target.nextSibling.style.display = 'block'
+                                    }}
+                                  />
+                                  <Alert severity="info" sx={{ display: 'none' }}>
+                                    Visualization not available
+                                  </Alert>
+                                </Paper>
+                              </Grid>
+                            ))}
+                          </Grid>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+
+                    {/* Model Performance Metrics */}
+                    <Grid item xs={12}>
+                      <Card>
+                        <CardContent>
+                          <Typography variant="h6" gutterBottom>Model Performance</Typography>
+                          <Divider sx={{ my: 2 }} />
+                          <Grid container spacing={2}>
+                            {selectedResult?.result?.test_r2 && (
+                              <Grid item xs={6} sm={3}>
+                                <RiskGauge
+                                  value={(selectedResult.result.test_r2 * 100)}
+                                  label="R² Score (%)"
+                                />
+                              </Grid>
+                            )}
+                            {selectedResult?.result?.test_mae && (
+                              <Grid item xs={6} sm={3}>
+                                <Box sx={{ textAlign: 'center' }}>
+                                  <Typography variant="h4" color="primary">
+                                    {selectedResult.result.test_mae.toFixed(4)}
+                                  </Typography>
+                                  <Typography variant="body2" color="text.secondary">
+                                    MAE
+                                  </Typography>
+                                </Box>
+                              </Grid>
+                            )}
+                            {selectedResult?.result?.test_rmse && (
+                              <Grid item xs={6} sm={3}>
+                                <Box sx={{ textAlign: 'center' }}>
+                                  <Typography variant="h4" color="secondary">
+                                    {selectedResult.result.test_rmse.toFixed(4)}
+                                  </Typography>
+                                  <Typography variant="body2" color="text.secondary">
+                                    RMSE
+                                  </Typography>
+                                </Box>
+                              </Grid>
+                            )}
+                            {selectedResult?.result?.epochs_trained && (
+                              <Grid item xs={6} sm={3}>
+                                <Box sx={{ textAlign: 'center' }}>
+                                  <Typography variant="h4" color="info.main">
+                                    {selectedResult.result.epochs_trained}
+                                  </Typography>
+                                  <Typography variant="body2" color="text.secondary">
+                                    Epochs
+                                  </Typography>
+                                </Box>
+                              </Grid>
+                            )}
+                          </Grid>
+                          <Box sx={{ mt: 2 }}>
+                            <Stack direction="row" spacing={2}>
+                              <Button
+                                variant="outlined"
+                                startIcon={<DownloadIcon />}
+                                href={api.explainability.downloadPredictions(selectedJobId, 'csv')}
+                                target="_blank"
+                              >
+                                Download CSV
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                startIcon={<DownloadIcon />}
+                                href={api.explainability.downloadPredictions(selectedJobId, 'excel')}
+                                target="_blank"
+                              >
+                                Download Excel
+                              </Button>
+                            </Stack>
+                          </Box>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  </Grid>
+                </TabPanel>
+              )}
+
+              {/* AI Explainability Tab */}
+              {['training', 'prediction'].includes(selectedResult?.job_type) && (
+                <TabPanel value={selectedTab} index={selectedResult?.job_type === 'training' ? 2 : 1}>
+                  <Card>
+                    <CardContent>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                        <InfoIcon color="primary" />
+                        <Typography variant="h6">
+                          EU AI Act Compliant Explainability
+                        </Typography>
+                        <Chip label="NO BLACK BOX" color="success" size="small" />
+                      </Box>
+                      <Divider sx={{ my: 2 }} />
+                      {explanation ? (
+                        <Grid container spacing={3}>
+                          <Grid item xs={12}>
+                            <Alert severity="success">
+                              <Typography variant="subtitle2" gutterBottom>
+                                {explanation.explainability_compliance}
+                              </Typography>
+                              <Typography variant="body2">
+                                {explanation.summary}
+                              </Typography>
+                            </Alert>
+                          </Grid>
+                          <Grid item xs={12} md={6}>
+                            <Paper sx={{ p: 2 }}>
+                              <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                                Feature Importance
+                              </Typography>
+                              <List dense>
+                                {Object.entries(explanation.feature_importance || {}).slice(0, 10).map(([feature, importance]) => (
+                                  <ListItem key={feature}>
+                                    <ListItemText
+                                      primary={feature}
+                                      secondary={
+                                        <LinearProgress
+                                          variant="determinate"
+                                          value={Math.abs(importance) * 100}
+                                          sx={{ mt: 1 }}
+                                        />
+                                      }
+                                    />
+                                  </ListItem>
+                                ))}
+                              </List>
+                            </Paper>
+                          </Grid>
+                          <Grid item xs={12} md={6}>
+                            <Paper sx={{ p: 2 }}>
+                              <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                                Model Compliance
+                              </Typography>
+                              <List dense>
+                                {Object.entries(explanation.compliance || {}).map(([key, value]) => (
+                                  <ListItem key={key}>
+                                    <ListItemText
+                                      primary={key.replace(/_/g, ' ').toUpperCase()}
+                                      secondary={value}
+                                    />
+                                    <CheckCircleIcon color="success" />
+                                  </ListItem>
+                                ))}
+                              </List>
+                            </Paper>
+                          </Grid>
+                          {explanation.explanation_report && (
+                            <Grid item xs={12}>
+                              <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
+                                <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                                  Detailed Explanation Report
+                                </Typography>
+                                <Typography variant="body2" component="pre" sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
+                                  {explanation.explanation_report}
+                                </Typography>
+                              </Paper>
+                            </Grid>
+                          )}
+                        </Grid>
+                      ) : (
+                        <Alert severity="info">AI explainability data not available for this job</Alert>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabPanel>
+              )}
+
+              {/* Per-Bank Risk Tab */}
+              {['training', 'prediction'].includes(selectedResult?.job_type) && (
+                <TabPanel value={selectedTab} index={selectedResult?.job_type === 'training' ? 3 : 2}>
+                  <Card>
+                    <CardContent>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                        <BankIcon color="primary" />
+                        <Typography variant="h6">
+                          Per-Bank Liquidity Risk Analysis
+                        </Typography>
+                      </Box>
+                      <Divider sx={{ my: 2 }} />
+                      {bankRisks?.banks ? (
+                        <Box>
+                          <Alert severity="info" sx={{ mb: 2 }}>
+                            {bankRisks.summary}
+                          </Alert>
+                          <Grid container spacing={2}>
+                            {bankRisks.banks.map((bank) => (
+                              <Grid item xs={12} md={6} key={bank.bank_id}>
+                                <Paper sx={{ p: 2 }}>
+                                  <Typography variant="h6" gutterBottom>
+                                    {bank.bank_name} ({bank.bank_id})
+                                  </Typography>
+                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+                                    <RiskGauge value={bank.overall_risk_percentage} label="Overall Risk" />
+                                    <Box sx={{ textAlign: 'center' }}>
+                                      <Typography variant="body2" color="text.secondary">
+                                        Confidence Range
+                                      </Typography>
+                                      <Typography variant="h6">
+                                        {bank.confidence_range.lower.toFixed(1)}% - {bank.confidence_range.upper.toFixed(1)}%
+                                      </Typography>
+                                    </Box>
+                                  </Box>
+                                  <Divider sx={{ my: 1 }} />
+                                  <Typography variant="subtitle2" gutterBottom>
+                                    Top Vulnerabilities:
+                                  </Typography>
+                                  <List dense>
+                                    {bank.top_vulnerabilities?.map((vuln, idx) => (
+                                      <ListItem key={idx}>
+                                        <WarningIcon fontSize="small" color="warning" sx={{ mr: 1 }} />
+                                        <ListItemText primary={vuln} />
+                                      </ListItem>
+                                    ))}
+                                  </List>
+                                  <Typography variant="subtitle2" gutterBottom>
+                                    Recommendations:
+                                  </Typography>
+                                  <List dense>
+                                    {bank.recommendations?.map((rec, idx) => (
+                                      <ListItem key={idx}>
+                                        <CheckCircleIcon fontSize="small" color="success" sx={{ mr: 1 }} />
+                                        <ListItemText primary={rec} />
+                                      </ListItem>
+                                    ))}
+                                  </List>
+                                  {bank.is_systemically_important && (
+                                    <Alert severity="error" sx={{ mt: 1 }}>
+                                      SYSTEMICALLY IMPORTANT INSTITUTION ({bank.systemic_importance_percentage.toFixed(1)}%)
+                                    </Alert>
+                                  )}
+                                </Paper>
+                              </Grid>
+                            ))}
+                          </Grid>
+                        </Box>
+                      ) : (
+                        <Alert severity="info">Per-bank risk data not available. This feature requires multi-bank data.</Alert>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabPanel>
+              )}
+
+              {/* Contagion Analysis Tab */}
+              {['training', 'prediction'].includes(selectedResult?.job_type) && (
+                <TabPanel value={selectedTab} index={selectedResult?.job_type === 'training' ? 4 : 3}>
+                  <Card>
+                    <CardContent>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                        <NetworkIcon color="error" />
+                        <Typography variant="h6">
+                          Contagion & Network Effects
+                        </Typography>
+                      </Box>
+                      <Divider sx={{ my: 2 }} />
+                      {contagionAnalysis ? (
+                        <Grid container spacing={3}>
+                          {/* System Health */}
+                          <Grid item xs={12}>
+                            <Paper sx={{ p: 2 }}>
+                              <Typography variant="h6" gutterBottom>System Health</Typography>
+                              <Grid container spacing={2}>
+                                <Grid item xs={6} sm={3}>
+                                  <RiskGauge
+                                    value={contagionAnalysis.system_health?.avg_risk_percentage || 0}
+                                    label="Average Risk"
+                                  />
+                                </Grid>
+                                <Grid item xs={6} sm={3}>
+                                  <RiskGauge
+                                    value={contagionAnalysis.system_health?.max_risk_percentage || 0}
+                                    label="Max Risk"
+                                  />
+                                </Grid>
+                                <Grid item xs={6} sm={3}>
+                                  <RiskGauge
+                                    value={contagionAnalysis.system_health?.systemic_risk_percentage || 0}
+                                    label="Systemic Risk"
+                                  />
+                                </Grid>
+                                <Grid item xs={6} sm={3}>
+                                  <Box sx={{ textAlign: 'center' }}>
+                                    <Typography variant="h3" color="error.main">
+                                      {contagionAnalysis.system_health?.num_critical_risk_banks || 0}
+                                    </Typography>
+                                    <Typography variant="body2" color="text.secondary">
+                                      Critical Banks
+                                    </Typography>
+                                  </Box>
+                                </Grid>
+                              </Grid>
+                            </Paper>
+                          </Grid>
+
+                          {/* Systemically Important Banks */}
+                          {contagionAnalysis.systemic_banks?.length > 0 && (
+                            <Grid item xs={12}>
+                              <Paper sx={{ p: 2 }}>
+                                <Typography variant="h6" gutterBottom>Systemically Important Banks</Typography>
+                                <TableContainer>
+                                  <Table size="small">
+                                    <TableHead>
+                                      <TableRow>
+                                        <TableCell>Bank ID</TableCell>
+                                        <TableCell>Importance</TableCell>
+                                        <TableCell>Reason</TableCell>
+                                      </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                      {contagionAnalysis.systemic_banks.map((bank) => (
+                                        <TableRow key={bank.bank_id}>
+                                          <TableCell>{bank.bank_id}</TableCell>
+                                          <TableCell>
+                                            <Chip
+                                              label={`${bank.systemic_importance_percentage.toFixed(1)}%`}
+                                              color="error"
+                                              size="small"
+                                            />
+                                          </TableCell>
+                                          <TableCell>{bank.reason}</TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                </TableContainer>
+                              </Paper>
+                            </Grid>
+                          )}
+
+                          {/* Cascade Scenarios */}
+                          {contagionAnalysis.cascade_scenarios?.length > 0 && (
+                            <Grid item xs={12}>
+                              <Paper sx={{ p: 2 }}>
+                                <Typography variant="h6" gutterBottom>Cascade Scenarios (If Bank Fails)</Typography>
+                                <Alert severity="warning" sx={{ mb: 2 }}>
+                                  These scenarios show what happens if a high-risk bank fails
+                                </Alert>
+                                <Grid container spacing={2}>
+                                  {contagionAnalysis.cascade_scenarios.map((scenario) => (
+                                    <Grid item xs={12} md={6} key={scenario.initial_failure}>
+                                      <Paper sx={{ p: 2, bgcolor: 'error.50', border: 1, borderColor: 'error.main' }}>
+                                        <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                                          If {scenario.initial_failure} fails:
+                                        </Typography>
+                                        <Typography variant="body2">
+                                          • Total failures: <strong>{scenario.total_failures}</strong> banks
+                                        </Typography>
+                                        <Typography variant="body2">
+                                          • Cascade depth: <strong>{scenario.cascade_depth}</strong> rounds
+                                        </Typography>
+                                        <Typography variant="body2" sx={{ mt: 1 }}>
+                                          Affected: {scenario.affected_banks?.join(', ') || 'None'}
+                                        </Typography>
+                                        <Chip
+                                          label={scenario.severity}
+                                          color={scenario.severity === 'CRITICAL' ? 'error' : scenario.severity === 'HIGH' ? 'warning' : 'info'}
+                                          size="small"
+                                          sx={{ mt: 1 }}
+                                        />
+                                      </Paper>
+                                    </Grid>
+                                  ))}
+                                </Grid>
+                              </Paper>
+                            </Grid>
+                          )}
+
+                          {/* Summary */}
+                          {contagionAnalysis.summary && (
+                            <Grid item xs={12}>
+                              <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
+                                <Typography variant="subtitle1" gutterBottom fontWeight="bold">
+                                  Contagion Risk Summary
+                                </Typography>
+                                <Typography variant="body2" component="pre" sx={{ whiteSpace: 'pre-wrap' }}>
+                                  {contagionAnalysis.summary}
+                                </Typography>
+                              </Paper>
+                            </Grid>
+                          )}
+                        </Grid>
+                      ) : (
+                        <Alert severity="info">
+                          Contagion analysis not available. This feature requires multi-bank data with exposure information.
+                        </Alert>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabPanel>
+              )}
+
+              {/* Data Quality Tab */}
+              {selectedResult?.job_type === 'data_collection' && (
+                <TabPanel value={selectedTab} index={selectedResult?.job_type === 'training' ? 5 : (['prediction'].includes(selectedResult?.job_type) ? 4 : 1)}>
                   <Card>
                     <CardContent>
                       <Typography variant="h6" gutterBottom>Data Quality Report</Typography>
@@ -414,48 +878,12 @@ export default function Results() {
                 </TabPanel>
               )}
 
-              {['prediction', 'backtest', 'training'].includes(selectedResult?.job_type) && (
-                <TabPanel value={selectedTab} index={selectedResult?.job_type === 'data_collection' ? 2 : 1}>
-                  <Card>
-                    <CardContent>
-                      <Typography variant="h6" gutterBottom>Risk Scores</Typography>
-                      <Divider sx={{ my: 2 }} />
-                      {riskScores?.risk_scores ? (
-                        <Grid container spacing={3}>
-                          <Grid item xs={12} sm={6} md={3}>
-                            <RiskGauge
-                              value={riskScores.risk_scores.overall_risk_score || 0}
-                              label="Overall Risk"
-                            />
-                          </Grid>
-                          <Grid item xs={12} sm={6} md={3}>
-                            <RiskGauge
-                              value={riskScores.risk_scores.market_liquidity || 0}
-                              label="Market Liquidity"
-                            />
-                          </Grid>
-                          <Grid item xs={12} sm={6} md={3}>
-                            <RiskGauge
-                              value={riskScores.risk_scores.funding_liquidity || 0}
-                              label="Funding Liquidity"
-                            />
-                          </Grid>
-                          <Grid item xs={12} sm={6} md={3}>
-                            <RiskGauge
-                              value={riskScores.risk_scores.systemic_risk || 0}
-                              label="Systemic Risk"
-                            />
-                          </Grid>
-                        </Grid>
-                      ) : (
-                        <Alert severity="info">Risk scores not available</Alert>
-                      )}
-                    </CardContent>
-                  </Card>
-                </TabPanel>
-              )}
-
-              <TabPanel value={selectedTab} index={selectedResult?.job_type === 'data_collection' ? 2 : (['prediction', 'backtest', 'training'].includes(selectedResult?.job_type) ? 2 : 1)}>
+              {/* Raw Result Tab */}
+              <TabPanel value={selectedTab} index={
+                selectedResult?.job_type === 'training' ? 6 :
+                selectedResult?.job_type === 'prediction' ? 5 :
+                selectedResult?.job_type === 'data_collection' ? 2 : 1
+              }>
                 <Card>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>Raw Result Data</Typography>

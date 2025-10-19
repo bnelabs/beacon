@@ -100,6 +100,16 @@ export const api = {
     delete: (jobId) => apiClient.delete(`/results/${jobId}`),
   },
 
+  // Explainability (EU AI Act Compliant)
+  explainability: {
+    explanation: (jobId) => apiClient.get(`/explainability/${jobId}/explanation`),
+    bankRisks: (jobId, params = {}) => apiClient.get(`/explainability/${jobId}/bank-risks`, { params }),
+    contagionAnalysis: (jobId) => apiClient.get(`/explainability/${jobId}/contagion-analysis`),
+    executiveSummary: (jobId, format = 'json') => apiClient.get(`/explainability/${jobId}/executive-summary`, { params: { format } }),
+    visualization: (jobId, vizName) => `${API_BASE_URL}/api/v1/explainability/${jobId}/visualizations/${vizName}`,
+    downloadPredictions: (jobId, format = 'csv') => `${API_BASE_URL}/api/v1/explainability/${jobId}/download/predictions?format=${format}`,
+  },
+
   // Data Catalogue
   catalogue: {
     list: (params = {}) => apiClient.get('/catalogue', { params }),

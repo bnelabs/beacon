@@ -109,7 +109,7 @@ class BISPlugin(DataSourcePlugin):
         Fetch economic indicator data from BIS.
 
         Args:
-            indicator_id: BIS series key (e.g., 'WEBSTATS_CREDIT_TO_GDP_PUB_DATAFLOW')
+            indicator_id: BIS series key (e.g., 'WS_CREDIT_GAP/Q.US')
             start_date: Start date
             end_date: End date
 
@@ -117,31 +117,27 @@ class BISPlugin(DataSourcePlugin):
             DataFrame with Date and Value columns
         """
         try:
-            # BIS API endpoint for data
+            # BIS API endpoint for data (returns XML by default)
             url = "https://stats.bis.org/api/v1/data"
 
             # Parameters for API request
             params = {
-                "format": "json",
-                "startPeriod": start_date.strftime("%Y-%m-%d"),
-                "endPeriod": end_date.strftime("%Y-%m-%d")
+                "startPeriod": start_date.strftime("%Y"),  # BIS uses year format
+                "endPeriod": end_date.strftime("%Y")
             }
 
             # Add indicator ID to URL path
             full_url = f"{url}/{indicator_id}"
 
             headers = {
-                "Accept": "application/json",
                 "User-Agent": "BEACON/2.0"
             }
 
             response = requests.get(full_url, headers=headers, params=params, timeout=30)
             response.raise_for_status()
 
-            data = response.json()
-
-            # Parse BIS JSON response
-            df = self._parse_bis_json(data)
+            # Parse XML response
+            df = self._parse_bis_xml(response.text)
 
             if df is not None and not df.empty:
                 logger.info(f"Fetched {len(df)} records for {indicator_id} from BIS")
@@ -154,8 +150,63 @@ class BISPlugin(DataSourcePlugin):
             logger.error(f"Error fetching indicator {indicator_id} from BIS: {e}")
             return None
 
+    def _parse_bis_xml(self, xml_text: str) -> Optional[pd.DataFrame]:
+        """Parse BIS API XML (SDMX) response into DataFrame."""
+        try:
+            import xml.etree.ElementTree as ET
+
+            # Parse XML
+            root = ET.fromstring(xml_text)
+
+            # Define namespaces
+            ns = {
+                'message': 'http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message',
+                'common': 'http://www.sdmx.org/resources/sdmxml/schemas/v2_1/common'
+            }
+
+            # Find all observations
+            records = []
+
+            # BIS SDMX structure: DataSet -> Series -> Obs
+            for series in root.findall('.//Series', ns):
+                for obs in series.findall('Obs', ns):
+                    time_period = obs.get('TIME_PERIOD')
+                    obs_value = obs.get('OBS_VALUE')
+
+                    if time_period and obs_value:
+                        try:
+                            # Parse quarterly format (2023-Q1) or annual format (2023)
+                            if '-Q' in time_period:
+                                year, quarter = time_period.split('-Q')
+                                # Convert to first day of quarter
+                                month = (int(quarter) - 1) * 3 + 1
+                                date = pd.to_datetime(f"{year}-{month:02d}-01")
+                            else:
+                                # Annual data
+                                date = pd.to_datetime(f"{time_period}-01-01")
+
+                            records.append({
+                                'date': date,
+                                'value': float(obs_value)
+                            })
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Failed to parse observation: {time_period}, {obs_value} - {e}")
+                            continue
+
+            if records:
+                df = pd.DataFrame(records)
+                df = df.sort_values('date')
+                df = df.drop_duplicates(subset=['date'], keep='first')
+                return df
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error parsing BIS XML: {e}")
+            return None
+
     def _parse_bis_json(self, data: Dict) -> Optional[pd.DataFrame]:
-        """Parse BIS API JSON response into DataFrame."""
+        """Parse BIS API JSON response into DataFrame (legacy - BIS no longer supports JSON)."""
         try:
             if not data or 'data' not in data:
                 return None

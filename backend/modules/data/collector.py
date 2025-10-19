@@ -5,6 +5,7 @@ from typing import List, Dict
 from datetime import datetime
 import pandas as pd
 from sqlalchemy.orm import Session
+import os
 
 from models.data_catalogue import DataCatalogueItem
 from models.data_source import DataSource
@@ -62,8 +63,32 @@ class DataCollector:
             logger.error(f"Plugin type '{data_source.plugin_type}' not found")
             return pd.DataFrame()
 
+        # Prepare plugin config - inject API keys from environment if not in config
+        config = data_source.config or {}
+
+        # Inject FRED API key from environment if not in config
+        if data_source.plugin_type == 'fred' and not config.get('api_key'):
+            fred_key = os.getenv('FRED_API_KEY')
+            if fred_key:
+                config['api_key'] = fred_key
+                logger.info("Injected FRED API key from environment")
+
+        # Inject Alpha Vantage API key from environment if not in config
+        if data_source.plugin_type == 'alpha_vantage' and not config.get('api_key'):
+            av_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+            if av_key:
+                config['api_key'] = av_key
+                logger.info("Injected Alpha Vantage API key from environment")
+
+        # Inject SEC API key from environment if not in config
+        if data_source.plugin_type == 'sec_edgar' and not config.get('api_key'):
+            sec_key = os.getenv('SEC_API_KEY')
+            if sec_key:
+                config['api_key'] = sec_key
+                logger.info("Injected SEC API key from environment")
+
         # Instantiate plugin with config
-        plugin = plugin_class(data_source.config or {})
+        plugin = plugin_class(config)
 
         # Convert dates
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")

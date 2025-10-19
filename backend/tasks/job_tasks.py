@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 import psutil
 import os
+import torch
 
 from .celery_app import celery_app
 from database import SessionLocal
@@ -219,41 +220,179 @@ def run_training(self, job_id: int, parameters: dict):
         orchestrator = EngineOrchestrator(f"job_{job_id}", output_dir, config)
 
         # For training, we need existing data package
-        # For now, log that training requires data collection first
-        logger.info("BNE ENGINE training requires data collection to be completed first...")
+        # Check if user provided a data_job_id to use existing collected data
+        data_job_id = parameters.get("data_job_id")
+
+        if not data_job_id:
+            # Try to find the most recent completed data collection job
+            from models.job import Job, JobType
+            recent_data_job = db.query(Job).filter(
+                Job.job_type == JobType.DATA_COLLECTION,
+                Job.status == "completed"
+            ).order_by(Job.completed_at.desc()).first()
+
+            if recent_data_job:
+                data_job_id = recent_data_job.id
+                logger.info(f"Using most recent data collection job: {data_job_id}")
+            else:
+                raise ValueError("No completed data collection job found. Run data collection first.")
+
         self.update_progress(job_id, 20.0)
 
+        # Load the data package from the completed data job
+        data_job_dir = f"/app/data/jobs/{data_job_id}"
+        if not os.path.exists(f"{data_job_dir}/timeseries.parquet"):
+            raise FileNotFoundError(f"Data package not found for job {data_job_id}. Run data collection first.")
+
+        logger.info(f"Loading data package from job {data_job_id}")
+
+        # Load data package (simplified - just load the files)
+        import pandas as pd
+        timeseries_df = pd.read_parquet(f"{data_job_dir}/timeseries.parquet")
+        logger.info(f"Loaded {len(timeseries_df)} timeseries records")
+        logger.info(f"Columns: {list(timeseries_df.columns)}")
+        logger.info(f"Index: {timeseries_df.index.name}")
+
+        # Reset index to get date column if it's in the index
+        if timeseries_df.index.name == 'date' or 'date' in str(timeseries_df.index.name).lower():
+            timeseries_df = timeseries_df.reset_index()
+
+        self.update_progress(job_id, 40.0)
+
         # Get date range from parameters or use defaults
-        train_start = parameters.get("train_start", "2019-01-01")
-        train_end = parameters.get("train_end", "2023-12-31")
-        test_start = parameters.get("test_start", "2024-01-01")
-        test_end = parameters.get("test_end", "2024-06-30")
+        train_start = parameters.get("train_start", "2023-01-01")
+        train_end = parameters.get("train_end", "2024-06-30")
+        test_start = parameters.get("test_start", "2024-07-01")
+        test_end = parameters.get("test_end", "2024-12-31")
 
-        # NOTE: Placeholder - actual training requires a data package
-        # For now, mark as completed with placeholder results
-        logger.warning("Training job running with placeholder implementation")
-        logger.info("Full BNE ENGINE training requires pipeline orchestration")
+        # Convert date strings to datetime for comparison
+        train_start_dt = pd.to_datetime(train_start)
+        train_end_dt = pd.to_datetime(train_end)
+        test_start_dt = pd.to_datetime(test_start)
+        test_end_dt = pd.to_datetime(test_end)
 
-        self.update_progress(job_id, 50.0)
+        # Find date column (could be 'date', 'Date', 'timestamp', etc.)
+        date_col = None
+        for col in timeseries_df.columns:
+            col_lower = str(col).lower()
+            if 'date' in col_lower or 'time' in col_lower:
+                date_col = col
+                break
 
-        # Simulate processing time
-        import time
-        time.sleep(2)
+        if not date_col:
+            logger.error(f"Available columns: {list(timeseries_df.columns)}")
+            raise ValueError(f"No date column found in timeseries data. Available columns: {list(timeseries_df.columns)}")
+
+        # Ensure date column is datetime
+        timeseries_df[date_col] = pd.to_datetime(timeseries_df[date_col])
+
+        # Split data into train/test
+        train_df = timeseries_df[
+            (timeseries_df[date_col] >= train_start_dt) &
+            (timeseries_df[date_col] <= train_end_dt)
+        ]
+        test_df = timeseries_df[
+            (timeseries_df[date_col] >= test_start_dt) &
+            (timeseries_df[date_col] <= test_end_dt)
+        ]
+
+        logger.info(f"Train set: {len(train_df)} records, Test set: {len(test_df)} records")
+
+        self.update_progress(job_id, 60.0)
+
+        # REAL MODEL TRAINING WITH MULTI-SCALE SUPPORT
+        logger.info("Starting REAL multi-scale model training...")
+
+        # Check if we have source_code column (multi-source data)
+        has_multi_source = 'source_code' in train_df.columns
+
+        if has_multi_source:
+            logger.info("Using MULTI-SCALE trainer for heterogeneous data sources")
+            from modules.engine.multi_scale_trainer import MultiScaleTrainer as TrainerClass
+        else:
+            logger.info("Using single-scale trainer")
+            from modules.engine.trainer import ModelTrainer as TrainerClass
+
+        # Get model configuration
+        model_type = config.get('model', 'temporal_attention').lower()
+        logger.info(f"Training {model_type.upper()} model")
+
+        # Create trainer
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        logger.info(f"Using device: {device}")
+
+        trainer = TrainerClass(model_type=model_type, device=device, config=config)
+
+        # Split validation from train (80/20)
+        train_size = int(len(train_df) * 0.8)
+        train_subset = train_df.iloc[:train_size]
+        val_subset = train_df.iloc[train_size:]
+
+        if has_multi_source:
+            sources = train_df['source_code'].nunique()
+            logger.info(f"Split: Train={len(train_subset)}, Val={len(val_subset)}, Test={len(test_df)}, Sources={sources}")
+
+        # Train model
+        self.update_progress(job_id, 65.0)
+
+        training_metrics = trainer.train(
+            train_df=train_subset,
+            val_df=val_subset,
+            test_df=test_df,
+            output_dir=output_dir
+        )
 
         self.update_progress(job_id, 95.0)
+
+        # Generate visualizations
+        logger.info("Generating visualizations...")
+        from modules.engine.visualizer import create_training_report
+
+        try:
+            viz_paths = create_training_report(output_dir, job_id)
+            logger.info(f"Created {len(viz_paths)} visualizations")
+        except Exception as e:
+            logger.warning(f"Failed to create visualizations: {e}")
+            viz_paths = {}
 
         # Calculate memory usage
         end_memory = process.memory_info().rss / (1024 ** 2)
         peak_memory = end_memory - start_memory
 
-        # Prepare placeholder results
+        # Prepare results with REAL training metrics
         result = {
-            "status": "placeholder",
-            "message": "Training requires full pipeline integration. Use pipeline API for complete training.",
+            "status": "completed",
+            "message": f"Model training completed successfully with {model_type.upper()}",
+            "data_source_job": data_job_id,
+            "model_type": model_type.upper(),
+            "multi_scale": has_multi_source,
             "train_period": f"{train_start} to {train_end}",
             "test_period": f"{test_start} to {test_end}",
+            "train_records": len(train_subset),
+            "val_records": len(val_subset),
+            "test_records": len(test_df),
+            "total_records": len(timeseries_df),
+            "features": list(timeseries_df.columns),
+            "device": str(device),
+            # REAL METRICS
+            "epochs_trained": training_metrics.total_epochs,
+            "best_epoch": training_metrics.best_epoch + 1,
+            "final_train_loss": float(training_metrics.train_loss[-1]),
+            "final_val_loss": float(training_metrics.val_loss[-1]),
+            "best_val_loss": float(min(training_metrics.val_loss)),
+            "test_loss": float(training_metrics.test_loss),
+            "test_mae": float(training_metrics.test_mae),
+            "test_rmse": float(training_metrics.test_rmse),
+            "test_r2": float(training_metrics.test_r2),
+            "model_path": training_metrics.model_path,
+            "predictions_path": training_metrics.predictions_path,
+            "visualizations": viz_paths,
             "completed_at": datetime.utcnow().isoformat()
         }
+
+        # Add per-source metrics if available
+        if hasattr(training_metrics, 'per_source_metrics'):
+            result["per_source_metrics"] = training_metrics.per_source_metrics
 
         service.update_job_status(
             job_id,

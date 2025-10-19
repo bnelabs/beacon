@@ -62,7 +62,7 @@ services:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       PYTHONIOENCODING: utf-8
-      FRED_API_KEY: ${FRED_API_KEY:-}
+      FRED_API_KEY: f0a1e5e0a4dc3272e4e95d3ec2ff3644
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       SEC_API_KEY: ${SEC_API_KEY:-}
     volumes:
@@ -97,7 +97,7 @@ services:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       PYTHONIOENCODING: utf-8
-      FRED_API_KEY: ${FRED_API_KEY:-}
+      FRED_API_KEY: f0a1e5e0a4dc3272e4e95d3ec2ff3644
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       SEC_API_KEY: ${SEC_API_KEY:-}
     volumes:

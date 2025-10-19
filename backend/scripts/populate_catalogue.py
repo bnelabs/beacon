@@ -632,11 +632,11 @@ def populate_catalogue():
                 "region": DataRegion.GLOBAL,
                 "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.SYSTEMIC_RISK.value],
                 "data_source_id": sources["BIS"].id,
-                "endpoint": "WEBSTATS_GLI_DATAFLOW/Q.5A.N.5J.N",
+                "endpoint": "WS_GLI/Q.5A.N.5J.N",
                 "frequency": "quarterly",
                 "granularity": "macro",
                 "unit": "USD billions",
-                "default_selected": False,  # BIS requires specific series keys
+                "default_selected": True,  # BIS now working with XML parser
                 "priority": 90,
                 "tags": ["global", "cross_border", "credit_flows"]
             },
@@ -648,11 +648,11 @@ def populate_catalogue():
                 "region": DataRegion.GLOBAL,
                 "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.CREDIT_RISK.value],
                 "data_source_id": sources["BIS"].id,
-                "endpoint": "WEBSTATS_CREDIT_GAP_DATAFLOW/Q.US",
+                "endpoint": "WS_CREDIT_GAP/Q.US",
                 "frequency": "quarterly",
                 "granularity": "macro",
                 "unit": "percentage_points",
-                "default_selected": False,  # BIS requires specific series keys
+                "default_selected": True,  # BIS now working with XML parser
                 "priority": 95,
                 "tags": ["credit_gap", "early_warning", "systemic"]
             },
@@ -664,11 +664,11 @@ def populate_catalogue():
                 "region": DataRegion.GLOBAL,
                 "risk_types": [RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
                 "data_source_id": sources["BIS"].id,
-                "endpoint": "WEBSTATS_DSR_DATAFLOW/Q.US.H.N",
+                "endpoint": "WS_DSR/Q.US.H.N",
                 "frequency": "quarterly",
                 "granularity": "macro",
                 "unit": "percentage",
-                "default_selected": False,  # BIS requires specific series keys
+                "default_selected": True,  # BIS now working with XML parser
                 "priority": 85,
                 "tags": ["debt_sustainability", "household_debt"]
             },
