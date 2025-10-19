@@ -11,8 +11,25 @@ from .celery_app import celery_app
 from database import SessionLocal
 from services.job_service import JobService
 from services.enhanced_error_translator import translate_error_enhanced as translate_error
+import json
+from dataclasses import asdict
 
 logger = logging.getLogger(__name__)
+
+
+def error_details_to_json(error_details) -> str:
+    """Convert ErrorDetails dataclass to JSON string for database storage."""
+    try:
+        error_dict = asdict(error_details)
+        # Convert Enum values to strings
+        if 'severity' in error_dict:
+            error_dict['severity'] = error_dict['severity'].value if hasattr(error_dict['severity'], 'value') else str(error_dict['severity'])
+        if 'category' in error_dict:
+            error_dict['category'] = error_dict['category'].value if hasattr(error_dict['category'], 'value') else str(error_dict['category'])
+        return json.dumps(error_dict)
+    except Exception as e:
+        logger.error(f"Failed to convert error details to JSON: {e}")
+        return json.dumps({"user_message": "An error occurred", "technical_message": str(error_details)})
 
 
 class JobTask(Task):
@@ -39,7 +56,7 @@ class JobTask(Task):
                     job_id,
                     status="failed",
                     error_message=str(exc),
-                    user_friendly_error=user_friendly
+                    user_friendly_error=error_details_to_json(user_friendly)
                 )
                 logger.error(f"Job {job_id} failed: {exc}\n{einfo}")
             finally:
@@ -141,7 +158,7 @@ def run_data_collection(self, job_id: int, parameters: dict):
             job_id,
             status="failed",
             error_message=str(e),
-            user_friendly_error=user_friendly
+            user_friendly_error=error_details_to_json(user_friendly)
         )
         raise
     finally:
@@ -238,7 +255,7 @@ def run_training(self, job_id: int, parameters: dict):
             job_id,
             status="failed",
             error_message=str(e),
-            user_friendly_error=user_friendly
+            user_friendly_error=error_details_to_json(user_friendly)
         )
         raise
     finally:
@@ -289,7 +306,7 @@ def run_prediction(self, job_id: int, parameters: dict):
             job_id,
             status="failed",
             error_message=str(e),
-            user_friendly_error=user_friendly
+            user_friendly_error=error_details_to_json(user_friendly)
         )
         raise
     finally:
