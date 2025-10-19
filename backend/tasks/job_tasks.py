@@ -13,8 +13,26 @@ from services.job_service import JobService
 from services.enhanced_error_translator import translate_error_enhanced as translate_error
 import json
 from dataclasses import asdict
+import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+def convert_numpy_types(obj):
+    """Convert numpy types to Python native types for JSON serialization."""
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [convert_numpy_types(item) for item in obj]
+    return obj
 
 
 def error_details_to_json(error_details) -> str:
@@ -130,15 +148,15 @@ def run_data_collection(self, job_id: int, parameters: dict):
         end_memory = process.memory_info().rss / (1024 ** 2)
         peak_memory = end_memory - start_memory
 
-        # Prepare results
-        result = {
+        # Prepare results (convert numpy types to Python types)
+        result = convert_numpy_types({
             "quality_score": data_package.quality_report.quality_score,
             "completeness": data_package.quality_report.completeness,
             "fit_for_engine": data_package.quality_report.fit_for_engine,
             "anomalies_detected": data_package.quality_report.anomalies_detected,
             "output_path": data_package.timeseries_path,
             "completed_at": datetime.utcnow().isoformat()
-        }
+        })
 
         service.update_job_status(
             job_id,
