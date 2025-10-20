@@ -114,6 +114,7 @@ export const api = {
   catalogue: {
     list: (params = {}) => apiClient.get('/catalogue', { params }),
     get: (id) => apiClient.get(`/catalogue/${id}`),
+    test: (id) => apiClient.post(`/catalogue/${id}/test`),
     categories: () => apiClient.get('/catalogue/categories'),
     regions: () => apiClient.get('/catalogue/regions'),
   },

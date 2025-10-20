@@ -59,12 +59,12 @@ def error_details_to_json(error_details) -> str:
 class JobTask(Task):
     """Base task with progress tracking and error handling."""
 
-    def update_progress(self, job_id: int, progress: float, status: str = "running"):
+    def update_progress(self, job_id: int, progress: float, status: str = "running", current_step: str = None):
         """Update job progress in database."""
         db = SessionLocal()
         try:
             service = JobService(db)
-            service.update_job_status(job_id, status=status, progress=progress)
+            service.update_job_status(job_id, status=status, progress=progress, current_step=current_step)
         finally:
             db.close()
 
@@ -113,10 +113,15 @@ def run_data_collection(self, job_id: int, parameters: dict):
         output_dir = f"/app/data/jobs/{job_id}"
         os.makedirs(output_dir, exist_ok=True)
 
-        orchestrator = DataOrchestrator(db, f"job_{job_id}", output_dir)
+        # Create progress callback to map orchestrator progress (0-100%) to job progress (20-95%)
+        def orchestrator_progress_callback(orchestrator_progress: float, message: str):
+            job_progress = 20.0 + (orchestrator_progress * 0.75)  # Maps 0-100 to 20-95
+            self.update_progress(job_id, job_progress, current_step=message)
 
-        # Run data collection with default catalogue items
-        self.update_progress(job_id, 20.0)
+        orchestrator = DataOrchestrator(db, f"job_{job_id}", output_dir, progress_callback=orchestrator_progress_callback)
+
+        # Run data collection - progress will be reported via callback (20%-95%)
+        # No need for manual update_progress call here
 
         # Get catalogue items from parameters
         catalogue_items = parameters.get('catalogue_items')

@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Callable
 from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
@@ -82,10 +82,11 @@ class DataOrchestrator:
     Coordinates: Collection → Validation → Cleaning → Formatting → Analysis → Certification
     """
 
-    def __init__(self, db: Session, job_id: str, output_dir: str):
+    def __init__(self, db: Session, job_id: str, output_dir: str, progress_callback: Optional[Callable[[float, str], None]] = None):
         self.db = db
         self.job_id = job_id
         self.output_dir = output_dir
+        self.progress_callback = progress_callback
 
         # Initialize components
         self.collector = DataCollector(db, job_id, output_dir)
@@ -98,6 +99,15 @@ class DataOrchestrator:
         self.status = DataStatus.PENDING
         self.current_step = None
         self.progress = 0.0
+
+    def _update_progress(self, progress: float, message: str):
+        """Update internal progress and call callback if provided."""
+        self.progress = progress
+        self.current_step = message
+        self.monitor.update(self.status.value, self.progress, self.current_step)
+
+        if self.progress_callback:
+            self.progress_callback(progress, message)
 
     def run(self,
             catalogue_items: List[int],
@@ -122,9 +132,7 @@ class DataOrchestrator:
 
             # Step 1: Collection
             self.status = DataStatus.COLLECTING
-            self.current_step = "Collecting data from sources"
-            self.progress = 0.0
-            self.monitor.update(self.status.value, self.progress, self.current_step)
+            self._update_progress(0.0, "Initializing data collection...")
 
             raw_data = self.collector.collect(
                 catalogue_items=catalogue_items,
@@ -132,15 +140,11 @@ class DataOrchestrator:
                 end_date=end_date
             )
 
-            self.progress = 20.0
-            self.monitor.update(self.status.value, self.progress,
-                              f"Collected {len(raw_data)} datasets")
+            self._update_progress(20.0, f"Collected {len(raw_data)} datasets from sources")
 
             # Step 2: Validation
             self.status = DataStatus.VALIDATING
-            self.current_step = "Validating data quality"
-            self.progress = 25.0
-            self.monitor.update(self.status.value, self.progress, self.current_step)
+            self._update_progress(25.0, "Validating data quality and completeness...")
 
             validation_report = self.validator.validate(raw_data)
 
@@ -149,45 +153,33 @@ class DataOrchestrator:
                 self.monitor.fail(f"{validation_report.critical_errors} critical errors")
                 raise Exception(f"Validation failed: {validation_report.critical_errors} critical errors")
 
-            self.progress = 40.0
-            self.monitor.update(self.status.value, self.progress,
-                              f"Validation: {validation_report.warnings} warnings")
+            self._update_progress(40.0, f"Validation complete: {validation_report.warnings} warnings detected")
 
             # Step 3: Cleaning
             self.status = DataStatus.CLEANING
-            self.current_step = "Cleaning and imputing missing values"
-            self.progress = 45.0
-            self.monitor.update(self.status.value, self.progress, self.current_step)
+            self._update_progress(45.0, "Cleaning data and imputing missing values...")
 
             clean_data, cleaning_report = self.cleaner.clean(
                 raw_data,
                 validation_report
             )
 
-            self.progress = 60.0
-            self.monitor.update(self.status.value, self.progress,
-                              f"Fixed {cleaning_report.fixed_issues} issues")
+            self._update_progress(60.0, f"Data cleaning complete: Fixed {cleaning_report.fixed_issues} issues")
 
             # Step 4: Formatting
             self.status = DataStatus.FORMATTING
-            self.current_step = "Formatting and feature engineering"
-            self.progress = 65.0
-            self.monitor.update(self.status.value, self.progress, self.current_step)
+            self._update_progress(65.0, "Formatting data and engineering features...")
 
             formatted_data = self.formatter.format(
                 clean_data,
                 target_schema="engine_v1"
             )
 
-            self.progress = 80.0
-            self.monitor.update(self.status.value, self.progress,
-                              f"Formatted {len(formatted_data.columns)} features")
+            self._update_progress(80.0, f"Formatting complete: {len(formatted_data.columns)} features generated")
 
             # Step 5: Analysis
             self.status = DataStatus.ANALYZING
-            self.current_step = "Analyzing and generating quality report"
-            self.progress = 85.0
-            self.monitor.update(self.status.value, self.progress, self.current_step)
+            self._update_progress(85.0, "Analyzing data quality and generating report...")
 
             analysis_report = self.analyzer.analyze(
                 formatted_data,
@@ -202,15 +194,11 @@ class DataOrchestrator:
                 analysis_report
             )
 
-            self.progress = 90.0
-            self.monitor.update(self.status.value, self.progress,
-                              f"Quality score: {quality_report.quality_score:.1f}/100")
+            self._update_progress(90.0, f"Analysis complete: Quality score {quality_report.quality_score:.1f}/100")
 
             # Step 6: Save and certify
             self.status = DataStatus.CERTIFIED
-            self.current_step = "Saving and certifying data package"
-            self.progress = 95.0
-            self.monitor.update(self.status.value, self.progress, self.current_step)
+            self._update_progress(95.0, "Saving and certifying data package...")
 
             data_package = self._save_data_package(
                 formatted_data,
@@ -220,7 +208,7 @@ class DataOrchestrator:
                 user_id
             )
 
-            self.progress = 100.0
+            self._update_progress(100.0, f"Data certified and ready for training")
             self.monitor.complete(f"Data certified: {data_package.job_id}")
 
             logger.info(f"[{self.job_id}] DATA pipeline completed successfully")

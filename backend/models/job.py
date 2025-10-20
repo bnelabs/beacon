@@ -20,6 +20,7 @@ class Job(Base):
     # Job status
     status = Column(String(20), default="pending", nullable=False)  # pending, running, completed, failed
     progress = Column(Float, default=0.0)  # 0.0 to 100.0
+    current_step = Column(String(255))  # Descriptive message of current operation
 
     # Job parameters
     parameters = Column(JSON)  # Input parameters for the job

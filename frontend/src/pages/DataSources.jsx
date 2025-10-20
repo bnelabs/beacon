@@ -42,6 +42,7 @@ export default function DataSources() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingSource, setEditingSource] = useState(null)
   const [error, setError] = useState(null)
+  const [testResult, setTestResult] = useState(null)
   const [formData, setFormData] = useState({
     name: '',
     plugin_type: 'yfinance',
@@ -96,6 +97,34 @@ export default function DataSources() {
     }
   )
 
+  // Test connection mutation
+  const testConnectionMutation = useMutation(
+    (data) => api.dataSources.test(data),
+    {
+      onSuccess: (response) => {
+        const result = response.data
+        setTestResult({
+          success: result.success,
+          message: result.message
+        })
+      },
+      onError: (err) => {
+        setTestResult({
+          success: false,
+          message: err.userFriendlyMessage || err.message || 'Failed to test connection'
+        })
+      }
+    }
+  )
+
+  const handleTestConnection = () => {
+    setTestResult(null)
+    testConnectionMutation.mutate({
+      plugin_type: formData.plugin_type,
+      config: formData.config
+    })
+  }
+
   const handleOpenDialog = (source = null) => {
     if (source) {
       setEditingSource(source)
@@ -123,6 +152,7 @@ export default function DataSources() {
     setDialogOpen(false)
     setEditingSource(null)
     setError(null)
+    setTestResult(null)
   }
 
   const handleSubmit = () => {
@@ -333,6 +363,30 @@ export default function DataSources() {
               }
               label="Enabled"
             />
+
+            {/* Test Connection Section */}
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+              <Typography variant="subtitle2" gutterBottom>
+                Test Connection
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                Verify that the data source is accessible before saving
+              </Typography>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleTestConnection}
+                disabled={testConnectionMutation.isLoading}
+                fullWidth
+              >
+                {testConnectionMutation.isLoading ? 'Testing...' : 'Test Connection'}
+              </Button>
+              {testResult && (
+                <Alert severity={testResult.success ? 'success' : 'error'} sx={{ mt: 1 }}>
+                  {testResult.message}
+                </Alert>
+              )}
+            </Box>
           </Box>
         </DialogContent>
         <DialogActions>

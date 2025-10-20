@@ -33,7 +33,8 @@ import {
   TrendingUp as TrendingUpIcon,
   AttachMoney as MoneyIcon,
   AccountBalance as BankIcon,
-  ShowChart as ChartIcon
+  ShowChart as ChartIcon,
+  PlayArrow as TestIcon
 } from '@mui/icons-material'
 import { api } from '../api/client'
 
@@ -123,6 +124,39 @@ export default function Catalogue() {
                        error.response?.data?.detail ||
                        error.userFriendlyMessage ||
                        'Failed to add to monitoring'
+      setSnackbar({
+        open: true,
+        message: errorMsg,
+        severity: 'error'
+      })
+    }
+  })
+
+  // Test catalogue item mutation
+  const testItemMutation = useMutation({
+    mutationFn: async (itemId) => {
+      return await api.catalogue.test(itemId)
+    },
+    onSuccess: (data) => {
+      if (data.data.success) {
+        setSnackbar({
+          open: true,
+          message: `✓ ${data.data.item_name}: ${data.data.message}`,
+          severity: 'success'
+        })
+      } else {
+        setSnackbar({
+          open: true,
+          message: `✗ ${data.data.item_name}: ${data.data.message}`,
+          severity: 'warning'
+        })
+      }
+    },
+    onError: (error) => {
+      const errorMsg = error.response?.data?.detail?.user_friendly ||
+                       error.response?.data?.message ||
+                       error.userFriendlyMessage ||
+                       'Failed to test data source'
       setSnackbar({
         open: true,
         message: errorMsg,
@@ -404,11 +438,23 @@ export default function Catalogue() {
 
                   {/* Actions */}
                   <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Chip
-                      label={`Priority: ${item.priority}`}
-                      size="small"
-                      color={item.priority >= 90 ? 'success' : item.priority >= 80 ? 'info' : 'default'}
-                    />
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                      <Chip
+                        label={`Priority: ${item.priority}`}
+                        size="small"
+                        color={item.priority >= 90 ? 'success' : item.priority >= 80 ? 'info' : 'default'}
+                      />
+                      <Tooltip title="Test if this data source is currently accessible">
+                        <IconButton
+                          size="small"
+                          color="primary"
+                          onClick={() => testItemMutation.mutate(item.id)}
+                          disabled={testItemMutation.isLoading}
+                        >
+                          <TestIcon />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
                     <Button
                       variant="contained"
                       size="small"

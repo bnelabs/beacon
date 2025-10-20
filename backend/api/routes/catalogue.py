@@ -288,6 +288,76 @@ async def get_catalogue_item(
         )
 
 
+@router.post("/{item_id}/test")
+async def test_catalogue_item(
+    item_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Test if a specific catalogue item is accessible and has data.
+
+    **For non-technical users:** Click this to verify that the data source is working
+    and has recent data available before adding it to your monitoring.
+
+    Returns:
+        - success: Whether the test passed
+        - message: What happened during the test
+        - details: Additional information (data points found, date range, etc.)
+    """
+    try:
+        # Get the catalogue item
+        item = db.query(DataCatalogueItem).options(
+            joinedload(DataCatalogueItem.data_source)
+        ).filter(DataCatalogueItem.id == item_id).first()
+
+        if not item:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "technical": f"Catalogue item {item_id} not found",
+                    "user_friendly": "This data source doesn't exist in our catalogue."
+                }
+            )
+
+        # Get the plugin for this data source
+        from plugins import get_plugin
+        plugin_config = item.data_source.config or {}
+
+        # Inject API keys from environment if needed
+        import os
+        if item.data_source.plugin_type == 'fred' and 'api_key' not in plugin_config:
+            plugin_config['api_key'] = os.getenv('FRED_API_KEY', '')
+
+        plugin = get_plugin(item.data_source.plugin_type, plugin_config)
+
+        # Test the specific item using its endpoint
+        test_result = plugin.test_item(item.endpoint)
+
+        return {
+            "item_id": item_id,
+            "item_name": item.name,
+            "item_code": item.code,
+            **test_result
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(
+            e,
+            context=f"testing catalogue item {item_id}",
+            endpoint=f"/api/v1/catalogue/{item_id}/test",
+            method="POST"
+        )
+        return {
+            "item_id": item_id,
+            "success": False,
+            "message": error_log.user_message,
+            "details": {"error": str(e)}
+        }
+
+
 def _get_category_description(cat: DataCategory) -> str:
     """Get description for category."""
     descriptions = {

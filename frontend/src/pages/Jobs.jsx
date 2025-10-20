@@ -185,9 +185,16 @@ export default function Jobs() {
                   </IconButton>
                 </Box>
                 <LinearProgress variant="determinate" value={job.progress} />
-                <Typography variant="caption" color="text.secondary">
-                  {Math.round(job.progress)}% complete
-                </Typography>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mt={0.5}>
+                  <Typography variant="caption" color="text.secondary">
+                    {Math.round(job.progress)}% complete
+                  </Typography>
+                  {job.current_step && (
+                    <Typography variant="caption" color="primary" fontStyle="italic">
+                      {job.current_step}
+                    </Typography>
+                  )}
+                </Box>
               </Box>
             ))}
           </CardContent>

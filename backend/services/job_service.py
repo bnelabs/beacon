@@ -83,6 +83,7 @@ class JobService:
         job_id: int,
         status: str,
         progress: Optional[float] = None,
+        current_step: Optional[str] = None,
         error_message: Optional[str] = None,
         user_friendly_error: Optional[str] = None,
         result: Optional[dict] = None
@@ -95,6 +96,8 @@ class JobService:
         db_job.status = status
         if progress is not None:
             db_job.progress = progress
+        if current_step is not None:
+            db_job.current_step = current_step
         if error_message:
             db_job.error_message = error_message
         if user_friendly_error:

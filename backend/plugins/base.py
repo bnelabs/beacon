@@ -49,6 +49,56 @@ class DataSourcePlugin(ABC):
         """
         pass
 
+    def test_item(self, item_identifier: str) -> Dict[str, Any]:
+        """
+        Test if a specific data item (indicator/symbol) is available.
+
+        This method attempts to fetch a small sample of data to verify the item exists
+        and is accessible. Default implementation uses fetch_indicator_data with a
+        short date range. Override for custom behavior.
+
+        Args:
+            item_identifier: The indicator ID, symbol, or endpoint to test
+
+        Returns:
+            Dictionary with keys:
+            - success (bool): Whether the item is accessible
+            - message (str): User-friendly message
+            - details (dict, optional): Additional information (e.g., data points found)
+        """
+        try:
+            # Try to fetch last 7 days of data as a test
+            from datetime import timedelta
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=7)
+
+            # Try indicator data first (most common)
+            df = self.fetch_indicator_data(item_identifier, start_date, end_date)
+
+            if df is not None and not df.empty:
+                return {
+                    "success": True,
+                    "message": f"Successfully accessed {item_identifier}. Found {len(df)} data points.",
+                    "details": {
+                        "data_points": len(df),
+                        "date_range": f"{start_date.date()} to {end_date.date()}"
+                    }
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": f"No data found for {item_identifier}. It may not exist or have no recent data.",
+                    "details": {"error": "Empty dataset"}
+                }
+
+        except Exception as e:
+            logger.error(f"Error testing item {item_identifier}: {e}")
+            return {
+                "success": False,
+                "message": f"Failed to access {item_identifier}: {str(e)}",
+                "details": {"error": str(e)}
+            }
+
     @abstractmethod
     def fetch_asset_data(
         self,
