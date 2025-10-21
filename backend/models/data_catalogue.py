@@ -1,9 +1,10 @@
 """Data catalogue models for organizing financial data sources."""
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, Text, ForeignKey, Enum
-from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
+from sqlalchemy import Integer, String, Boolean, DateTime, JSON, Text, ForeignKey, Enum as SQLEnum, func
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 import enum
+from datetime import datetime
+from typing import List, Optional, Dict, Any
 
 from database import Base
 
@@ -49,44 +50,44 @@ class DataCatalogueItem(Base):
 
     __tablename__ = "data_catalogue"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
 
     # Identification
-    code = Column(String(100), unique=True, nullable=False, index=True)
-    name = Column(String(255), nullable=False)
-    description = Column(Text)
+    code: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
 
     # Classification
-    category = Column(Enum(DataCategory), nullable=False, index=True)
-    region = Column(Enum(DataRegion), nullable=False, index=True)
-    risk_types = Column(JSON, default=[])  # List of RiskType values
+    category: Mapped[DataCategory] = mapped_column(SQLEnum(DataCategory), nullable=False, index=True)
+    region: Mapped[DataRegion] = mapped_column(SQLEnum(DataRegion), nullable=False, index=True)
+    risk_types: Mapped[List[str]] = mapped_column(JSON, default=[])  # List of RiskType values
 
     # Data source information
-    data_source_id = Column(Integer, ForeignKey("data_sources.id"), nullable=False)
-    data_source = relationship("DataSource")
+    data_source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"), nullable=False)
+    data_source: Mapped["DataSource"] = relationship(back_populates="catalogue_items")
 
     # API/Query information
-    endpoint = Column(String(500))  # API endpoint or query string
-    parameters = Column(JSON, default={})  # Default parameters
-    frequency = Column(String(50))  # daily, weekly, monthly, quarterly, annual
+    endpoint: Mapped[Optional[str]] = mapped_column(String(500))  # API endpoint or query string
+    parameters: Mapped[Dict[str, Any]] = mapped_column(JSON, default={})  # Default parameters
+    frequency: Mapped[Optional[str]] = mapped_column(String(50))  # daily, weekly, monthly, quarterly, annual
 
     # Metadata
-    granularity = Column(String(50))  # micro, meso, macro
-    unit = Column(String(100))  # USD, EUR, percentage, basis_points, etc.
+    granularity: Mapped[Optional[str]] = mapped_column(String(50))  # micro, meso, macro
+    unit: Mapped[Optional[str]] = mapped_column(String(100))  # USD, EUR, percentage, basis_points, etc.
 
     # Status
-    enabled = Column(Boolean, default=True)
-    default_selected = Column(Boolean, default=False)  # Included by default
-    priority = Column(Integer, default=0)  # Higher = more important
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_selected: Mapped[bool] = mapped_column(Boolean, default=False)  # Included by default
+    priority: Mapped[int] = mapped_column(Integer, default=0)  # Higher = more important
 
     # Relationships and dependencies
-    dependencies = Column(JSON, default=[])  # IDs of required catalogue items
-    tags = Column(JSON, default=[])  # Additional searchable tags
+    dependencies: Mapped[List[int]] = mapped_column(JSON, default=[])  # IDs of required catalogue items
+    tags: Mapped[List[str]] = mapped_column(JSON, default=[])  # Additional searchable tags
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    last_data_update = Column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+    last_data_update: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     def __repr__(self):
         return f"<DataCatalogueItem {self.code}: {self.name}>"

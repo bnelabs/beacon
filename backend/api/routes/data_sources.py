@@ -15,6 +15,8 @@ from schemas.data_source import (
 )
 from services.data_source_service import DataSourceService
 from services.error_logger import ErrorLogger
+from auth import fastapi_users, current_active_user, current_active_superuser
+from models.user import User
 
 router = APIRouter()
 
@@ -23,7 +25,8 @@ router = APIRouter()
 @router.get("/", response_model=List[DataSourceResponse])
 async def list_data_sources(
     enabled_only: bool = False,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user)
 ):
     """
     List all configured data sources.
@@ -47,7 +50,8 @@ async def list_data_sources(
 @router.get("/{data_source_id}", response_model=DataSourceResponse)
 async def get_data_source(
     data_source_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user)
 ):
     """
     Get details of a specific data source.
@@ -81,7 +85,8 @@ async def get_data_source(
 @router.post("/", response_model=DataSourceResponse, status_code=status.HTTP_201_CREATED)
 async def create_data_source(
     data_source: DataSourceCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Create a new data source.
@@ -113,7 +118,8 @@ async def create_data_source(
 async def update_data_source(
     data_source_id: int,
     data_source_update: DataSourceUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Update an existing data source.
@@ -147,7 +153,8 @@ async def update_data_source(
 @router.delete("/{data_source_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_data_source(
     data_source_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Delete a data source.
@@ -180,22 +187,6 @@ async def delete_data_source(
 @router.post("/test", response_model=DataSourceTestResponse)
 async def test_data_source(
     test_request: DataSourceTestRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user)
 ):
-    """
-    Test a data source configuration before saving it.
-
-    **For non-technical users:** Check if your data feed settings are correct
-    before you save them. This will verify your API key and connection work.
-    """
-    try:
-        service = DataSourceService(db)
-        return service.test_data_source(test_request)
-    except Exception as e:
-        error_logger = ErrorLogger(db)
-        error_log = error_logger.log_error(e, context="testing data source", endpoint="/api/v1/data-sources/test", method="POST", request_data=test_request.dict())
-        return DataSourceTestResponse(
-            success=False,
-            message=error_log.user_message,
-            details={"technical_error": error_log.technical_message}
-        )

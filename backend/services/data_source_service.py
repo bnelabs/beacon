@@ -15,11 +15,14 @@ from schemas.data_source import (
 logger = logging.getLogger(__name__)
 
 
+from services.secrets_service import SecretsService
+
 class DataSourceService:
     """Service for managing data sources."""
 
     def __init__(self, db: Session):
         self.db = db
+        self.secrets_service = SecretsService()
 
     def list_data_sources(self, enabled_only: bool = False) -> List[DataSource]:
         """List all data sources."""
@@ -30,7 +33,14 @@ class DataSourceService:
 
     def get_data_source(self, data_source_id: int) -> Optional[DataSource]:
         """Get a specific data source by ID."""
-        return self.db.query(DataSource).filter(DataSource.id == data_source_id).first()
+        db_data_source = self.db.query(DataSource).filter(DataSource.id == data_source_id).first()
+        if db_data_source and db_data_source.config.get("api_key_vault_ref"):
+            try:
+                api_key = self.secrets_service.get_secret(db_data_source.config["api_key_vault_ref"], "api_key")
+                db_data_source.config["api_key"] = api_key
+            except Exception as e:
+                logger.error(f"Failed to retrieve secret for data source {db_data_source.id}: {e}")
+        return db_data_source
 
     def create_data_source(self, data_source: DataSourceCreate) -> DataSource:
         """Create a new data source."""
@@ -44,10 +54,17 @@ class DataSourceService:
         if data_source.plugin_type not in valid_plugins:
             raise ValueError(f"Invalid plugin type. Must be one of: {', '.join(valid_plugins)}")
 
+        config = data_source.config.copy()
+        if "api_key" in config:
+            api_key = config.pop("api_key")
+            secret_path = f"beacon/datasource/{data_source.name}/api_key"
+            self.secrets_service.set_secret(secret_path, {"api_key": api_key})
+            config["api_key_vault_ref"] = secret_path
+
         db_data_source = DataSource(
             name=data_source.name,
             plugin_type=data_source.plugin_type,
-            config=data_source.config,
+            config=config,
             description=data_source.description,
             enabled=data_source.enabled,
             status="active"
@@ -81,7 +98,13 @@ class DataSourceService:
         if update.plugin_type is not None:
             db_data_source.plugin_type = update.plugin_type
         if update.config is not None:
-            db_data_source.config = update.config
+            config = update.config.copy()
+            if "api_key" in config:
+                api_key = config.pop("api_key")
+                secret_path = f"beacon/datasource/{db_data_source.name}/api_key"
+                self.secrets_service.set_secret(secret_path, {"api_key": api_key})
+                config["api_key_vault_ref"] = secret_path
+            db_data_source.config = config
         if update.description is not None:
             db_data_source.description = update.description
         if update.enabled is not None:

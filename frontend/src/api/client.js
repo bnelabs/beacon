@@ -83,6 +83,26 @@ export const api = {
     updateTraining: (data) => apiClient.put('/config/training', data),
   },
 
+  // Configurations
+  configurations: {
+    list: () => apiClient.get('/configurations'),
+    create: (data) => apiClient.post('/configurations', data),
+    update: (id, data) => apiClient.put(`/configurations/${id}`, data),
+  },
+
+  // Models
+  models: {
+    list: () => apiClient.get('/models'),
+    promote: (id) => apiClient.post(`/models/versions/${id}/promote`),
+  },
+
+  // Models
+  models: {
+    list: () => apiClient.get('/models'),
+    promote: (id) => apiClient.post(`/models/versions/${id}/promote`),
+    getDriftReport: (id) => apiClient.get(`/models/versions/${id}/drift_report`),
+  },
+
   // System
   system: {
     status: () => apiClient.get('/system/status'),

@@ -12,13 +12,15 @@ from schemas.config import (
 )
 from services.config_service import ConfigService
 from services.error_logger import ErrorLogger
+from auth import fastapi_users, current_active_user, current_active_superuser
+from models.user import User
 
 router = APIRouter()
 
 
 @router.get("", response_model=SystemConfigResponse)
 @router.get("/", response_model=SystemConfigResponse)
-async def get_system_config(db: Session = Depends(get_db)):
+async def get_system_config(db: Session = Depends(get_db), user: User = Depends(current_active_user)):
     """
     Get current system configuration.
 
@@ -40,7 +42,8 @@ async def get_system_config(db: Session = Depends(get_db)):
 @router.put("/model", response_model=SystemConfigResponse)
 async def update_model_params(
     params: ModelParamsUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Update model parameters.
@@ -74,7 +77,8 @@ async def update_model_params(
 @router.put("/data", response_model=SystemConfigResponse)
 async def update_data_params(
     params: DataParamsUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Update data collection parameters.
@@ -106,7 +110,8 @@ async def update_data_params(
 @router.put("/training", response_model=SystemConfigResponse)
 async def update_training_params(
     params: TrainingParamsUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Update training parameters.

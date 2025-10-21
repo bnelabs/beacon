@@ -63,29 +63,17 @@ class DataCollector:
             logger.error(f"Plugin type '{data_source.plugin_type}' not found")
             return pd.DataFrame()
 
-        # Prepare plugin config - inject API keys from environment if not in config
+        # Prepare plugin config - retrieve secret from vault if necessary
         config = data_source.config or {}
-
-        # Inject FRED API key from environment if not in config
-        if data_source.plugin_type == 'fred' and not config.get('api_key'):
-            fred_key = os.getenv('FRED_API_KEY')
-            if fred_key:
-                config['api_key'] = fred_key
-                logger.info("Injected FRED API key from environment")
-
-        # Inject Alpha Vantage API key from environment if not in config
-        if data_source.plugin_type == 'alpha_vantage' and not config.get('api_key'):
-            av_key = os.getenv('ALPHA_VANTAGE_API_KEY')
-            if av_key:
-                config['api_key'] = av_key
-                logger.info("Injected Alpha Vantage API key from environment")
-
-        # Inject SEC API key from environment if not in config
-        if data_source.plugin_type == 'sec_edgar' and not config.get('api_key'):
-            sec_key = os.getenv('SEC_API_KEY')
-            if sec_key:
-                config['api_key'] = sec_key
-                logger.info("Injected SEC API key from environment")
+        if "api_key_vault_ref" in config:
+            from services.secrets_service import SecretsService
+            secrets_service = SecretsService()
+            try:
+                api_key = secrets_service.get_secret(config["api_key_vault_ref"], "api_key")
+                config["api_key"] = api_key
+            except Exception as e:
+                logger.error(f"Failed to retrieve secret for data source {data_source.id}: {e}")
+                return pd.DataFrame()
 
         # Instantiate plugin with config
         plugin = plugin_class(config)

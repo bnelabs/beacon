@@ -21,34 +21,22 @@ logger = logging.getLogger(__name__)
 CONFIG_PATH = os.getenv("CONFIG_PATH", "/app/configs/config.yaml")
 
 
+from services.configuration_service import ConfigurationService
+
 class ConfigService:
     """Service for managing system configuration."""
 
     def __init__(self, db: Session):
         self.db = db
-
-    def _load_config(self) -> dict:
-        """Load configuration from YAML file."""
-        try:
-            with open(CONFIG_PATH, "r") as f:
-                return yaml.safe_load(f)
-        except Exception as e:
-            logger.error(f"Failed to load config: {e}")
-            raise
-
-    def _save_config(self, config: dict):
-        """Save configuration to YAML file."""
-        try:
-            with open(CONFIG_PATH, "w") as f:
-                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-            logger.info("Configuration saved successfully")
-        except Exception as e:
-            logger.error(f"Failed to save config: {e}")
-            raise
+        self.config_service = ConfigurationService(db)
 
     def get_system_config(self) -> SystemConfigResponse:
         """Get current system configuration."""
-        config = self._load_config()
+        config = self.config_service.get_active_configuration()
+        if not config:
+            raise ValueError("No active configuration found in the database.")
+
+        config_data = config.config_data
 
         # Get system information
         memory = psutil.virtual_memory()
@@ -58,23 +46,23 @@ class ConfigService:
 
         return SystemConfigResponse(
             model_params={
-                "hidden_dim": config.get("model", {}).get("hidden_dim", 128),
-                "num_heads": config.get("model", {}).get("num_heads", 8),
-                "num_layers": config.get("model", {}).get("num_layers", 3),
-                "dropout": config.get("model", {}).get("dropout", 0.3),
-                "learning_rate": config.get("model", {}).get("learning_rate", 0.001)
+                "hidden_dim": config_data.get("model", {}).get("hidden_dim", 128),
+                "num_heads": config_data.get("model", {}).get("num_heads", 8),
+                "num_layers": config_data.get("model", {}).get("num_layers", 3),
+                "dropout": config_data.get("model", {}).get("dropout", 0.3),
+                "learning_rate": config_data.get("model", {}).get("learning_rate", 0.001)
             },
             data_params={
-                "start_date_days": config.get("data", {}).get("start_date_days", 7300),
-                "look_back": config.get("data", {}).get("look_back", 30),
-                "correlation_threshold": config.get("data", {}).get("correlation_threshold", 0.5),
-                "api_rate_limit_seconds": config.get("data", {}).get("api_rate_limit_seconds", 2.0)
+                "start_date_days": config_data.get("data", {}).get("start_date_days", 7300),
+                "look_back": config_data.get("data", {}).get("look_back", 30),
+                "correlation_threshold": config_data.get("data", {}).get("correlation_threshold", 0.5),
+                "api_rate_limit_seconds": config_data.get("data", {}).get("api_rate_limit_seconds", 2.0)
             },
             training_params={
-                "batch_size": config.get("training", {}).get("batch_size", 32),
-                "num_epochs": config.get("training", {}).get("num_epochs", 100),
-                "early_stopping_patience": config.get("training", {}).get("early_stopping_patience", 10),
-                "validation_split": config.get("training", {}).get("validation_split", 0.2)
+                "batch_size": config_data.get("training", {}).get("batch_size", 32),
+                "num_epochs": config_data.get("training", {}).get("num_epochs", 100),
+                "early_stopping_patience": config_data.get("training", {}).get("early_stopping_patience", 10),
+                "validation_split": config_data.get("training", {}).get("validation_split", 0.2)
             },
             system_info={
                 "cpu_cores": cpu_count,

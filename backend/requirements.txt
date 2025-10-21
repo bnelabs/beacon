@@ -45,4 +45,7 @@ psutil==5.9.8
 # Testing
 pytest==8.3.4
 pytest-cov==6.0.0
-httpx==0.26.0
+httpx==0.26.0hvac
+evidently
+fastapi-users[sqlalchemy]
+shap

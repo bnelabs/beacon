@@ -7,12 +7,14 @@ import torch
 
 from database import get_db
 from services.error_logger import ErrorLogger
+from auth import fastapi_users, current_active_user
+from models.user import User
 
 router = APIRouter()
 
 
 @router.get("/status")
-async def get_system_status(db: Session = Depends(get_db)):
+async def get_system_status(db: Session = Depends(get_db), user: User = Depends(current_active_user)):
     """
     Get system health and resource usage.
 
@@ -90,7 +92,7 @@ async def get_system_status(db: Session = Depends(get_db)):
 
 
 @router.get("/resources/recommendations")
-async def get_resource_recommendations(db: Session = Depends(get_db)):
+async def get_resource_recommendations(db: Session = Depends(get_db), user: User = Depends(current_active_user)):
     """
     Get resource usage recommendations.
 

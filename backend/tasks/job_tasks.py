@@ -68,6 +68,79 @@ class JobTask(Task):
         finally:
             db.close()
 
+@celery_app.task(base=JobTask, bind=True, name="run_explanation")
+def run_explanation(self, job_id: int, parameters: dict):
+    """Run SHAP explanation for a specific prediction."""
+    db = SessionLocal()
+    try:
+        service = JobService(db)
+        service.update_job_status(job_id, status="running", progress=0.0)
+
+        model_version_id = parameters.get("model_version_id")
+        prediction_id = parameters.get("prediction_id")
+
+        from models.model import ModelVersion
+        import torch
+        import shap
+        import pandas as pd
+
+        # 1. Load model
+        model_version = db.query(ModelVersion).filter(ModelVersion.id == model_version_id).first()
+        if not model_version:
+            raise ValueError(f"Model version {model_version_id} not found.")
+
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model = torch.load(model_version.model_path, map_location=device)
+        model.eval()
+
+        # 2. Load data
+        data_job_id = model_version.job.id
+        data_job_dir = f"/app/data/jobs/{data_job_id}"
+        timeseries_df = pd.read_parquet(f"{data_job_dir}/timeseries.parquet")
+
+        # 3. Get the specific prediction instance
+        # This is a placeholder, as the prediction data format is not finalized
+        background_data = timeseries_df.sample(100)  # Background for SHAP
+        instance_to_explain = timeseries_df.iloc[[prediction_id]]
+
+        # 4. Create explainer and generate SHAP values
+        explainer = shap.KernelExplainer(model.predict, background_data)
+        shap_values = explainer.shap_values(instance_to_explain)
+
+        # 5. Save SHAP values
+        output_dir = f"/app/data/jobs/{job_id}"
+        os.makedirs(output_dir, exist_ok=True)
+        shap_values_path = f"{output_dir}/shap_values.json"
+        with open(shap_values_path, "w") as f:
+            json.dump(shap_values.tolist(), f)
+
+        result = {
+            "status": "completed",
+            "shap_values_path": shap_values_path,
+        }
+
+        service.update_job_status(
+            job_id,
+            status="completed",
+            progress=100.0,
+            result=result
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Explanation failed for job {job_id}: {e}")
+        user_friendly = translate_error(e, context="generating explanation")
+        service.update_job_status(
+            job_id,
+            status="failed",
+            error_message=str(e),
+            user_friendly_error=error_details_to_json(user_friendly)
+        )
+        raise
+    finally:
+        db.close()
+
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         """Handle task failure."""
         job_id = args[0] if args else None
@@ -221,26 +294,26 @@ def run_training(self, job_id: int, parameters: dict):
         output_dir = f"/app/data/jobs/{job_id}"
         os.makedirs(output_dir, exist_ok=True)
 
-        config = parameters.get('config', {'model': 'HGT'})
-        orchestrator = EngineOrchestrator(f"job_{job_id}", output_dir, config)
+        from services.configuration_service import ConfigurationService
+        config_service = ConfigurationService(db)
+        config = config_service.get_active_configuration()
+        if not config:
+            raise ValueError("No active configuration found in the database.")
+
+        # Link job to configuration
+        from models.configuration import JobConfiguration
+        job_config = JobConfiguration(job_id=job_id, configuration_id=config.id)
+        db.add(job_config)
+        db.commit()
+
+        orchestrator = EngineOrchestrator(f"job_{job_id}", output_dir, config.config_data)
 
         # For training, we need existing data package
         # Check if user provided a data_job_id to use existing collected data
         data_job_id = parameters.get("data_job_id")
 
         if not data_job_id:
-            # Try to find the most recent completed data collection job
-            from models.job import Job, JobType
-            recent_data_job = db.query(Job).filter(
-                Job.job_type == JobType.DATA_COLLECTION,
-                Job.status == "completed"
-            ).order_by(Job.completed_at.desc()).first()
-
-            if recent_data_job:
-                data_job_id = recent_data_job.id
-                logger.info(f"Using most recent data collection job: {data_job_id}")
-            else:
-                raise ValueError("No completed data collection job found. Run data collection first.")
+            raise ValueError("A data_job_id must be provided to run a training job.")
 
         self.update_progress(job_id, 20.0)
 
@@ -305,6 +378,25 @@ def run_training(self, job_id: int, parameters: dict):
 
         self.update_progress(job_id, 60.0)
 
+        from models.experiment import Experiment, Run
+        experiment_name = parameters.get("experiment_name", "Default Experiment")
+        experiment = db.query(Experiment).filter(Experiment.name == experiment_name).first()
+        if not experiment:
+            experiment = Experiment(name=experiment_name, description="Default experiment")
+            db.add(experiment)
+            db.commit()
+            db.refresh(experiment)
+
+        run = Run(
+            experiment_id=experiment.id,
+            job_id=job_id,
+            configuration_id=config.id,
+            parameters=parameters,
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
         # REAL MODEL TRAINING WITH MULTI-SCALE SUPPORT
         logger.info("Starting REAL multi-scale model training...")
 
@@ -319,14 +411,18 @@ def run_training(self, job_id: int, parameters: dict):
             from modules.engine.trainer import ModelTrainer as TrainerClass
 
         # Get model configuration
-        model_type = config.get('model', 'temporal_attention').lower()
+        model_type = config.config_data.get('model', 'temporal_attention').lower()
         logger.info(f"Training {model_type.upper()} model")
 
         # Create trainer
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         logger.info(f"Using device: {device}")
 
-        trainer = TrainerClass(model_type=model_type, device=device, config=config)
+        def training_callback(metrics):
+            run.metrics = metrics
+            db.commit()
+
+        trainer = TrainerClass(model_type=model_type, device=device, config=config.config_data, training_callback=training_callback)
 
         # Split validation from train (80/20)
         train_size = int(len(train_df) * 0.8)
@@ -346,6 +442,10 @@ def run_training(self, job_id: int, parameters: dict):
             test_df=test_df,
             output_dir=output_dir
         )
+
+        run.status = "completed"
+        run.completed_at = datetime.utcnow()
+        db.commit()
 
         self.update_progress(job_id, 95.0)
 
@@ -397,7 +497,26 @@ def run_training(self, job_id: int, parameters: dict):
 
         # Add per-source metrics if available
         if hasattr(training_metrics, 'per_source_metrics'):
-            result["per_source_metrics"] = training_metrics.per_source_metrics
+        # Create Model and ModelVersion
+        from models.model import Model, ModelVersion
+        model_name = config.config_data.get("model", {}).get("name", "LiquidityForecaster")
+        model = db.query(Model).filter(Model.name == model_name).first()
+        if not model:
+            model = Model(name=model_name, description="Liquidity forecasting model")
+            db.add(model)
+            db.commit()
+            db.refresh(model)
+
+        model_version = ModelVersion(
+            model_id=model.id,
+            job_id=job_id,
+            configuration_id=config.id,
+            version=model.versions.count() + 1 if model.versions else 1,
+            metrics=result,
+            model_path=result["model_path"],
+        )
+        db.add(model_version)
+        db.commit()
 
         service.update_job_status(
             job_id,
@@ -438,22 +557,42 @@ def run_prediction(self, job_id: int, parameters: dict):
     liquidity risk for the next 7 days.
     """
     db = SessionLocal()
-
     try:
         service = JobService(db)
         service.update_job_status(job_id, status="running", progress=0.0)
 
-        logger.info(f"Starting prediction for job {job_id}")
+        model_version_id = parameters.get("model_version_id")
+        data_job_id = parameters.get("data_job_id")
 
-        # TODO: Implement prediction logic
-        # This will load the trained model and make predictions
+        from models.model import ModelVersion
+        import torch
+        import pandas as pd
 
-        self.update_progress(job_id, 50.0)
+        # 1. Load model
+        model_version = db.query(ModelVersion).filter(ModelVersion.id == model_version_id).first()
+        if not model_version:
+            raise ValueError(f"Model version {model_version_id} not found.")
+
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model = torch.load(model_version.model_path, map_location=device)
+        model.eval()
+
+        # 2. Load data
+        data_job_dir = f"/app/data/jobs/{data_job_id}"
+        timeseries_df = pd.read_parquet(f"{data_job_dir}/timeseries.parquet")
+
+        # 3. Run inference
+        predictions = model.predict(timeseries_df)
+
+        # 4. Save predictions
+        output_dir = f"/app/data/jobs/{job_id}"
+        os.makedirs(output_dir, exist_ok=True)
+        predictions_path = f"{output_dir}/predictions.csv"
+        predictions.to_csv(predictions_path, index=False)
 
         result = {
-            "status": "predictions generated",
-            "message": "Prediction functionality to be implemented",
-            "completed_at": datetime.utcnow().isoformat()
+            "status": "completed",
+            "predictions_path": predictions_path,
         }
 
         service.update_job_status(
@@ -463,11 +602,10 @@ def run_prediction(self, job_id: int, parameters: dict):
             result=result
         )
 
-        logger.info(f"Prediction completed for job {job_id}")
         return result
 
     except Exception as e:
-        logger.error(f"Prediction failed for job {job_id}: {e}\n{traceback.format_exc()}")
+        logger.error(f"Prediction failed for job {job_id}: {e}")
         user_friendly = translate_error(e, context="generating predictions")
         service.update_job_status(
             job_id,
@@ -543,12 +681,64 @@ def run_backtest(self, job_id: int, parameters: dict):
     except Exception as e:
         logger.error(f"Backtest failed for job {job_id}: {e}\n{traceback.format_exc()}")
         user_friendly = translate_error(e, context="running backtest")
-        service.update_job_status(
-            job_id,
-            status="failed",
-            error_message=str(e),
-            user_friendly_error=user_friendly
-        )
-        raise
+from celery.schedules import crontab
+
+@celery_app.on_after_configure.connect
+def setup_periodic_tasks(sender, **kwargs):
+    # Run daily at midnight
+    sender.add_periodic_task(
+        crontab(hour=0, minute=0),
+        monitor_production_model.s(),
+    )
+
+@celery_app.task(name="monitor_production_model")
+def monitor_production_model():
+    """Periodically monitor the production model for data drift and performance degradation."""
+    db = SessionLocal()
+    try:
+        from models.model import ModelVersion
+        from evidently.report import Report
+        from evidently.metric_preset import DataDriftPreset
+        import pandas as pd
+
+        # 1. Get the production model
+        prod_model = db.query(ModelVersion).filter(ModelVersion.stage == "Production").first()
+        if not prod_model:
+            logger.info("No production model to monitor.")
+            return
+
+        # 2. Get the training data
+        training_job = prod_model.job
+        training_data_path = f"/app/data/jobs/{training_job.id}/timeseries.parquet"
+        reference_data = pd.read_parquet(training_data_path)
+
+        # 3. Get the latest prediction data (assuming predictions are stored somewhere)
+        # This part is a placeholder as prediction data storage is not fully implemented
+        # In a real scenario, you would fetch the latest data that the model has predicted on
+        # For now, we will simulate new data by taking a recent slice of the training data
+        current_data = reference_data.tail(1000)
+
+        # 4. Generate data drift report
+        report = Report(metrics=[DataDriftPreset()])
+        report.run(reference_data=reference_data, current_data=current_data)
+        drift_report = report.as_dict()
+
+        # 5. Check for drift and store report
+        prod_model.metrics["drift_report"] = drift_report
+        db.commit()
+
+        if drift_report["data_drift"]["data"]["metrics"]["dataset_drift"]:
+            logger.warning(f"Data drift detected for model {prod_model.model.name} v{prod_model.version}")
+            # Create an alert (e.g., update model status, send notification)
+            prod_model.status = "Drift Detected"
+            db.commit()
+
+            # Trigger retraining pipeline
+            from services.pipeline_service import PipelineService
+            pipeline_service = PipelineService(db)
+            pipeline_service.trigger_retraining_pipeline(prod_model.id)
+
+    except Exception as e:
+        logger.error(f"Failed to monitor production model: {e}")
     finally:
         db.close()

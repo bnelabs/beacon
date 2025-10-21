@@ -3,11 +3,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from database import get_db
 from models.error_log import ErrorLog
 from services.error_logger import ErrorLogger
+from auth import fastapi_users, current_active_user, current_active_superuser
+from models.user import User
 
 router = APIRouter()
 
@@ -36,8 +38,7 @@ class ErrorLogResponse(BaseModel):
     created_at: str
     last_occurred_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ErrorStatsResponse(BaseModel):
@@ -58,7 +59,8 @@ async def list_errors(
     severity: Optional[str] = None,
     category: Optional[str] = None,
     resolved: Optional[bool] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user)
 ):
     """
     List error logs with filtering.
@@ -94,7 +96,7 @@ async def list_errors(
 
 
 @router.get("/statistics", response_model=ErrorStatsResponse)
-async def get_error_statistics(db: Session = Depends(get_db)):
+async def get_error_statistics(db: Session = Depends(get_db), user: User = Depends(current_active_user)):
     """
     Get error statistics and analytics.
 
@@ -109,7 +111,8 @@ async def get_error_statistics(db: Session = Depends(get_db)):
 @router.get("/{error_id}", response_model=ErrorLogResponse)
 async def get_error_detail(
     error_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user)
 ):
     """
     Get detailed information about a specific error.
@@ -144,7 +147,8 @@ async def get_error_detail(
 @router.post("/report")
 async def report_client_error(
     error_report: ErrorReportRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user)
 ):
     """
     Report a client-side error.
@@ -191,7 +195,8 @@ async def report_client_error(
 async def resolve_error(
     error_id: int,
     resolution_notes: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Mark an error as resolved.
@@ -217,7 +222,8 @@ async def resolve_error(
 @router.delete("/{error_id}")
 async def delete_error_log(
     error_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Delete an error log entry.

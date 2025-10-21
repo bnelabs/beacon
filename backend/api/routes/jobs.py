@@ -13,6 +13,8 @@ from schemas.job import (
 )
 from services.job_service import JobService
 from services.error_logger import ErrorLogger
+from auth import fastapi_users, current_active_user, current_active_superuser
+from models.user import User
 
 router = APIRouter()
 
@@ -24,7 +26,8 @@ async def list_jobs(
     status_filter: str = None,
     limit: int = 50,
     offset: int = 0,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user)
 ):
     """
     List background jobs.
@@ -53,7 +56,8 @@ async def list_jobs(
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(
     job_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user)
 ):
     """
     Get details of a specific job.
@@ -88,7 +92,8 @@ async def get_job(
 @router.post("/", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
 async def create_job(
     job: JobCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Start a new background job.
@@ -121,10 +126,11 @@ async def create_job(
         )
 
 
-@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def cancel_job(
+@router.post("/{job_id}/cancel", status_code=status.HTTP_200_OK)
+async def cancel_job_endpoint(
     job_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Cancel a running job.

@@ -15,6 +15,8 @@ from schemas.asset import (
 )
 from services.asset_service import AssetService
 from services.error_logger import ErrorLogger
+from auth import fastapi_users, current_active_user, current_active_superuser
+from models.user import User
 
 router = APIRouter()
 
@@ -26,7 +28,8 @@ async def list_assets(
     asset_type: str = None,
     sector: str = None,
     region: str = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user)
 ):
     """
     List all configured assets.
@@ -54,7 +57,8 @@ async def list_assets(
 @router.get("/{asset_id}", response_model=AssetResponse)
 async def get_asset(
     asset_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user)
 ):
     """
     Get details of a specific asset.
@@ -88,7 +92,8 @@ async def get_asset(
 @router.post("/", response_model=AssetResponse, status_code=status.HTTP_201_CREATED)
 async def create_asset(
     asset: AssetCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Add a new asset to monitor.
@@ -118,7 +123,8 @@ async def create_asset(
 @router.post("/bulk", response_model=AssetBulkResponse)
 async def create_assets_bulk(
     bulk_create: AssetBulkCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Add multiple assets at once.
@@ -142,7 +148,8 @@ async def create_assets_bulk(
 async def update_asset(
     asset_id: int,
     asset_update: AssetUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Update an existing asset.
@@ -176,7 +183,8 @@ async def update_asset(
 @router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_asset(
     asset_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_superuser)
 ):
     """
     Remove an asset from monitoring.

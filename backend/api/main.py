@@ -12,7 +12,16 @@ from contextlib import asynccontextmanager
 import logging
 import os
 
-from .routes import data_sources, assets, jobs, config, system, errors, catalogue, pipeline, results, explainability
+from .routes import data_sources, assets, jobs, config, system, errors, catalogue, pipeline, results, explainability, scenarios, configurations, models
+
+app.include_router(models.router, prefix="/api/v1/models", tags=["Models"])
+
+
+app.include_router(configurations.router, prefix="/api/v1/configurations", tags=["Configurations"])
+
+
+app.include_router(scenarios.router, prefix="/api/v1/scenarios", tags=["Scenarios"])
+
 from database import init_db, close_db
 
 logger = logging.getLogger(__name__)
@@ -89,7 +98,14 @@ app.include_router(assets.router, prefix="/api/v1/assets", tags=["Assets"])
 app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["Jobs"])
 app.include_router(config.router, prefix="/api/v1/config", tags=["Configuration"])
 app.include_router(system.router, prefix="/api/v1/system", tags=["System"])
-app.include_router(errors.router, prefix="/api/v1/errors", tags=["Error Logging"])
+from auth import fastapi_users
+
+app.include_router(fastapi_users.get_auth_router(jwt_authentication), prefix="/auth/jwt", tags=["auth"])
+app.include_router(fastapi_users.get_register_router(), prefix="/auth", tags=["auth"])
+app.include_router(fastapi_users.get_reset_password_router(), prefix="/auth", tags=["auth"])
+app.include_router(fastapi_users.get_verify_router(), prefix="/auth", tags=["auth"])
+app.include_router(fastapi_users.get_users_router(), prefix="/users", tags=["users"])
+
 
 
 @app.get("/")

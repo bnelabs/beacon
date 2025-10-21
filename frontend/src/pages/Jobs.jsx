@@ -91,11 +91,21 @@ export default function Jobs() {
     createJobMutation.mutate(newJob)
   }
 
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [jobToCancel, setJobToCancel] = useState(null);
+
   const handleCancelJob = (id) => {
-    if (window.confirm('Are you sure you want to cancel this job?')) {
-      cancelJobMutation.mutate(id)
+    setJobToCancel(id);
+    setCancelDialogOpen(true);
+  };
+
+  const confirmCancelJob = () => {
+    if (jobToCancel) {
+      cancelJobMutation.mutate(jobToCancel);
     }
-  }
+    setCancelDialogOpen(false);
+    setJobToCancel(null);
+  };
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -368,6 +378,18 @@ export default function Jobs() {
         </CardContent>
       </Card>
 
+      {/* Cancel Job Dialog */}
+      <Dialog open={cancelDialogOpen} onClose={() => setCancelDialogOpen(false)}>
+        <DialogTitle>Cancel Job</DialogTitle>
+        <DialogContent>
+          <Typography>Are you sure you want to cancel job #{jobToCancel}?</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCancelDialogOpen(false)}>Back</Button>
+          <Button onClick={confirmCancelJob} color="error">Cancel Job</Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Start Job Dialog */}
       <Dialog open={startDialogOpen} onClose={() => setStartDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Start New Job</DialogTitle>
@@ -402,8 +424,33 @@ export default function Jobs() {
               )}
             </Alert>
 
+  const { data: completedDataJobs } = useQuery(
+    'completedDataJobs',
+    () => api.jobs.list({ job_type: 'data_collection', status: 'completed' }).then(res => res.data),
+    {
+      enabled: startDialogOpen && newJob.job_type === 'training',
+    }
+  );
+
             {newJob.job_type === 'training' && (
               <>
+                <FormControl fullWidth>
+                  <InputLabel>Data Source Job</InputLabel>
+                  <Select
+                    value={newJob.parameters.data_job_id || ''}
+                    label="Data Source Job"
+                    onChange={(e) => setNewJob({
+                      ...newJob,
+                      parameters: { ...newJob.parameters, data_job_id: e.target.value }
+                    })}
+                  >
+                    {completedDataJobs && completedDataJobs.map(job => (
+                      <MenuItem key={job.id} value={job.id}>
+                        Job #{job.id} - {new Date(job.completed_at).toLocaleString()}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
                 <TextField
                   label="Training Start Date"
                   type="date"

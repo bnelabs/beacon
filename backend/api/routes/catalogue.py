@@ -13,6 +13,8 @@ from schemas.catalogue import (
     BulkCatalogueSelectRequest
 )
 from services.error_logger import ErrorLogger
+from auth import fastapi_users, current_active_user
+from models.user import User
 
 router = APIRouter()
 
@@ -26,7 +28,8 @@ async def list_catalogue_items(
     search: Optional[str] = Query(None),
     enabled_only: bool = Query(True),
     default_only: bool = Query(False),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user)
 ):
     """
     List available data catalogue items with filtering.
@@ -86,7 +89,7 @@ async def list_catalogue_items(
 
 
 @router.get("/summary", response_model=CatalogueSummaryResponse)
-async def get_catalogue_summary(db: Session = Depends(get_db)):
+async def get_catalogue_summary(db: Session = Depends(get_db), user: User = Depends(current_active_user)):
     """
     Get summary statistics for the data catalogue.
 
@@ -146,7 +149,7 @@ async def get_catalogue_summary(db: Session = Depends(get_db)):
 
 
 @router.get("/defaults", response_model=List[DataCatalogueItemResponse])
-async def get_default_items(db: Session = Depends(get_db)):
+async def get_default_items(db: Session = Depends(get_db), user: User = Depends(current_active_user)):
     """
     Get default selected catalogue items.
 
@@ -180,7 +183,7 @@ async def get_default_items(db: Session = Depends(get_db)):
 
 
 @router.get("/categories", response_model=List[dict])
-async def get_categories():
+async def get_categories(user: User = Depends(current_active_user)):
     """
     Get list of available data categories.
 
@@ -198,7 +201,7 @@ async def get_categories():
 
 
 @router.get("/stats")
-async def get_catalogue_stats(db: Session = Depends(get_db)):
+async def get_catalogue_stats(db: Session = Depends(get_db), user: User = Depends(current_active_user)):
     """
     Get catalogue statistics.
 
@@ -216,7 +219,7 @@ async def get_catalogue_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/regions", response_model=List[dict])
-async def get_regions():
+async def get_regions(user: User = Depends(current_active_user)):
     """
     Get list of available regions.
 
@@ -234,7 +237,7 @@ async def get_regions():
 
 
 @router.get("/risk-types", response_model=List[dict])
-async def get_risk_types():
+async def get_risk_types(user: User = Depends(current_active_user)):
     """
     Get list of risk types.
 
@@ -253,7 +256,8 @@ async def get_risk_types():
 @router.get("/{item_id}", response_model=DataCatalogueItemResponse)
 async def get_catalogue_item(
     item_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user)
 ):
     """Get details of a specific catalogue item."""
     try:
@@ -291,7 +295,8 @@ async def get_catalogue_item(
 @router.post("/{item_id}/test")
 async def test_catalogue_item(
     item_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(current_active_user)
 ):
     """
     Test if a specific catalogue item is accessible and has data.

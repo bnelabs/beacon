@@ -579,18 +579,12 @@ export default function Results() {
                               </List>
                             </Paper>
                           </Grid>
-                          {explanation.explanation_report && (
-                            <Grid item xs={12}>
-                              <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
-                                <Typography variant="subtitle1" gutterBottom fontWeight="bold">
-                                  Detailed Explanation Report
-                                </Typography>
-                                <Typography variant="body2" component="pre" sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
-                                  {explanation.explanation_report}
-                                </Typography>
-                              </Paper>
-                            </Grid>
-                          )}
+                          <Grid item xs={12}>
+                            <Button variant="contained" disabled>Explain Prediction</Button>
+                          </Grid>
+                          <Grid item xs={12}>
+                            <Alert severity="info">Explanation visualization will be displayed here.</Alert>
+                          </Grid>
                         </Grid>
                       ) : (
                         <Alert severity="info">AI explainability data not available for this job</Alert>

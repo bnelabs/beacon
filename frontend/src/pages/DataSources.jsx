@@ -37,137 +37,78 @@ import {
 } from '@mui/icons-material'
 import { api } from '../api/client'
 
+import { invalidateQueries } from '../api/queryClient';
+
 export default function DataSources() {
-  const queryClient = useQueryClient()
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingSource, setEditingSource] = useState(null)
-  const [error, setError] = useState(null)
-  const [testResult, setTestResult] = useState(null)
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [sourceToDelete, setSourceToDelete] = useState(null);
+  const [editingSource, setEditingSource] = useState(null);
+  const [error, setError] = useState(null);
+  const [testResult, setTestResult] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
     plugin_type: 'yfinance',
     enabled: true,
     description: '',
     config: {}
-  })
+  });
 
   // Fetch data sources
   const { data: dataSources, isLoading } = useQuery(
     'dataSources',
     () => api.dataSources.list().then(res => res.data)
-  )
+  );
 
   // Create mutation
   const createMutation = useMutation(
     (data) => api.dataSources.create(data),
     {
       onSuccess: () => {
-        queryClient.invalidateQueries('dataSources')
-        handleCloseDialog()
-        setError(null)
+        invalidateQueries(['dataSources', 'catalogue', 'systemStatus']);
+        handleCloseDialog();
+        setError(null);
       },
       onError: (err) => {
-        setError(err.userFriendlyMessage || err.message || 'Failed to create data source')
+        setError(err.userFriendlyMessage || err.message || 'Failed to create data source');
       }
     }
-  )
+  );
 
   // Update mutation
   const updateMutation = useMutation(
     ({ id, data }) => api.dataSources.update(id, data),
     {
       onSuccess: () => {
-        queryClient.invalidateQueries('dataSources')
-        handleCloseDialog()
-        setError(null)
-      },
-      onError: (err) => {
-        setError(err.userFriendlyMessage || err.message || 'Failed to update data source')
+        invalidateQueries(['dataSources', 'catalogue', 'systemStatus']);
+        handleCloseDialog();
+        setError(null);
       }
     }
-  )
+  );
 
   // Delete mutation
   const deleteMutation = useMutation(
     (id) => api.dataSources.delete(id),
     {
       onSuccess: () => {
-        queryClient.invalidateQueries('dataSources')
+        invalidateQueries(['dataSources', 'catalogue', 'systemStatus']);
+        setDeleteDialogOpen(false);
+        setSourceToDelete(null);
       }
     }
-  )
-
-  // Test connection mutation
-  const testConnectionMutation = useMutation(
-    (data) => api.dataSources.test(data),
-    {
-      onSuccess: (response) => {
-        const result = response.data
-        setTestResult({
-          success: result.success,
-          message: result.message
-        })
-      },
-      onError: (err) => {
-        setTestResult({
-          success: false,
-          message: err.userFriendlyMessage || err.message || 'Failed to test connection'
-        })
-      }
-    }
-  )
-
-  const handleTestConnection = () => {
-    setTestResult(null)
-    testConnectionMutation.mutate({
-      plugin_type: formData.plugin_type,
-      config: formData.config
-    })
-  }
-
-  const handleOpenDialog = (source = null) => {
-    if (source) {
-      setEditingSource(source)
-      setFormData({
-        name: source.name,
-        plugin_type: source.plugin_type,
-        enabled: source.enabled,
-        description: source.description || '',
-        config: source.config
-      })
-    } else {
-      setEditingSource(null)
-      setFormData({
-        name: '',
-        plugin_type: 'yfinance',
-        enabled: true,
-        description: '',
-        config: {}
-      })
-    }
-    setDialogOpen(true)
-  }
-
-  const handleCloseDialog = () => {
-    setDialogOpen(false)
-    setEditingSource(null)
-    setError(null)
-    setTestResult(null)
-  }
-
-  const handleSubmit = () => {
-    if (editingSource) {
-      updateMutation.mutate({ id: editingSource.id, data: formData })
-    } else {
-      createMutation.mutate(formData)
-    }
-  }
+  );
 
   const handleDelete = (id) => {
-    if (window.confirm('Are you sure you want to delete this data source?')) {
-      deleteMutation.mutate(id)
+    setSourceToDelete(id);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    if (sourceToDelete) {
+      deleteMutation.mutate(sourceToDelete);
     }
-  }
+  };
 
   if (isLoading) {
     return (
@@ -282,6 +223,20 @@ export default function DataSources() {
           </TableContainer>
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+        <DialogTitle>Delete Data Source</DialogTitle>
+        <DialogContent>
+          <Typography>Are you sure you want to delete this data source? This action cannot be undone.</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+          <Button onClick={confirmDelete} color="error" disabled={deleteMutation.isLoading}>
+            {deleteMutation.isLoading ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>

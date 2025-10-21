@@ -24,7 +24,7 @@ class YFinancePlugin(DataSourcePlugin):
         try:
             # Try fetching a well-known ticker
             test_ticker = yf.Ticker("AAPL")
-            info = test_ticker.info
+            info = test_ticker.fast_info
 
             if info and 'symbol' in info:
                 return {

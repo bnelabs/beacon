@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 import uuid
 import os
@@ -12,6 +12,8 @@ import os
 from database import get_db
 from models.pipeline_job import PipelineJob, DataJob, EngineJob, ResultJob, PipelineStage, JobStatus
 from services.error_logger import ErrorLogger
+from auth import fastapi_users, current_active_user
+from models.user import User
 
 router = APIRouter()
 
@@ -45,8 +47,7 @@ class PipelineStatusResponse(BaseModel):
 
     error_message: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.post("", response_model=PipelineStatusResponse, status_code=status.HTTP_201_CREATED)

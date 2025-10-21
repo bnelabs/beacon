@@ -9,10 +9,9 @@ import os
 import json
 from pathlib import Path
 
-from database import get_db
-from models.job import Job
-
-logger = logging.getLogger(__name__)
+from services.error_logger import ErrorLogger
+from auth import fastapi_users, current_active_user
+from models.user import User
 
 router = APIRouter()
 
