@@ -352,8 +352,19 @@ class ReportExporter:
     
     def export_pdf(self, report: ComprehensiveReport) -> str:
         """Export report as PDF."""
-        # TODO: Implement PDF generation
-        return f"{self.output_dir}/{report.job_id}/report.pdf"
+        from fpdf import FPDF
+
+        path = f"{self.output_dir}/{report.job_id}/report.pdf"
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, txt="BEACON Risk Report", ln=1, align="C")
+        pdf.cell(200, 10, txt=f"Job ID: {report.job_id}", ln=1, align="L")
+        pdf.cell(200, 10, txt=f"Generated At: {report.generated_at.isoformat()}", ln=1, align="L")
+        pdf.cell(200, 10, txt=f"Overall Risk Score: {report.executive_summary.overall_risk_score}", ln=1, align="L")
+        pdf.cell(200, 10, txt=f"Risk Level: {report.executive_summary.risk_level}", ln=1, align="L")
+        pdf.output(path)
+        return path
     
     def export_json(self, report: ComprehensiveReport) -> str:
         """Export report as JSON."""
@@ -378,5 +389,20 @@ class ReportExporter:
     
     def export_excel(self, report: ComprehensiveReport) -> str:
         """Export report as Excel."""
-        # TODO: Implement Excel export
-        return f"{self.output_dir}/{report.job_id}/report.xlsx"
+        import openpyxl
+
+        path = f"{self.output_dir}/{report.job_id}/report.xlsx"
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "Risk Report"
+
+        sheet["A1"] = "BEACON Risk Report"
+        sheet["A2"] = f"Job ID: {report.job_id}"
+        sheet["A3"] = f"Generated At: {report.generated_at.isoformat()}"
+        sheet["A4"] = "Overall Risk Score"
+        sheet["B4"] = report.executive_summary.overall_risk_score
+        sheet["A5"] = "Risk Level"
+        sheet["B5"] = report.executive_summary.risk_level
+
+        workbook.save(path)
+        return path

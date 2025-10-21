@@ -86,7 +86,7 @@ class DataCollector:
         # Use endpoint from catalogue if available, otherwise use code
         endpoint = item.endpoint if item.endpoint else item.code
 
-        if item.category in ['exchange_rates', 'stocks', 'bonds', 'commodities']:
+        if item.category.value in ['exchange_rates', 'stocks', 'bonds', 'commodities']:
             # Asset data (price data)
             df = plugin.fetch_asset_data([endpoint], start_dt, end_dt)
         else:

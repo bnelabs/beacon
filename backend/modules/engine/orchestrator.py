@@ -6,7 +6,9 @@ from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
 import torch
-
+import pandas as pd
+import numpy as np
+from modules.engine.baseline_model import BaselineModel
 from modules.data.orchestrator import DataPackage
 
 logger = logging.getLogger(__name__)
@@ -101,8 +103,9 @@ class EngineOrchestrator:
             # Step 2: Model Training/Loading
             self.status = EngineStatus.TRAINING
             logger.info(f"[{self.job_id}] Loading/training model")
-            
+
             model = self._get_model()
+            metrics = self._train_model(model, preprocessed)
             self.progress = 50.0
             
             # Step 3: Prediction
@@ -122,18 +125,18 @@ class EngineOrchestrator:
             self.status = EngineStatus.EVALUATING
             logger.info(f"[{self.job_id}] Evaluating performance")
             
-            metrics = self._evaluate(predictions, preprocessed)
+            evaluation_metrics = self._evaluate(metrics, preprocessed)
             self.progress = 95.0
-            
+
             # Step 6: Save results
             predictions_path = self._save_predictions(predictions)
             explanations_path = self._save_explanations(model, predictions)
-            
+
             duration = (datetime.utcnow() - self.start_time).total_seconds()
-            
+
             self.status = EngineStatus.COMPLETED
             self.progress = 100.0
-            
+
             result = EngineResult(
                 job_id=self.job_id,
                 model_name=self.config.get("model", "HGT"),
@@ -141,7 +144,7 @@ class EngineOrchestrator:
                 risk_scores=risk_scores,
                 predictions_path=predictions_path,
                 explanations_path=explanations_path,
-                performance_metrics=metrics,
+                performance_metrics=evaluation_metrics,
                 compute_stats={
                     "device": str(self.device),
                     "duration_seconds": duration,
@@ -174,38 +177,42 @@ class EngineOrchestrator:
     
     def _get_model(self):
         """Load or train model."""
-        # Placeholder - return mock model
-        class MockModel:
-            def predict(self, X):
-                import numpy as np
-                return np.random.rand(len(X))
-        
-        return MockModel()
-    
+        return BaselineModel()
+
+    def _train_model(self, model, data: Dict[str, Any]):
+        """Train the model."""
+        logger.info(f"[{self.job_id}] Training model")
+
+        # Create a more realistic target variable based on VIX data
+        vix_data = data["timeseries"][data["timeseries"]["asset"] == "VIX"]
+        vix_data = vix_data.set_index("date")
+        vix_data["risky"] = (vix_data["close"] > 20).astype(int)
+        target = vix_data["risky"]
+
+        # Align features with the target
+        features = data["features"].join(target, how="inner")
+        target = features["risky"]
+        features = features.drop(columns=["risky"])
+
+        return model.train(features, target)
+
     def _predict(self, model, data: Dict[str, Any]):
         """Generate predictions."""
-        import numpy as np
-        
-        # Mock predictions
-        n_samples = len(data["timeseries"])
-        return {
-            "market_liquidity": np.random.rand(n_samples) * 100,
-            "funding_liquidity": np.random.rand(n_samples) * 100,
-            "systemic_risk": np.random.rand(n_samples) * 100
-        }
-    
+        logger.info(f"[{self.job_id}] Generating predictions")
+        return model.predict_proba(data["features"])
+
     def _compute_risk_scores(self, predictions, data) -> RiskScores:
         """Compute aggregated risk scores."""
-        import numpy as np
-        
-        # Aggregate predictions
-        market_liq = {"overall": float(np.mean(predictions["market_liquidity"]))}
-        funding_liq = {"overall": float(np.mean(predictions["funding_liquidity"]))}
-        systemic = {"network_risk": float(np.mean(predictions["systemic_risk"]))}
+        logger.info(f"[{self.job_id}] Computing risk scores")
+        # This is a placeholder for actual risk score calculation
+        # In a real scenario, you would have a more sophisticated mapping from predictions to risk scores
+        market_liq = {"overall": np.mean(predictions[:, 1]) * 100}
+        funding_liq = {"overall": np.mean(predictions[:, 1]) * 100}
+        systemic = {"network_risk": np.mean(predictions[:, 1]) * 100}
         operational = {"process_risk": 50.0}
-        
+
         overall = (market_liq["overall"] + funding_liq["overall"] + systemic["network_risk"]) / 3
-        
+
         if overall < 30:
             risk_level = "low"
         elif overall < 60:
@@ -214,7 +221,7 @@ class EngineOrchestrator:
             risk_level = "high"
         else:
             risk_level = "critical"
-        
+
         return RiskScores(
             market_liquidity=market_liq,
             funding_liquidity=funding_liq,
@@ -224,28 +231,25 @@ class EngineOrchestrator:
             risk_level=risk_level
         )
     
-    def _evaluate(self, predictions, data) -> Dict[str, float]:
+    def _evaluate(self, metrics, data) -> Dict[str, float]:
         """Evaluate model performance."""
-        return {
-            "mse": 0.0234,
-            "mae": 0.0156,
-            "r2": 0.89,
-            "accuracy": 0.92
-        }
-    
+        # In a real scenario, you would have a more sophisticated evaluation
+        return metrics
+
     def _save_predictions(self, predictions) -> str:
         """Save predictions to file."""
-        import pandas as pd
-        
         path = f"{self.output_dir}/{self.job_id}/predictions.parquet"
-        df = pd.DataFrame(predictions)
-        df.to_parquet(path)
+        pd.DataFrame(predictions, columns=["no_risk_prob", "risk_prob"]).to_parquet(path)
         return path
-    
+
     def _save_explanations(self, model, predictions) -> Optional[str]:
         """Save model explanations."""
-        # TODO: Implement SHAP values
-        return None
+        # For a baseline model, we can save the model itself
+        import pickle
+        path = f"{self.output_dir}/{self.job_id}/model.pkl"
+        with open(path, "wb") as f:
+            pickle.dump(model, f)
+        return path
     
     def _get_peak_memory(self) -> float:
         """Get peak memory usage."""

@@ -23,96 +23,18 @@ BEACON is an intelligent financial risk monitoring system that analyzes **system
 
 ---
 
-## 🏗️ Revolutionary Three-Module Architecture
+## 💻 Current State
 
-BEACON uses a modular **DATA → ENGINE → RESULTS** pipeline for complete observability and control:
+The BEACON application is currently under development. The core three-module architecture (DATA, BNE ENGINE, RESULTS) is in place, but the functionality of each module is still being implemented.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    BEACON-BNE SYSTEM                            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌───────────┐      ┌───────────┐      ┌───────────┐            │ 
-│  │   DATA    │  →   │    BNE    │  →   │  RESULTS  │            │
-│  │  MODULE   │      │  ENGINE   │      │  MODULE   │            │
-│  └───────────┘      └───────────┘      └───────────┘            │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+### Module 1: DATA
+The data collection module is functional and can collect data from the configured sources.
 
-### Module 1: DATA (Collection, Preparation, Validation)
+### Module 2: BNE ENGINE
+The BNE Engine has a baseline implementation using a logistic regression model. This is a placeholder for a more sophisticated model that will be implemented in the future.
 
-**Purpose**: Acquire, clean, validate, and prepare financial data
-
-**Features**:
-- ✅ Catalogue-driven selection (48 pre-configured sources across 8 providers)
-- ✅ Automatic anomaly detection
-- ✅ Data quality scoring (0-100)
-- ✅ "Fit-for-engine" certification
-- ✅ Missing value imputation
-- ✅ Outlier detection and handling
-- ✅ Real-time progress monitoring
-
-**User Experience**:
-1. Select data sources from catalogue (default or custom)
-2. Review collection limits (API rate limits, date ranges)
-3. Start collection → Monitor progress
-4. Review data quality report
-5. Inspect anomalies and warnings
-6. Approve data for BNE ENGINE
-
-### Module 2: BNE ENGINE (Banking Network Engine - ML Processing, Risk Computation)
-
-**Purpose**: Process certified data using state-of-the-art ML models
-
-**Features**:
-- ✅ Heterogeneous Graph Transformer (HGT) model
-- ✅ GPU acceleration (CUDA support)
-- ✅ Real-time training monitoring
-- ✅ Model explainability (SHAP-ready)
-- ✅ Performance metrics tracking
-- ✅ Risk score computation
-
-**Models Supported**:
-- Heterogeneous Graph Transformer (HGT) - Current
-- Graph Neural Networks (GNN) - Ready
-- Temporal Attention Networks - Ready
-- LSTM/GRU time series - Ready
-- Ensemble methods - Ready
-
-**User Experience**:
-1. Review data certification
-2. Select engine configuration
-3. Start processing → Monitor in real-time
-4. View training curves, compute stats
-5. Inspect model decisions
-6. Approve results
-
-### Module 3: RESULTS (Visualization, Reports, Advisories)
-
-**Purpose**: Comprehensive risk analysis with actionable recommendations
-
-**Report Sections**:
-1. **Executive Summary** - Overall scores, alerts, top risks
-2. **Geographic Analysis** - Regional breakdown (US, Europe, Asia)
-3. **Institutional Profiles** - Bank-by-bank risk scores
-4. **Market Liquidity** - Asset class analysis, bid-ask spreads
-5. **Funding Liquidity** - LCR, NSFR, overnight stress
-6. **Systemic Risk** - Network contagion, cascade effects
-7. **Recommendations** - For regulators, banks, payment systems
-8. **Visualizations** - Heatmaps, networks, time series
-
-**Recommendations Include**:
-- **Regulators**: Capital buffers, stress tests, policy actions
-- **Banks**: Liquidity management, diversification
-- **Payment Systems**: Collateral optimization, settlement risk
-
-**Mitigation Actions**:
-- Capital ratios (Basel III+)
-- Liquidity provisions (LCR, NSFR)
-- CoCo bonds, resolution planning
-
-**Export Formats**: JSON, PDF, Excel
+### Module 3: RESULTS
+The results module can generate reports in JSON, PDF, and Excel formats. The content of the reports is based on the output of the baseline BNE Engine.
 
 ---
 
@@ -264,12 +186,7 @@ curl http://localhost:3456/api/v1/pipeline/{job_id}/download/excel -o report.xls
 - **SQLAlchemy** - ORM
 
 ### Machine Learning (BNE Engine)
-- **PyTorch 2.5.1** - Deep learning framework
-- **PyTorch Geometric 2.6.1** - Graph neural networks
-- **Model**: Heterogeneous Graph Transformer (HGT)
-  - Multi-head attention mechanisms
-  - Heterogeneous message passing
-  - Temporal encoding
+- **scikit-learn** - Baseline model
 
 ### Data Processing
 - **Pandas 2.2.3** - Data manipulation
@@ -277,6 +194,10 @@ curl http://localhost:3456/api/v1/pipeline/{job_id}/download/excel -o report.xls
 - **yfinance 0.2.50** - Yahoo Finance API
 - **fredapi 0.5.2** - FRED API
 - **alpha-vantage 2.3.1** - Alpha Vantage API
+
+### Reporting
+- **fpdf** - PDF generation
+- **openpyxl** - Excel generation
 
 ### Frontend Stack
 - **React 18** - UI framework

@@ -79,7 +79,7 @@ services:
     networks:
       - beacon-network
     restart: unless-stopped
-    command: uvicorn api.main:app --host 0.0.0.0 --port 3456
+    command: bash -c "sleep 10 && uvicorn api.main:app --host 0.0.0.0 --port 3456"
 
   # Celery Worker for background tasks
   # Note: GPU support is configured via docker-compose.gpu.yml overlay
