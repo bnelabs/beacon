@@ -73,11 +73,30 @@ export default function ErrorDisplay({ error, onRetry, onDismiss }) {
     }
   }
 
-  const handleCopyTechnical = () => {
+  const handleCopyTechnical = async () => {
     if (technical_message) {
-      navigator.clipboard.writeText(technical_message)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      try {
+        await navigator.clipboard.writeText(technical_message)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      } catch (err) {
+        console.error('Failed to copy to clipboard:', err)
+        // Fallback for older browsers or when clipboard API is not available
+        const textArea = document.createElement('textarea')
+        textArea.value = technical_message
+        textArea.style.position = 'fixed'
+        textArea.style.left = '-999999px'
+        document.body.appendChild(textArea)
+        textArea.select()
+        try {
+          document.execCommand('copy')
+          setCopied(true)
+          setTimeout(() => setCopied(false), 2000)
+        } catch (fallbackErr) {
+          console.error('Fallback copy failed:', fallbackErr)
+        }
+        document.body.removeChild(textArea)
+      }
     }
   }
 

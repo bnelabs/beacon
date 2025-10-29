@@ -43,7 +43,7 @@ import {
   Info as InfoIcon
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import apiClient from '../api/client';
+import api from '../api/client';
 
 const ErrorAnalytics = () => {
   const queryClient = useQueryClient();
@@ -60,8 +60,7 @@ const ErrorAnalytics = () => {
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['error-statistics'],
     queryFn: async () => {
-      const response = await apiClient.get('/errors/statistics');
-      return response.data;
+      return await api.errors.statistics();
     },
     refetchInterval: 120000 // Refresh every 2 minutes
   });
@@ -70,13 +69,7 @@ const ErrorAnalytics = () => {
   const { data: errors, isLoading: errorsLoading, refetch } = useQuery({
     queryKey: ['error-logs', filters],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (filters.severity) params.append('severity', filters.severity);
-      if (filters.category) params.append('category', filters.category);
-      if (filters.resolved !== '') params.append('resolved', filters.resolved);
-
-      const response = await apiClient.get(`/errors/?${params.toString()}`);
-      return response.data;
+      return await api.errors.list(filters);
     },
     refetchInterval: 60000 // Refresh every minute
   });
@@ -84,9 +77,7 @@ const ErrorAnalytics = () => {
   // Resolve error mutation
   const resolveMutation = useMutation({
     mutationFn: async ({ errorId, notes }) => {
-      await apiClient.post(`/errors/${errorId}/resolve`, null, {
-        params: { resolution_notes: notes }
-      });
+      return await api.errors.resolve(errorId, notes);
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['error-logs']);
@@ -99,7 +90,7 @@ const ErrorAnalytics = () => {
   // Delete error mutation
   const deleteMutation = useMutation({
     mutationFn: async (errorId) => {
-      await apiClient.delete(`/errors/${errorId}`);
+      return await api.errors.delete(errorId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['error-logs']);
@@ -601,7 +592,7 @@ const ErrorAnalytics = () => {
           <Button
             onClick={handleResolve}
             variant="contained"
-            disabled={!resolutionNotes.trim() || resolveMutation.isPending}
+            disabled={!resolutionNotes.trim() || resolveMutation.isLoading}
           >
             Resolve
           </Button>
