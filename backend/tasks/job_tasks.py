@@ -583,12 +583,12 @@ def run_backtest(self, job_id: int, parameters: dict):
         import pandas as pd
         data = pd.read_parquet(data_path)
 
-        if 'date' in data.columns:
+        if 'date' in data.columns and train_start and train_end and test_start and test_end:
             data['date'] = pd.to_datetime(data['date'])
             train_data = data[(data['date'] >= train_start) & (data['date'] <= train_end)]
             test_data = data[(data['date'] >= test_start) & (data['date'] <= test_end)]
         else:
-            # If no date column, use time-based split
+            # If no date column or no date params, use time-based split
             split_idx = int(len(data) * 0.8)
             train_data = data[:split_idx]
             test_data = data[split_idx:]
