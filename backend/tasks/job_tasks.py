@@ -457,8 +457,40 @@ def run_prediction(self, job_id: int, parameters: dict):
         self.update_progress(job_id, 10.0)
 
         # Get model and data paths
-        model_path = parameters.get("model_path")
-        data_path = parameters.get("data_path")
+        trained_model_job = parameters.get("trained_model_job")
+        forecast_horizon = parameters.get("forecast_horizon", 7)
+
+        if not trained_model_job:
+            raise ValueError("trained_model_job parameter is required for prediction")
+
+        # Get the trained model job - refresh from DB to avoid stale data
+        from sqlalchemy import inspect
+        trained_job = service.get_job(trained_model_job)
+        if not trained_job or trained_job.status != "completed":
+            raise ValueError(f"Trained model job {trained_model_job} not found or not completed")
+
+        # Force refresh from database
+        db.expire(trained_job)
+        db.refresh(trained_job)
+
+        logger.info(f"Trained job result type: {type(trained_job.result)}")
+        logger.info(f"Trained job result: {trained_job.result}")
+
+        # Extract paths from trained job result
+        if isinstance(trained_job.result, dict):
+            model_path = trained_job.result.get("model_path")
+            data_source_job = trained_job.result.get("data_source_job")
+        else:
+            raise ValueError(f"Trained job {trained_model_job} has invalid result format: {type(trained_job.result)}")
+
+        # Get the original data from the data collection job (not predictions)
+        data_path = None
+        if data_source_job:
+            data_job = service.get_job(data_source_job)
+            if data_job and isinstance(data_job.result, dict):
+                data_path = data_job.result.get("output_path")
+
+        logger.info(f"Model path: {model_path}, Data path: {data_path}")
 
         if not model_path or not os.path.exists(model_path):
             raise FileNotFoundError(f"Model file not found: {model_path}")
@@ -567,15 +599,34 @@ def run_backtest(self, job_id: int, parameters: dict):
         self.update_progress(job_id, 10.0)
 
         # Get parameters
-        model_path = parameters.get("model_path")
-        data_path = parameters.get("data_path")
-        train_start = parameters.get("train_start")
-        train_end = parameters.get("train_end")
-        test_start = parameters.get("test_start")
-        test_end = parameters.get("test_end")
+        trained_model_job = parameters.get("trained_model_job")
+        start_date = parameters.get("start_date")
+        end_date = parameters.get("end_date")
+
+        if not trained_model_job:
+            raise ValueError("trained_model_job parameter is required for backtest")
+
+        # Get the trained model job
+        trained_job = service.get_job(trained_model_job)
+        if not trained_job or trained_job.status != "completed":
+            raise ValueError(f"Trained model job {trained_model_job} not found or not completed")
+
+        # Extract paths
+        if isinstance(trained_job.result, dict):
+            model_path = trained_job.result.get("model_path")
+            data_source_job = trained_job.result.get("data_source_job")
+        else:
+            raise ValueError(f"Trained job {trained_model_job} has invalid result format")
+
+        # Get data from data collection job
+        data_path = None
+        if data_source_job:
+            data_job = service.get_job(data_source_job)
+            if data_job and isinstance(data_job.result, dict):
+                data_path = data_job.result.get("output_path")
 
         if not model_path or not data_path:
-            raise ValueError("model_path and data_path are required for backtesting")
+            raise ValueError("Could not retrieve model_path or data_path from trained job")
 
         self.update_progress(job_id, 20.0)
 
@@ -583,17 +634,15 @@ def run_backtest(self, job_id: int, parameters: dict):
         import pandas as pd
         data = pd.read_parquet(data_path)
 
-        if 'date' in data.columns and train_start and train_end and test_start and test_end:
+        if 'date' in data.columns and start_date and end_date:
             data['date'] = pd.to_datetime(data['date'])
-            train_data = data[(data['date'] >= train_start) & (data['date'] <= train_end)]
-            test_data = data[(data['date'] >= test_start) & (data['date'] <= test_end)]
+            test_data = data[(data['date'] >= start_date) & (data['date'] <= end_date)]
         else:
-            # If no date column or no date params, use time-based split
+            # If no date column or params, use last 20% as test
             split_idx = int(len(data) * 0.8)
-            train_data = data[:split_idx]
             test_data = data[split_idx:]
 
-        logger.info(f"Backtest: {len(train_data)} train samples, {len(test_data)} test samples")
+        logger.info(f"Backtest: {len(test_data)} test samples")
 
         self.update_progress(job_id, 40.0)
 
