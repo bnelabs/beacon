@@ -485,7 +485,7 @@ def run_prediction(self, job_id: int, parameters: dict):
         self.update_progress(job_id, 50.0)
 
         # Generate predictions
-        predictions = engine.predict(data)
+        prediction_result = engine.predict(data)
 
         self.update_progress(job_id, 80.0)
 
@@ -494,15 +494,16 @@ def run_prediction(self, job_id: int, parameters: dict):
         os.makedirs(output_dir, exist_ok=True)
         output_path = f"{output_dir}/predictions_{job_id}.parquet"
 
-        predictions_df = pd.DataFrame(predictions)
-        predictions_df.to_parquet(output_path)
+        prediction_result.predictions_df.to_parquet(output_path)
 
         result = {
             "status": "completed",
             "predictions_path": output_path,
-            "num_predictions": len(predictions_df),
-            "mean_risk": float(predictions_df['risk_score'].mean()) if 'risk_score' in predictions_df else None,
-            "completed_at": datetime.utcnow().isoformat()
+            "num_predictions": len(prediction_result.predictions_df),
+            "mean_risk": float(prediction_result.predictions_df['risk_score'].mean()) if 'risk_score' in prediction_result.predictions_df.columns else None,
+            "completed_at": datetime.utcnow().isoformat(),
+            "feature_importances": prediction_result.feature_importances,
+            "metrics": prediction_result.metrics
         }
 
         service.update_job_status(
