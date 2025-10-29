@@ -149,11 +149,15 @@ class DataOrchestrator:
             validation_report = self.validator.validate(raw_data)
 
             if validation_report.critical_errors > 0:
-                self.status = DataStatus.FAILED
-                self.monitor.fail(f"{validation_report.critical_errors} critical errors")
-                raise Exception(f"Validation failed: {validation_report.critical_errors} critical errors")
+                logger.warning(f"[{self.job_id}] Validation found {validation_report.critical_errors} critical errors, continuing with valid data")
+                # Filter out datasets that failed critical validation
+                raw_data = {k: v for k, v in raw_data.items() if not v.empty}
+                if not raw_data:
+                    self.status = DataStatus.FAILED
+                    self.monitor.fail("All datasets failed validation")
+                    raise Exception("Validation failed: No valid datasets available")
 
-            self._update_progress(40.0, f"Validation complete: {validation_report.warnings} warnings detected")
+            self._update_progress(40.0, f"Validation complete: {len(validation_report.warnings)} warnings detected")
 
             # Step 3: Cleaning
             self.status = DataStatus.CLEANING

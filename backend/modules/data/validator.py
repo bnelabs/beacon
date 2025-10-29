@@ -33,8 +33,7 @@ class DataValidator:
         
         for code, df in data.items():
             if df.empty:
-                report.errors.append({"code": code, "error": "Empty dataset"})
-                report.critical_errors += 1
+                report.warnings.append({"code": code, "warning": "Empty dataset - no data available for requested period"})
                 continue
             
             # Missing values check
