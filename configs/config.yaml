@@ -1,267 +1,244 @@
-# Liquidity Monitor Configuration
-# This file contains all configurable parameters for the system
-
 data:
-  # Asset universe
   banks:
-    - 'JPM'
-    - 'BAC'
-    - 'WFC'
-    - 'C'
-    - 'GS'
-    - 'MS'
-    - 'DB'
-    - 'UBS'
-    - 'CS'
-    - 'BCS'
-    - 'HSBC'
-    - 'SAN'
-    - 'BMO'
-    - 'RY'
-    - 'TD'
-  
+  - JPM
+  - BAC
+  - WFC
+  - C
+  - GS
+  - MS
+  - DB
+  - UBS
+  - CS
+  - BCS
+  - HSBC
+  - SAN
+  - BMO
+  - RY
+  - TD
   insurance:
-    - 'AIG'
-    - 'PRU'
-    - 'MET'
-    - 'BRK-A'
-    - 'BRK-B'
-    - 'ALL'
-    - 'TRV'
-    - 'CB'
-    - 'CINF'
-    - 'AFL'
-  
+  - AIG
+  - PRU
+  - MET
+  - BRK-A
+  - BRK-B
+  - ALL
+  - TRV
+  - CB
+  - CINF
+  - AFL
   asset_managers:
-    - 'BLK'
-    - 'IVZ'
-    - 'AMG'
-    - 'EVR'
-    - 'LM'
-    - 'NTRS'
-    - 'STT'
-    - 'BEN'
-  
+  - BLK
+  - IVZ
+  - AMG
+  - EVR
+  - LM
+  - NTRS
+  - STT
+  - BEN
   tech_stocks:
-    - 'AAPL'
-    - 'MSFT'
-    - 'GOOGL'
-    - 'AMZN'
-    - 'META'
-    - 'NVDA'
-    - 'TSLA'
-    - 'ADBE'
-    - 'CRM'
-    - 'ORCL'
-  
+  - AAPL
+  - MSFT
+  - GOOGL
+  - AMZN
+  - META
+  - NVDA
+  - TSLA
+  - ADBE
+  - CRM
+  - ORCL
   energy_stocks:
-    - 'XOM'
-    - 'CVX'
-    - 'COP'
-    - 'EOG'
-    - 'SLB'
-    - 'HAL'
-    - 'BP'
-    - 'SHEL'
-    - 'TTE'
-    - 'ENB'
-  
+  - XOM
+  - CVX
+  - COP
+  - EOG
+  - SLB
+  - HAL
+  - BP
+  - SHEL
+  - TTE
+  - ENB
   etfs:
-    - 'SPY'
-    - 'QQQ'
-    - 'IWM'
-    - 'DIA'
-    - 'VTI'
-    - 'VOO'
-    - 'GLD'
-    - 'SLV'
-    - 'TLT'
-    - 'HYG'
-    - 'LQD'
-    - 'SHY'
-    - 'IEF'
-  
+  - SPY
+  - QQQ
+  - IWM
+  - DIA
+  - VTI
+  - VOO
+  - GLD
+  - SLV
+  - TLT
+  - HYG
+  - LQD
+  - SHY
+  - IEF
   crypto:
-    - 'BTC-USD'
-    - 'ETH-USD'
-  
+  - BTC-USD
+  - ETH-USD
   market_indicators:
-    - '^VIX'
-    - '^VVIX'
-    - '^MOVE'
-    - '^TYX'
-    - '^FVX'
-    - '^TNX'
-    - '^IRX'
-  
-  # Global assets
+  - ^VIX
+  - ^VVIX
+  - ^MOVE
+  - ^TYX
+  - ^FVX
+  - ^TNX
+  - ^IRX
   european_banks:
-    - 'HSBA.L'
-    - 'BARC.L'
-    - 'LLOY.L'
-    - 'BNP.PA'
-    - 'SAN.PA'
-    - 'GLE.PA'
-    - 'INGA.AS'
-    - 'DBK.DE'
-    - 'CBK.DE'
-    - 'UBS.S'
-    - 'CSGN.S'
-    - 'ISP.MI'
-    - 'UCG.MI'
-    - 'BBVA.MC'
-    - 'CA.MC'
-  
+  - HSBA.L
+  - BARC.L
+  - LLOY.L
+  - BNP.PA
+  - SAN.PA
+  - GLE.PA
+  - INGA.AS
+  - DBK.DE
+  - CBK.DE
+  - UBS.S
+  - CSGN.S
+  - ISP.MI
+  - UCG.MI
+  - BBVA.MC
+  - CA.MC
   asian_banks:
-    - '0005.HK'
-    - '3988.HK'
-    - '2318.HK'
-    - '1299.HK'
-    - '2800.HK'
-    - '7203.T'
-    - '8306.T'
-    - '8316.T'
-    - '9304.T'
-    - '6586.T'
-    - '005930.KS'
-    - '051910.KS'
-    - '000660.KS'
-    - '373220.KS'
-    - '600519.SS'
-    - '000001.SZ'
-    - '600036.SS'
-    - '601318.SS'
-    - '000858.SZ'
-  
+  - 0005.HK
+  - 3988.HK
+  - 2318.HK
+  - 1299.HK
+  - 2800.HK
+  - 7203.T
+  - 8306.T
+  - 8316.T
+  - 9304.T
+  - 6586.T
+  - 005930.KS
+  - 051910.KS
+  - 000660.KS
+  - 373220.KS
+  - 600519.SS
+  - 000001.SZ
+  - 600036.SS
+  - 601318.SS
+  - 000858.SZ
   global_etfs:
-    - 'EWU'
-    - 'EWG'
-    - 'EWQ'
-    - 'EWA'
-    - 'EWC'
-    - 'EWH'
-    - 'EWJ'
-    - 'EWS'
-    - 'EWM'
-    - 'EWW'
-    - 'EWZ'
-    - 'EEM'
-    - 'EFA'
-    - 'VTI'
-    - 'VEA'
-    - 'VWO'
-    - 'VNQ'
-    - 'BNDX'
-    - 'VXUS'
-    - 'AVDE'
-    - 'SPDW'
-    - 'DNL'
-    - 'DWM'
-    - 'DTH'
-    - 'DLS'
-    - 'DGS'
-    - 'DEM'
-    - 'DRR'
-    - 'DDM'
-  
-  # Data parameters
-  start_date_days: 7300  # 20 years of data
-  look_back: 30
-  correlation_threshold: 0.5
-  api_rate_limit_seconds: 2.0  # Sleep time between API batch requests
+  - EWU
+  - EWG
+  - EWQ
+  - EWA
+  - EWC
+  - EWH
+  - EWJ
+  - EWS
+  - EWM
+  - EWW
+  - EWZ
+  - EEM
+  - EFA
+  - VTI
+  - VEA
+  - VWO
+  - VNQ
+  - BNDX
+  - VXUS
+  - AVDE
+  - SPDW
+  - DNL
+  - DWM
+  - DTH
+  - DLS
+  - DGS
+  - DEM
+  - DRR
+  - DDM
+  start_date_days: 7300
+  look_back: 90
+  correlation_threshold: 0.6
+  api_rate_limit_seconds: 2.0
   rolling_correlation_window: 90
-  graph_update_frequency: 30  # days
+  graph_update_frequency: 30
   numerical_stability_epsilon: 1e-9
-  cache_enabled: true  # Enable data caching
-  cache_format: "parquet"  # Format for cached data (parquet, feather, csv)
-  
+  cache_enabled: true
+  cache_format: parquet
   financial_facts:
-    - "Assets"
-    - "StockholdersEquity"
-    - "ShortTermDebt"
-    - "LongTermDebt"
-    - "CashAndCashEquivalentsAtCarryingValue"
-  
-  # Economic indicators from FRED
+  - Assets
+  - StockholdersEquity
+  - ShortTermDebt
+  - LongTermDebt
+  - CashAndCashEquivalentsAtCarryingValue
   economic_indicators:
-    # US indicators
-    - "GDP"
-    - "CPIAUCSL"
-    - "UNRATE"
-    - "PAYEMS"
-    - "INDPRO"
-    - "HOUST"
-    - "UMCSENT"
-    - "DGS10"
-    - "DGS2"
-    - "DGS1MO"
-    - "DGS30"
-    - "TREAST"
-    - "WALCL"
-    - "RRPONTSYD"
-    - "BAA10Y"
-    - "AAA10Y"
-    - "TEDRATE"
-    - "DPRIME"
-    - "DFF"
-    - "TB3MS"
-    - "DTWEXBGS"
-    # Global indicators
-    - "DEXUSEU"
-    - "DEXUSUK"
-    - "DEXJPUS"
-    - "DEXCHUS"
-    - "DEXUSAL"
-    - "DEXUSCA"
-    - "DEXSZUS"
-    - "DEXKOUS"
-    - "DEXINUS"
-
+  - GDP
+  - CPIAUCSL
+  - UNRATE
+  - PAYEMS
+  - INDPRO
+  - HOUST
+  - UMCSENT
+  - DGS10
+  - DGS2
+  - DGS1MO
+  - DGS30
+  - TREAST
+  - WALCL
+  - RRPONTSYD
+  - BAA10Y
+  - AAA10Y
+  - TEDRATE
+  - DPRIME
+  - DFF
+  - TB3MS
+  - DTWEXBGS
+  - DEXUSEU
+  - DEXUSUK
+  - DEXJPUS
+  - DEXCHUS
+  - DEXUSAL
+  - DEXUSCA
+  - DEXSZUS
+  - DEXKOUS
+  - DEXINUS
 model:
-  # Model architecture
-  hidden_dim: 64
+  hidden_dim: 512
   heads: 8
-  num_funds: 10  # Configurable number of funds for embeddings
-  
-  # Training parameters
+  num_funds: 10
   epochs: 100
   batch_size: 16
   learning_rate: 0.0001
   dropout_rate: 0.3
   lstm_hidden_size: 256
   gradient_clip_norm: 1.0
-
+  num_heads: 16
+  num_layers: 3
+  dropout: 0.15
 backtesting:
   start_year: 2010
   end_year: 2023
-
-
 simulation:
   low_liquidity_threshold: 0.2
-
 funds:
   major_funds:
-    - name: "BlackRock"
-      cik: "0001067983"
-    - name: "Vanguard"
-      cik: "0000102909"
-    - name: "Fidelity"
-      cik: "0000031453"
-    - name: "State Street"
-      cik: "0000036115"
-    - name: "JPMorgan"
-      cik: "0000019617"
-    - name: "Goldman Sachs"
-      cik: "0000088498"
-    - name: "Morgan Stanley"
-      cik: "0000070858"
-    - name: "Bank of America"
-      cik: "0000070858"
-    - name: "Charles Schwab"
-      cik: "0000034196"
-    - name: "BNY Mellon"
-      cik: "0000016232"
-
+  - name: BlackRock
+    cik: 0001067983
+  - name: Vanguard
+    cik: 0000102909
+  - name: Fidelity
+    cik: '0000031453'
+  - name: State Street
+    cik: '0000036115'
+  - name: JPMorgan
+    cik: 0000019617
+  - name: Goldman Sachs
+    cik: 0000088498
+  - name: Morgan Stanley
+    cik: 0000070858
+  - name: Bank of America
+    cik: 0000070858
+  - name: Charles Schwab
+    cik: 0000034196
+  - name: BNY Mellon
+    cik: '0000016232'
 logging:
-  level: "INFO"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  level: INFO
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+training:
+  batch_size: 16
+  num_epochs: 50
+  early_stopping_patience: 15
+  validation_split: 0.2

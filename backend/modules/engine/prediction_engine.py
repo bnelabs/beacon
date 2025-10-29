@@ -134,8 +134,9 @@ class RealPredictionEngine:
             # Get source ID
             source_id = 0  # Would map from source_code to ID
 
-            # Prepare sequence
-            values = source_data['Value'].values
+            # Prepare sequence - use 'Close' column from timeseries data
+            value_column = 'Close' if 'Close' in source_data.columns else 'Value'
+            values = source_data[value_column].values
             if len(values) < 30:
                 values = np.pad(values, (30 - len(values), 0), mode='edge')
 

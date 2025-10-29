@@ -74,8 +74,9 @@ class MultiSourceDataset(Dataset):
             source_data = self.data[self.data['source_code'] == source].copy()
             source_data = source_data.sort_values('Date')
 
-            # Extract values
-            values = source_data['Value'].ffill().fillna(0).values
+            # Extract values - use 'Close' column from timeseries data
+            value_column = 'Close' if 'Close' in source_data.columns else 'Value'
+            values = source_data[value_column].ffill().fillna(0).values
 
             # Store normalization stats PER SOURCE
             mean = float(np.mean(values))
