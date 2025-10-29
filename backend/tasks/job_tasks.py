@@ -496,14 +496,25 @@ def run_prediction(self, job_id: int, parameters: dict):
 
         prediction_result.predictions_df.to_parquet(output_path)
 
+        # Convert NaN to None for JSON serialization
+        import math
+        def clean_nan(obj):
+            if isinstance(obj, dict):
+                return {k: clean_nan(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [clean_nan(v) for v in obj]
+            elif isinstance(obj, float) and math.isnan(obj):
+                return None
+            return obj
+
         result = {
             "status": "completed",
             "predictions_path": output_path,
             "num_predictions": len(prediction_result.predictions_df),
             "mean_risk": float(prediction_result.predictions_df['risk_score'].mean()) if 'risk_score' in prediction_result.predictions_df.columns else None,
             "completed_at": datetime.utcnow().isoformat(),
-            "feature_importances": prediction_result.feature_importances,
-            "metrics": prediction_result.metrics
+            "feature_importances": clean_nan(prediction_result.feature_importances),
+            "metrics": clean_nan(prediction_result.metrics)
         }
 
         service.update_job_status(
