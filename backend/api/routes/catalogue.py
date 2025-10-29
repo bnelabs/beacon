@@ -328,7 +328,17 @@ async def test_catalogue_item(
         if item.data_source.plugin_type == 'fred' and 'api_key' not in plugin_config:
             plugin_config['api_key'] = os.getenv('FRED_API_KEY', '')
 
-        plugin = get_plugin(item.data_source.plugin_type, plugin_config)
+        plugin_class = get_plugin(item.data_source.plugin_type)
+        if not plugin_class:
+            return {
+                "item_id": item_id,
+                "success": False,
+                "message": f"Plugin '{item.data_source.plugin_type}' not found",
+                "details": {}
+            }
+
+        # Instantiate plugin with config
+        plugin = plugin_class(plugin_config)
 
         # Test the specific item using its endpoint
         test_result = plugin.test_item(item.endpoint)

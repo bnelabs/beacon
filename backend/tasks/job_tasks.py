@@ -113,10 +113,14 @@ def run_data_collection(self, job_id: int, parameters: dict):
         output_dir = f"/app/data/jobs/{job_id}"
         os.makedirs(output_dir, exist_ok=True)
 
-        # Create progress callback to map orchestrator progress (0-100%) to job progress (20-95%)
-        def orchestrator_progress_callback(orchestrator_progress: float, message: str):
-            job_progress = 20.0 + (orchestrator_progress * 0.75)  # Maps 0-100 to 20-95
-            self.update_progress(job_id, job_progress, current_step=message)
+        # Create progress callback - orchestrator already sends progress in 0-100 range
+        def orchestrator_progress_callback(progress: float, message: str):
+            try:
+                # Orchestrator sends progress 0-100, we just pass it through
+                logger.info(f"[job_{job_id}] Progress callback: {progress}% - {message}")
+                self.update_progress(job_id, progress, current_step=message)
+            except Exception as e:
+                logger.error(f"[job_{job_id}] Error in progress callback: {e}")
 
         orchestrator = DataOrchestrator(db, f"job_{job_id}", output_dir, progress_callback=orchestrator_progress_callback)
 
