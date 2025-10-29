@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import cast, String
 from typing import List, Optional
 
 from database import get_db
@@ -46,7 +47,7 @@ async def list_catalogue_items(
 
         if risk_type:
             # JSON array contains query
-            query = query.filter(DataCatalogueItem.risk_types.contains([risk_type]))
+            query = query.filter(cast(DataCatalogueItem.risk_types, String).contains(f'"{risk_type}"'))
 
         if search:
             search_pattern = f"%{search}%"
@@ -118,7 +119,7 @@ async def get_catalogue_summary(db: Session = Depends(get_db)):
         by_risk_type = {}
         for risk in RiskType:
             count = db.query(DataCatalogueItem).filter(
-                DataCatalogueItem.risk_types.contains([risk.value])
+                cast(DataCatalogueItem.risk_types, String).contains(f'"{risk.value}"')
             ).count()
             by_risk_type[risk.value] = count
 
