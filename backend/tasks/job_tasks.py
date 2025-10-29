@@ -683,7 +683,7 @@ def run_backtest(self, job_id: int, parameters: dict):
             job_id,
             status="failed",
             error_message=str(e),
-            user_friendly_error=user_friendly
+            user_friendly_error=error_details_to_json(user_friendly)
         )
         raise
     finally:
