@@ -43,18 +43,24 @@ class MultiSourceDataset(Dataset):
     - Creates sequences per source
     """
 
-    def __init__(self, data: pd.DataFrame, sequence_length: int = 30):
+    def __init__(self, data: pd.DataFrame, sequence_length: int = 30, source_to_id: dict = None):
         """
         Args:
             data: DataFrame with columns: Date, Value, source_code
             sequence_length: Number of time steps
+            source_to_id: Optional pre-defined source to ID mapping (for test/val sets)
         """
         self.sequence_length = sequence_length
         self.data = data.copy()
 
         # Group by source
         self.sources = self.data['source_code'].unique()
-        self.source_to_id = {src: i for i, src in enumerate(self.sources)}
+
+        # Use provided mapping or create new one
+        if source_to_id is not None:
+            self.source_to_id = source_to_id
+        else:
+            self.source_to_id = {src: i for i, src in enumerate(self.sources)}
 
         # Per-source normalization stats
         self.source_stats = {}
@@ -80,6 +86,11 @@ class MultiSourceDataset(Dataset):
             normalized = (values - mean) / std
 
             # Create sequences for this source
+            # Skip sources not in the mapping (can happen in test/val sets)
+            if source not in self.source_to_id:
+                logger.warning(f"Skipping source '{source}' - not in training set")
+                continue
+
             for i in range(len(normalized) - sequence_length):
                 self.sequences.append(normalized[i:i + sequence_length])
                 self.targets.append(normalized[i + sequence_length])
@@ -251,13 +262,25 @@ class MultiScaleTrainer:
         # Create datasets with per-source normalization
         sequence_length = self.config.get('sequence_length', 30)
 
+        # Create train dataset first to get source mapping
         train_dataset = MultiSourceDataset(train_df, sequence_length=sequence_length)
-        val_dataset = MultiSourceDataset(val_df, sequence_length=sequence_length)
-        test_dataset = MultiSourceDataset(test_df, sequence_length=sequence_length)
+
+        # Use same source_to_id mapping for val and test to ensure consistent indexing
+        val_dataset = MultiSourceDataset(val_df, sequence_length=sequence_length, source_to_id=train_dataset.source_to_id)
+        test_dataset = MultiSourceDataset(test_df, sequence_length=sequence_length, source_to_id=train_dataset.source_to_id)
+
+        # Check for empty datasets
+        if len(train_dataset) == 0:
+            raise ValueError("Training dataset is empty - no valid sequences created")
+        if len(val_dataset) == 0:
+            logger.warning("Validation dataset is empty - skipping validation during training")
+        if len(test_dataset) == 0:
+            logger.warning("Test dataset is empty - skipping final evaluation")
 
         # Get number of sources
         num_sources = len(train_dataset.sources)
         logger.info(f"Training with {num_sources} data sources")
+        logger.info(f"Dataset sizes: Train={len(train_dataset)}, Val={len(val_dataset)}, Test={len(test_dataset)}")
 
         # Create data loaders
         batch_size = self.config.get('batch_size', 32)
@@ -421,6 +444,10 @@ class MultiScaleTrainer:
 
     def _validate(self, dataloader: DataLoader) -> float:
         """Validate model."""
+        if len(dataloader) == 0:
+            logger.warning("Validation dataloader is empty, returning 0.0 loss")
+            return 0.0
+
         self.model.eval()
         total_loss = 0.0
 
@@ -439,6 +466,16 @@ class MultiScaleTrainer:
 
     def _evaluate_test(self, dataloader: DataLoader, dataset: MultiSourceDataset) -> Dict:
         """Comprehensive test set evaluation."""
+        if len(dataloader) == 0:
+            logger.warning("Test dataloader is empty, returning default metrics")
+            return {
+                'test_loss': 0.0,
+                'mae': 0.0,
+                'rmse': 0.0,
+                'r2': 0.0,
+                'predictions_df': pd.DataFrame()
+            }
+
         self.model.eval()
         all_predictions = []
         all_targets = []
