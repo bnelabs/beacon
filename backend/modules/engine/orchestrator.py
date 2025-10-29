@@ -8,7 +8,8 @@ from enum import Enum
 import torch
 import pandas as pd
 import numpy as np
-from modules.engine.baseline_model import BaselineModel
+from torch_geometric.data import Data
+from modules.engine.gnn_model import GNNModel
 from modules.data.orchestrator import DataPackage
 
 logger = logging.getLogger(__name__)
@@ -104,7 +105,10 @@ class EngineOrchestrator:
             self.status = EngineStatus.TRAINING
             logger.info(f"[{self.job_id}] Loading/training model")
 
-            model = self._get_model()
+            num_node_features = preprocessed["features"].shape[1]
+            num_classes = 2  # Assuming binary classification (risk vs. no risk)
+            model = self._get_model(num_node_features, num_classes)
+
             metrics = self._train_model(model, preprocessed)
             self.progress = 50.0
             
@@ -175,43 +179,92 @@ class EngineOrchestrator:
             "metadata": data_package.metadata
         }
     
-    def _get_model(self):
+    def _get_model(self, num_node_features, num_classes):
         """Load or train model."""
-        return BaselineModel()
+        return GNNModel(
+            num_node_features=num_node_features,
+            hidden_channels=self.config.get("hidden_channels", 64),
+            num_classes=num_classes,
+        ).to(self.device)
 
     def _train_model(self, model, data: Dict[str, Any]):
         """Train the model."""
-        logger.info(f"[{self.job_id}] Training model")
+        logger.info(f"[{self.job_id}] Training GNN model")
 
-        # Create a more realistic target variable based on VIX data
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.config.get("lr", 0.01))
+        criterion = torch.nn.CrossEntropyLoss()
+
+        # Create a realistic target variable
         vix_data = data["timeseries"][data["timeseries"]["asset"] == "VIX"]
         vix_data = vix_data.set_index("date")
         vix_data["risky"] = (vix_data["close"] > 20).astype(int)
         target = vix_data["risky"]
 
-        # Align features with the target
-        features = data["features"].join(target, how="inner")
-        target = features["risky"]
-        features = features.drop(columns=["risky"])
+        # Align features with the target and get the labels
+        features_df = data["features"].join(target, how="inner")
+        labels = torch.tensor(features_df["risky"].values, dtype=torch.long).to(self.device)
 
-        return model.train(features, target)
+        # Create a graph data object using only the features that have labels
+        features = torch.tensor(features_df.drop(columns=["risky"]).values, dtype=torch.float).to(self.device)
+
+        # Create edge index for a fully connected graph
+        num_nodes = features.shape[0]
+        edge_index = torch.combinations(torch.arange(num_nodes), r=2).t().contiguous()
+        edge_index = edge_index.to(self.device)
+
+        graph_data = Data(x=features, edge_index=edge_index, y=labels)
+
+        model.train()
+        for epoch in range(self.config.get("epochs", 10)):
+            optimizer.zero_grad()
+            out = model(graph_data)
+            loss = criterion(out, graph_data.y)
+            loss.backward()
+            optimizer.step()
+            logger.info(f"[{self.job_id}] Epoch {epoch+1}, Loss: {loss.item()}")
+
+        return {"loss": loss.item()}
 
     def _predict(self, model, data: Dict[str, Any]):
         """Generate predictions."""
         logger.info(f"[{self.job_id}] Generating predictions")
-        return model.predict_proba(data["features"])
+        model.eval()
+
+        features = torch.tensor(data["features"].values, dtype=torch.float).to(self.device)
+        num_nodes = features.shape[0]
+        edge_index = torch.combinations(torch.arange(num_nodes), r=2).t().contiguous()
+        edge_index = edge_index.to(self.device)
+
+        graph_data = Data(x=features, edge_index=edge_index)
+
+        with torch.no_grad():
+            out = model(graph_data)
+
+        return torch.exp(out).cpu().numpy()
 
     def _compute_risk_scores(self, predictions, data) -> RiskScores:
         """Compute aggregated risk scores."""
-        logger.info(f"[{self.job_id}] Computing risk scores")
-        # This is a placeholder for actual risk score calculation
-        # In a real scenario, you would have a more sophisticated mapping from predictions to risk scores
-        market_liq = {"overall": np.mean(predictions[:, 1]) * 100}
-        funding_liq = {"overall": np.mean(predictions[:, 1]) * 100}
-        systemic = {"network_risk": np.mean(predictions[:, 1]) * 100}
-        operational = {"process_risk": 50.0}
+        logger.info(f"[{self.job_id}] Computing enhanced risk scores")
 
-        overall = (market_liq["overall"] + funding_liq["overall"] + systemic["network_risk"]) / 3
+        risk_probabilities = predictions[:, 1]
+
+        # Enhanced Market Liquidity: based on volatility assets
+        vix_related_assets = [c for c in data["features"].columns if "VIX" in c]
+        market_liq_score = data["features"][vix_related_assets].mean(axis=1).mean() * 10
+
+        # Enhanced Funding Liquidity: based on interest rate spreads
+        interest_rate_spreads = [c for c in data["features"].columns if "spread" in c.lower()]
+        funding_liq_score = data["features"][interest_rate_spreads].mean(axis=1).mean() * 10
+
+        # Systemic Risk: based on graph properties and prediction variance
+        systemic_risk_score = np.std(risk_probabilities) * 200
+
+        # Operational Risk: simple placeholder based on prediction confidence
+        operational_risk_score = (1 - np.mean(np.abs(risk_probabilities - 0.5))) * 100
+
+        # Combine scores with weights
+        overall = (market_liq_score * 0.3) + (funding_liq_score * 0.3) + (systemic_risk_score * 0.4)
+        overall = np.clip(overall, 0, 100)
 
         if overall < 30:
             risk_level = "low"
@@ -223,10 +276,10 @@ class EngineOrchestrator:
             risk_level = "critical"
 
         return RiskScores(
-            market_liquidity=market_liq,
-            funding_liquidity=funding_liq,
-            systemic_risk=systemic,
-            operational_risk=operational,
+            market_liquidity={"score": market_liq_score},
+            funding_liquidity={"score": funding_liq_score},
+            systemic_risk={"score": systemic_risk_score},
+            operational_risk={"score": operational_risk_score},
             overall_score=overall,
             risk_level=risk_level
         )
