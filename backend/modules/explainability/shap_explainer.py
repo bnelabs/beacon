@@ -151,7 +151,8 @@ class ModelExplainer:
                     return np.ones(input_data.size(1)) / input_data.size(1)
             else:
                 return None
-        except:
+        except Exception as e:
+            logger.warning(f"Failed to get attention weights: {e}")
             return None
 
     def _compute_temporal_importance(self, importance_scores: np.ndarray) -> Dict[str, float]:

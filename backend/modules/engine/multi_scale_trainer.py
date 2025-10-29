@@ -69,7 +69,7 @@ class MultiSourceDataset(Dataset):
             source_data = source_data.sort_values('Date')
 
             # Extract values
-            values = source_data['Value'].fillna(method='ffill').fillna(0).values
+            values = source_data['Value'].ffill().fillna(0).values
 
             # Store normalization stats PER SOURCE
             mean = float(np.mean(values))

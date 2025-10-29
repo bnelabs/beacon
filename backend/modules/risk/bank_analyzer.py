@@ -249,9 +249,10 @@ class BankRiskAnalyzer:
         recommendations = self._generate_recommendations(risk_value, risk_level, explanation)
 
         # Extract separate risk components from prediction data
-        market_liquidity_risk = self._compute_market_liquidity_risk(bank_data, risk_value)
-        funding_liquidity_risk = self._compute_funding_liquidity_risk(bank_data, risk_value)
-        operational_risk = self._compute_operational_risk(bank_data)
+        # Use the sequence tensor (not DataFrame) for risk computations
+        market_liquidity_risk = self._compute_market_liquidity_risk(sequence, risk_value)
+        funding_liquidity_risk = self._compute_funding_liquidity_risk(sequence, risk_value)
+        operational_risk = self._compute_operational_risk(sequence)
 
         return BankRiskProfile(
             bank_id=bank_id,
@@ -273,7 +274,6 @@ class BankRiskAnalyzer:
 
     def _compute_market_liquidity_risk(self, bank_data: torch.Tensor, overall_risk: float) -> float:
         """Compute market liquidity risk component from bank data features."""
-        import numpy as np
 
         # If we can extract market-specific features from the data
         # Market liquidity is affected by bid-ask spreads, trading volumes, price volatility
@@ -307,7 +307,6 @@ class BankRiskAnalyzer:
 
     def _compute_funding_liquidity_risk(self, bank_data: torch.Tensor, overall_risk: float) -> float:
         """Compute funding liquidity risk component from bank data features."""
-        import numpy as np
 
         # Funding liquidity is affected by funding access, rollover risk, maturity mismatches
         try:
@@ -334,7 +333,6 @@ class BankRiskAnalyzer:
 
     def _compute_operational_risk(self, bank_data: torch.Tensor) -> float:
         """Compute operational risk from data quality and completeness."""
-        import numpy as np
 
         try:
             data_np = bank_data.cpu().numpy() if torch.is_tensor(bank_data) else bank_data

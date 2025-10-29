@@ -1,8 +1,8 @@
 """Data Cleaner - Missing value imputation and outlier handling."""
 
 import logging
-from typing import Dict, Tuple
-from dataclasses import dataclass
+from typing import Dict, Tuple, List
+from dataclasses import dataclass, field
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -11,11 +11,7 @@ logger = logging.getLogger(__name__)
 class CleaningReport:
     fixed_issues: int = 0
     anomalies_detected: int = 0
-    warnings: list = None
-
-    def __post_init__(self):
-        if self.warnings is None:
-            self.warnings = []
+    warnings: List[str] = field(default_factory=list)
 
 class DataCleaner:
     def __init__(self, job_id: str):
@@ -32,7 +28,7 @@ class DataCleaner:
                 continue
             
             # Forward fill missing values
-            df_clean = df.fillna(method='ffill').fillna(method='bfill')
+            df_clean = df.ffill().bfill()
             cleaned[code] = df_clean
             
             fixed = df.isnull().sum().sum() - df_clean.isnull().sum().sum()
