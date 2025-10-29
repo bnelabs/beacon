@@ -450,7 +450,7 @@ def run_prediction(self, job_id: int, parameters: dict):
         logger.info(f"Starting prediction for job {job_id}")
 
         # Load trained model and data
-        from modules.engine.prediction_engine import PredictionEngine
+        from modules.engine.prediction_engine import RealPredictionEngine
         import torch
         import os
 
@@ -470,7 +470,7 @@ def run_prediction(self, job_id: int, parameters: dict):
 
         # Initialize prediction engine
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        engine = PredictionEngine(
+        engine = RealPredictionEngine(
             model_path=model_path,
             device=device,
             config=parameters.get('config', {})
@@ -548,7 +548,7 @@ def run_backtest(self, job_id: int, parameters: dict):
         logger.info(f"Starting backtest for job {job_id}")
 
         from modules.engine.trainer import ModelTrainer
-        from modules.engine.prediction_engine import PredictionEngine
+        from modules.engine.prediction_engine import RealPredictionEngine
         import torch
         import numpy as np
 
@@ -587,7 +587,7 @@ def run_backtest(self, job_id: int, parameters: dict):
 
         # Initialize prediction engine with trained model
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        engine = PredictionEngine(
+        engine = RealPredictionEngine(
             model_path=model_path,
             device=device,
             config=parameters.get('config', {})
