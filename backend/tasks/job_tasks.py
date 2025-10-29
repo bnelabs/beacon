@@ -234,9 +234,9 @@ def run_training(self, job_id: int, parameters: dict):
 
         if not data_job_id:
             # Try to find the most recent completed data collection job
-            from models.job import Job, JobType
+            from models.job import Job
             recent_data_job = db.query(Job).filter(
-                Job.job_type == JobType.DATA_COLLECTION,
+                Job.job_type == "data_collection",
                 Job.status == "completed"
             ).order_by(Job.completed_at.desc()).first()
 
