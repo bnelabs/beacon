@@ -180,7 +180,7 @@ async def report_client_error(
 
     except Exception as e:
         # Don't fail if error reporting fails
-        print(f"Failed to report client error: {e}")
+        logger.error(f"Failed to report client error: {e}")
         return {
             "success": False,
             "message": "Failed to report error"

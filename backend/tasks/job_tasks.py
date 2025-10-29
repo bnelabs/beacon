@@ -445,14 +445,59 @@ def run_prediction(self, job_id: int, parameters: dict):
 
         logger.info(f"Starting prediction for job {job_id}")
 
-        # TODO: Implement prediction logic
-        # This will load the trained model and make predictions
+        # Load trained model and data
+        from modules.engine.prediction_engine import PredictionEngine
+        import torch
+        import os
+
+        self.update_progress(job_id, 10.0)
+
+        # Get model and data paths
+        model_path = parameters.get("model_path")
+        data_path = parameters.get("data_path")
+
+        if not model_path or not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+
+        if not data_path or not os.path.exists(data_path):
+            raise FileNotFoundError(f"Data file not found: {data_path}")
+
+        self.update_progress(job_id, 20.0)
+
+        # Initialize prediction engine
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        engine = PredictionEngine(
+            model_path=model_path,
+            device=device,
+            config=parameters.get('config', {})
+        )
+
+        self.update_progress(job_id, 40.0)
+
+        # Load and prepare data
+        import pandas as pd
+        data = pd.read_parquet(data_path)
 
         self.update_progress(job_id, 50.0)
 
+        # Generate predictions
+        predictions = engine.predict(data)
+
+        self.update_progress(job_id, 80.0)
+
+        # Save predictions
+        output_dir = parameters.get('output_dir', '/app/data/predictions')
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = f"{output_dir}/predictions_{job_id}.parquet"
+
+        predictions_df = pd.DataFrame(predictions)
+        predictions_df.to_parquet(output_path)
+
         result = {
-            "status": "predictions generated",
-            "message": "Prediction functionality to be implemented",
+            "status": "completed",
+            "predictions_path": output_path,
+            "num_predictions": len(predictions_df),
+            "mean_risk": float(predictions_df['risk_score'].mean()) if 'risk_score' in predictions_df else None,
             "completed_at": datetime.utcnow().isoformat()
         }
 
@@ -498,15 +543,103 @@ def run_backtest(self, job_id: int, parameters: dict):
 
         logger.info(f"Starting backtest for job {job_id}")
 
-        # NOTE: Placeholder - actual backtesting requires full pipeline
-        logger.warning("Backtest job running with placeholder implementation")
-        logger.info("Full backtesting requires pipeline orchestration")
+        from modules.engine.trainer import ModelTrainer
+        from modules.engine.prediction_engine import PredictionEngine
+        import torch
+        import numpy as np
+
+        self.update_progress(job_id, 10.0)
+
+        # Get parameters
+        model_path = parameters.get("model_path")
+        data_path = parameters.get("data_path")
+        train_start = parameters.get("train_start")
+        train_end = parameters.get("train_end")
+        test_start = parameters.get("test_start")
+        test_end = parameters.get("test_end")
+
+        if not model_path or not data_path:
+            raise ValueError("model_path and data_path are required for backtesting")
 
         self.update_progress(job_id, 20.0)
 
-        # Simulate processing
-        import time
-        time.sleep(2)
+        # Load historical data
+        import pandas as pd
+        data = pd.read_parquet(data_path)
+
+        if 'date' in data.columns:
+            data['date'] = pd.to_datetime(data['date'])
+            train_data = data[(data['date'] >= train_start) & (data['date'] <= train_end)]
+            test_data = data[(data['date'] >= test_start) & (data['date'] <= test_end)]
+        else:
+            # If no date column, use time-based split
+            split_idx = int(len(data) * 0.8)
+            train_data = data[:split_idx]
+            test_data = data[split_idx:]
+
+        logger.info(f"Backtest: {len(train_data)} train samples, {len(test_data)} test samples")
+
+        self.update_progress(job_id, 40.0)
+
+        # Initialize prediction engine with trained model
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        engine = PredictionEngine(
+            model_path=model_path,
+            device=device,
+            config=parameters.get('config', {})
+        )
+
+        self.update_progress(job_id, 60.0)
+
+        # Generate predictions on test set
+        test_predictions = engine.predict(test_data)
+
+        # Calculate backtest metrics
+        if 'actual_risk' in test_data.columns or 'target' in test_data.columns:
+            target_col = 'actual_risk' if 'actual_risk' in test_data.columns else 'target'
+            actuals = test_data[target_col].values
+
+            pred_values = np.array([p.get('risk_score', p.get('prediction', 0)) for p in test_predictions])
+
+            # Align lengths
+            min_len = min(len(actuals), len(pred_values))
+            actuals = actuals[:min_len]
+            pred_values = pred_values[:min_len]
+
+            # Calculate metrics
+            mse = np.mean((actuals - pred_values) ** 2)
+            mae = np.mean(np.abs(actuals - pred_values))
+            rmse = np.sqrt(mse)
+
+            ss_res = np.sum((actuals - pred_values) ** 2)
+            ss_tot = np.sum((actuals - np.mean(actuals)) ** 2)
+            r2 = 1 - (ss_res / (ss_tot + 1e-8))
+
+            # Directional accuracy
+            if len(actuals) > 1:
+                actual_direction = np.diff(actuals) > 0
+                pred_direction = np.diff(pred_values) > 0
+                directional_accuracy = np.mean(actual_direction == pred_direction)
+            else:
+                directional_accuracy = 0.0
+
+            backtest_metrics = {
+                "mse": float(mse),
+                "mae": float(mae),
+                "rmse": float(rmse),
+                "r2": float(r2),
+                "directional_accuracy": float(directional_accuracy)
+            }
+        else:
+            # No ground truth - compute prediction statistics
+            pred_values = np.array([p.get('risk_score', p.get('prediction', 0)) for p in test_predictions])
+            backtest_metrics = {
+                "mean_prediction": float(np.mean(pred_values)),
+                "std_prediction": float(np.std(pred_values)),
+                "min_prediction": float(np.min(pred_values)),
+                "max_prediction": float(np.max(pred_values)),
+                "note": "No ground truth available"
+            }
 
         self.update_progress(job_id, 95.0)
 
@@ -514,13 +647,12 @@ def run_backtest(self, job_id: int, parameters: dict):
         end_memory = process.memory_info().rss / (1024 ** 2)
         peak_memory = end_memory - start_memory
 
-        # Prepare placeholder results summary
+        # Prepare results summary
         result = {
-            "status": "placeholder",
-            "message": "Backtesting requires full pipeline integration. Use pipeline API for complete backtesting.",
-            "num_windows": 0,
-            "avg_mse": None,
-            "avg_mae": None,
+            "status": "completed",
+            "train_samples": len(train_data),
+            "test_samples": len(test_data),
+            "backtest_metrics": backtest_metrics,
             "completed_at": datetime.utcnow().isoformat()
         }
 

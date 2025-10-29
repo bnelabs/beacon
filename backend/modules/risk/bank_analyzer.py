@@ -8,6 +8,24 @@ from dataclasses import dataclass
 import logging
 
 from modules.explainability.shap_explainer import ModelExplainer, NetworkExplainer, ExplanationResult
+from .constants import (
+    RISK_THRESHOLD_LOW,
+    RISK_THRESHOLD_MODERATE,
+    RISK_THRESHOLD_HIGH,
+    HIGH_RISK_THRESHOLD,
+    CRITICAL_RISK_THRESHOLD,
+    WEIGHT_INDIVIDUAL_RISK,
+    WEIGHT_SYSTEMIC_CONCENTRATION,
+    WEIGHT_NETWORK_INTERCONNECTEDNESS,
+    VOLATILITY_NORMALIZATION_FACTOR,
+    TREND_NORMALIZATION_FACTOR,
+    OPERATIONAL_RISK_MINIMUM,
+    OPERATIONAL_RISK_MAXIMUM,
+    OPERATIONAL_RISK_DEFAULT,
+    WEIGHT_DATA_COMPLETENESS,
+    WEIGHT_DATA_CONSISTENCY,
+    RECENT_DATA_WINDOW
+)
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +151,7 @@ class BankRiskAnalyzer:
             # Simulate cascades for high-risk banks
             cascade_scenarios = {}
             for bank_id, risk in bank_predictions.items():
-                if risk > 0.7:  # High risk
+                if risk > HIGH_RISK_THRESHOLD:  # High risk
                     cascade = self.network_explainer.simulate_cascade(
                         bank_id, bank_predictions, bank_exposures
                     )
@@ -156,8 +174,8 @@ class BankRiskAnalyzer:
         risks = [p.overall_liquidity_risk for p in bank_profiles.values()]
         avg_risk = float(np.mean(risks))
         max_risk = float(np.max(risks))
-        num_high_risk = sum(1 for r in risks if r > 0.7)
-        num_critical_risk = sum(1 for r in risks if r > 0.9)
+        num_high_risk = sum(1 for r in risks if r > HIGH_RISK_THRESHOLD)
+        num_critical_risk = sum(1 for r in risks if r > CRITICAL_RISK_THRESHOLD)
 
         # System-wide risk
         systemic_risk_score = self._compute_systemic_risk(
@@ -214,11 +232,11 @@ class BankRiskAnalyzer:
 
         # Classify risk level
         risk_value = explanation.prediction_value
-        if risk_value < 0.3:
+        if risk_value < RISK_THRESHOLD_LOW:
             risk_level = "low"
-        elif risk_value < 0.6:
+        elif risk_value < RISK_THRESHOLD_MODERATE:
             risk_level = "medium"
-        elif risk_value < 0.85:
+        elif risk_value < RISK_THRESHOLD_HIGH:
             risk_level = "high"
         else:
             risk_level = "critical"
@@ -230,13 +248,18 @@ class BankRiskAnalyzer:
         # Generate recommendations
         recommendations = self._generate_recommendations(risk_value, risk_level, explanation)
 
+        # Extract separate risk components from prediction data
+        market_liquidity_risk = self._compute_market_liquidity_risk(bank_data, risk_value)
+        funding_liquidity_risk = self._compute_funding_liquidity_risk(bank_data, risk_value)
+        operational_risk = self._compute_operational_risk(bank_data)
+
         return BankRiskProfile(
             bank_id=bank_id,
             bank_name=f"Bank {bank_id}",  # Would come from database
             overall_liquidity_risk=risk_value,
-            market_liquidity_risk=risk_value * 0.9,  # Placeholder - would be computed separately
-            funding_liquidity_risk=risk_value * 1.1,
-            operational_risk=0.3,  # Placeholder
+            market_liquidity_risk=market_liquidity_risk,
+            funding_liquidity_risk=funding_liquidity_risk,
+            operational_risk=operational_risk,
             confidence_lower=explanation.confidence_lower,
             confidence_upper=explanation.confidence_upper,
             explanation=explanation,
@@ -247,6 +270,102 @@ class BankRiskAnalyzer:
             top_strengths=top_strengths,
             recommendations=recommendations
         )
+
+    def _compute_market_liquidity_risk(self, bank_data: torch.Tensor, overall_risk: float) -> float:
+        """Compute market liquidity risk component from bank data features."""
+        import numpy as np
+
+        # If we can extract market-specific features from the data
+        # Market liquidity is affected by bid-ask spreads, trading volumes, price volatility
+        try:
+            # Convert tensor to numpy for analysis
+            data_np = bank_data.cpu().numpy() if torch.is_tensor(bank_data) else bank_data
+
+            # Compute volatility as a proxy for market liquidity stress
+            if len(data_np.shape) > 1:
+                volatility = np.std(data_np[:, 0]) if data_np.shape[1] > 0 else 0.0
+            else:
+                volatility = np.std(data_np)
+
+            # Recent trend analysis
+            recent_data = data_np[-RECENT_DATA_WINDOW:] if len(data_np) >= RECENT_DATA_WINDOW else data_np
+            trend = np.polyfit(range(len(recent_data)), recent_data.flatten(), 1)[0]
+
+            # Combine overall risk with market-specific indicators
+            # Higher volatility and negative trend increase market liquidity risk
+            volatility_factor = min(volatility / VOLATILITY_NORMALIZATION_FACTOR, 1.0)  # Normalize to 0-1
+            trend_factor = max(-trend, 0) / TREND_NORMALIZATION_FACTOR  # Negative trends increase risk
+
+            market_risk = overall_risk * 0.7 + volatility_factor * 0.2 + trend_factor * 0.1
+
+            return float(np.clip(market_risk, 0.0, 1.0))
+
+        except Exception as e:
+            logger.warning(f"Could not compute market liquidity risk: {e}")
+            # Fallback: slightly lower than overall risk
+            return float(overall_risk * 0.9)
+
+    def _compute_funding_liquidity_risk(self, bank_data: torch.Tensor, overall_risk: float) -> float:
+        """Compute funding liquidity risk component from bank data features."""
+        import numpy as np
+
+        # Funding liquidity is affected by funding access, rollover risk, maturity mismatches
+        try:
+            data_np = bank_data.cpu().numpy() if torch.is_tensor(bank_data) else bank_data
+
+            # Analyze data stability and concentration
+            if len(data_np.shape) > 1:
+                stability = 1.0 - np.std(data_np[:, 0]) / (np.mean(np.abs(data_np[:, 0])) + 1e-8)
+            else:
+                stability = 1.0 - np.std(data_np) / (np.mean(np.abs(data_np)) + 1e-8)
+
+            # Lower stability means higher funding risk
+            instability_factor = max(1.0 - stability, 0.0)
+
+            # Funding risk tends to be slightly higher than overall risk during stress
+            funding_risk = overall_risk * 0.8 + instability_factor * 0.2
+
+            return float(np.clip(funding_risk, 0.0, 1.0))
+
+        except Exception as e:
+            logger.warning(f"Could not compute funding liquidity risk: {e}")
+            # Fallback: slightly higher than overall risk
+            return float(min(overall_risk * 1.1, 1.0))
+
+    def _compute_operational_risk(self, bank_data: torch.Tensor) -> float:
+        """Compute operational risk from data quality and completeness."""
+        import numpy as np
+
+        try:
+            data_np = bank_data.cpu().numpy() if torch.is_tensor(bank_data) else bank_data
+
+            # Operational risk is based on data quality indicators
+            # Missing data, irregularities, and gaps increase operational risk
+            data_flat = data_np.flatten()
+
+            # Check for data irregularities
+            if len(data_flat) > 0:
+                # Data completeness (no NaN or extreme values)
+                completeness = 1.0 - (np.isnan(data_flat).sum() / len(data_flat))
+
+                # Data consistency (low coefficient of variation)
+                if np.mean(data_flat) != 0:
+                    cv = np.std(data_flat) / abs(np.mean(data_flat))
+                    consistency = 1.0 / (1.0 + cv)
+                else:
+                    consistency = 0.5
+
+                # Operational risk is inverse of data quality
+                operational_risk = 1.0 - (0.6 * completeness + 0.4 * consistency)
+
+                # Typically operational risk is lower than market/funding risks
+                return float(np.clip(operational_risk * 0.5, OPERATIONAL_RISK_MINIMUM, OPERATIONAL_RISK_MAXIMUM))
+            else:
+                return OPERATIONAL_RISK_DEFAULT  # Default moderate operational risk
+
+        except Exception as e:
+            logger.warning(f"Could not compute operational risk: {e}")
+            return OPERATIONAL_RISK_DEFAULT  # Default moderate operational risk
 
     def _compute_systemic_risk(
         self,
@@ -259,16 +378,16 @@ class BankRiskAnalyzer:
         if len(bank_predictions) == 0:
             return 0.0
 
-        # Component 1: Average individual risk (40%)
+        # Component 1: Average individual risk
         avg_individual_risk = np.mean(list(bank_predictions.values()))
 
-        # Component 2: Concentration of risk in systemic banks (30%)
+        # Component 2: Concentration of risk in systemic banks
         if systemic_banks:
             systemic_risk_concentration = np.mean([score for _, score, _ in systemic_banks[:3]])
         else:
             systemic_risk_concentration = 0.0
 
-        # Component 3: Network interconnectedness (30%)
+        # Component 3: Network interconnectedness
         if not contagion_matrix.empty:
             # Average off-diagonal contagion effect
             np_matrix = contagion_matrix.values
@@ -278,9 +397,9 @@ class BankRiskAnalyzer:
             avg_contagion = 0.0
 
         systemic_risk = (
-            0.4 * avg_individual_risk +
-            0.3 * systemic_risk_concentration +
-            0.3 * min(avg_contagion * 10, 1.0)  # Scale to 0-1
+            WEIGHT_INDIVIDUAL_RISK * avg_individual_risk +
+            WEIGHT_SYSTEMIC_CONCENTRATION * systemic_risk_concentration +
+            WEIGHT_NETWORK_INTERCONNECTEDNESS * min(avg_contagion * 10, 1.0)  # Scale to 0-1
         )
 
         return float(systemic_risk)

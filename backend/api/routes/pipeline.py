@@ -454,8 +454,8 @@ def _execute_pipeline(
         db.commit()
 
         import traceback
-        print(f"Pipeline failed: {e}")
-        print(traceback.format_exc())
+        logger.error(f"Pipeline failed: {e}")
+        logger.error(traceback.format_exc())
 
     finally:
         db.close()

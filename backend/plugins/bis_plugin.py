@@ -75,14 +75,37 @@ class BISPlugin(DataSourcePlugin):
             base_url = "https://stats.bis.org/api/v1"
             all_data = []
 
+            # Map common symbols to BIS series codes
+            bis_series_map = {
+                # Exchange rates (effective exchange rate indices)
+                'USD': 'WS_XRU_D/D.USD.EUR',
+                'EUR': 'WS_XRU_D/D.EUR.USD',
+                'GBP': 'WS_XRU_D/D.GBP.USD',
+                'JPY': 'WS_XRU_D/D.JPY.USD',
+                'CHF': 'WS_XRU_D/D.CHF.USD',
+                # Credit statistics (credit to non-financial sector)
+                'US_CREDIT': 'WS_CREDIT_GAP/Q.US',
+                'EU_CREDIT': 'WS_CREDIT_GAP/Q.XM',
+                # Property prices
+                'US_PROPERTY': 'WS_LONG_PP/Q.US.N.628',
+                'EU_PROPERTY': 'WS_LONG_PP/Q.XM.N.628'
+            }
+
             for symbol in symbols:
                 try:
-                    # BIS uses specific series keys
-                    # For now, we'll return empty data and log
-                    logger.info(f"BIS asset data fetch for {symbol} - implementation needed for specific series")
+                    # Get BIS series code
+                    series_code = bis_series_map.get(symbol, symbol)
 
-                    # Placeholder: return empty DataFrame
-                    # TODO: Implement specific BIS series mapping
+                    # Fetch data using indicator method
+                    df = self.fetch_indicator_data(series_code, start_date, end_date)
+
+                    if df is not None and not df.empty:
+                        # Add symbol column
+                        df['symbol'] = symbol
+                        all_data.append(df)
+                        logger.info(f"Fetched BIS data for {symbol}: {len(df)} rows")
+                    else:
+                        logger.warning(f"No data returned for {symbol} from BIS")
 
                 except Exception as e:
                     logger.warning(f"Failed to fetch {symbol} from BIS: {e}")

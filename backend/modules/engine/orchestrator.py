@@ -174,47 +174,160 @@ class EngineOrchestrator:
     
     def _get_model(self):
         """Load or train model."""
-        # Placeholder - return mock model
-        class MockModel:
-            def predict(self, X):
-                import numpy as np
-                return np.random.rand(len(X))
-        
-        return MockModel()
+        from modules.engine.models import HeterogeneousGraphTransformer
+        import os
+
+        model_path = f"{self.output_dir}/{self.job_id}/model.pt"
+
+        # Check if trained model exists
+        if os.path.exists(model_path):
+            logger.info(f"[{self.job_id}] Loading trained model from {model_path}")
+            checkpoint = torch.load(model_path, map_location=self.device)
+
+            # Extract model configuration
+            config = checkpoint.get('config', self.config)
+
+            # Initialize model architecture
+            model = HeterogeneousGraphTransformer(
+                input_dim=config.get('input_dim', 1),
+                hidden_dim=config.get('hidden_dim', 128),
+                output_dim=config.get('output_dim', 1),
+                num_heads=config.get('num_heads', 8),
+                num_layers=config.get('num_layers', 3),
+                dropout=config.get('dropout', 0.1)
+            ).to(self.device)
+
+            # Load trained weights
+            model.load_state_dict(checkpoint['model_state_dict'])
+            model.eval()
+            logger.info(f"[{self.job_id}] Model loaded successfully")
+            return model
+        else:
+            raise FileNotFoundError(
+                f"Trained model not found at {model_path}. "
+                "Please run training job first before using ENGINE orchestrator."
+            )
     
     def _predict(self, model, data: Dict[str, Any]):
-        """Generate predictions."""
+        """Generate predictions using trained model."""
         import numpy as np
-        
-        # Mock predictions
-        n_samples = len(data["timeseries"])
+        import pandas as pd
+
+        df = data["timeseries"]
+
+        # Prepare sequences for time-series prediction
+        sequence_length = self.config.get('sequence_length', 30)
+        features_df = data["features"]
+
+        # Ensure we have numeric data
+        if 'value' not in df.columns:
+            raise ValueError("Timeseries data must contain 'value' column")
+
+        # Create sequences
+        values = df['value'].values
+        sequences = []
+        timestamps = []
+
+        for i in range(len(values) - sequence_length):
+            sequences.append(values[i:i+sequence_length])
+            timestamps.append(df.iloc[i+sequence_length].get('date', i+sequence_length))
+
+        if len(sequences) == 0:
+            raise ValueError(f"Not enough data for prediction. Need at least {sequence_length} samples.")
+
+        sequences = np.array(sequences)
+
+        # Convert to tensors
+        X = torch.FloatTensor(sequences).unsqueeze(-1).to(self.device)  # (batch, seq_len, 1)
+
+        # Generate predictions in batches
+        batch_size = self.config.get('batch_size', 32)
+        predictions = []
+
+        model.eval()
+        with torch.no_grad():
+            for i in range(0, len(X), batch_size):
+                batch = X[i:i+batch_size]
+                pred = model(batch)
+                predictions.append(pred.cpu().numpy())
+
+        predictions = np.concatenate(predictions, axis=0).flatten()
+
+        # Calculate risk scores from predictions
+        # Normalize predictions to risk scores (0-100)
+        risk_scores = (predictions - predictions.min()) / (predictions.max() - predictions.min() + 1e-8) * 100
+
         return {
-            "market_liquidity": np.random.rand(n_samples) * 100,
-            "funding_liquidity": np.random.rand(n_samples) * 100,
-            "systemic_risk": np.random.rand(n_samples) * 100
+            "timestamps": timestamps,
+            "predictions": predictions,
+            "market_liquidity": risk_scores,
+            "funding_liquidity": risk_scores * 0.95,  # Correlated but slightly different
+            "systemic_risk": risk_scores * 1.05  # Slightly amplified for systemic risk
         }
     
     def _compute_risk_scores(self, predictions, data) -> RiskScores:
-        """Compute aggregated risk scores."""
+        """Compute aggregated risk scores from predictions."""
         import numpy as np
-        
-        # Aggregate predictions
-        market_liq = {"overall": float(np.mean(predictions["market_liquidity"]))}
-        funding_liq = {"overall": float(np.mean(predictions["funding_liquidity"]))}
-        systemic = {"network_risk": float(np.mean(predictions["systemic_risk"]))}
-        operational = {"process_risk": 50.0}
-        
-        overall = (market_liq["overall"] + funding_liq["overall"] + systemic["network_risk"]) / 3
-        
-        if overall < 30:
+
+        # Risk level thresholds
+        RISK_LEVEL_LOW = 30
+        RISK_LEVEL_MEDIUM = 60
+        RISK_LEVEL_HIGH = 80
+
+        # Extract risk arrays
+        market_liq_scores = predictions["market_liquidity"]
+        funding_liq_scores = predictions["funding_liquidity"]
+        systemic_scores = predictions["systemic_risk"]
+
+        # Compute aggregate metrics
+        market_liq = {
+            "overall": float(np.mean(market_liq_scores)),
+            "current": float(market_liq_scores[-1]),  # Most recent
+            "trend": float(np.polyfit(range(len(market_liq_scores)), market_liq_scores, 1)[0]),
+            "volatility": float(np.std(market_liq_scores)),
+            "percentile_95": float(np.percentile(market_liq_scores, 95))
+        }
+
+        funding_liq = {
+            "overall": float(np.mean(funding_liq_scores)),
+            "current": float(funding_liq_scores[-1]),
+            "trend": float(np.polyfit(range(len(funding_liq_scores)), funding_liq_scores, 1)[0]),
+            "volatility": float(np.std(funding_liq_scores)),
+            "percentile_95": float(np.percentile(funding_liq_scores, 95))
+        }
+
+        systemic = {
+            "network_risk": float(np.mean(systemic_scores)),
+            "current": float(systemic_scores[-1]),
+            "trend": float(np.polyfit(range(len(systemic_scores)), systemic_scores, 1)[0]),
+            "max_risk": float(np.max(systemic_scores))
+        }
+
+        # Operational risk based on data quality and model performance
+        data_quality = data.get("metadata", {}).get("quality_score", 80.0)
+        operational = {
+            "process_risk": float(100 - data_quality),
+            "data_quality_score": float(data_quality)
+        }
+
+        # Compute overall risk score (weighted average)
+        overall = (
+            market_liq["overall"] * 0.35 +
+            funding_liq["overall"] * 0.35 +
+            systemic["network_risk"] * 0.25 +
+            operational["process_risk"] * 0.05
+        )
+
+        # Determine risk level
+        if overall < RISK_LEVEL_LOW:
             risk_level = "low"
-        elif overall < 60:
+        elif overall < RISK_LEVEL_MEDIUM:
             risk_level = "medium"
-        elif overall < 80:
+        elif overall < RISK_LEVEL_HIGH:
             risk_level = "high"
         else:
             risk_level = "critical"
-        
+
         return RiskScores(
             market_liquidity=market_liq,
             funding_liquidity=funding_liq,
@@ -225,13 +338,55 @@ class EngineOrchestrator:
         )
     
     def _evaluate(self, predictions, data) -> Dict[str, float]:
-        """Evaluate model performance."""
-        return {
-            "mse": 0.0234,
-            "mae": 0.0156,
-            "r2": 0.89,
-            "accuracy": 0.92
-        }
+        """Evaluate model performance against available ground truth."""
+        import numpy as np
+
+        metrics = {}
+
+        # If we have actual risk labels or validation data, compute real metrics
+        df = data["timeseries"]
+
+        if 'actual_risk' in df.columns or 'target' in df.columns:
+            # Real evaluation with ground truth
+            target_col = 'actual_risk' if 'actual_risk' in df.columns else 'target'
+            actual = df[target_col].values
+
+            pred_array = predictions.get("predictions", predictions.get("market_liquidity"))
+
+            # Align lengths
+            min_len = min(len(actual), len(pred_array))
+            actual = actual[-min_len:]
+            pred_array = pred_array[:min_len]
+
+            # Calculate metrics
+            mse = np.mean((actual - pred_array) ** 2)
+            mae = np.mean(np.abs(actual - pred_array))
+            rmse = np.sqrt(mse)
+
+            # R-squared
+            ss_res = np.sum((actual - pred_array) ** 2)
+            ss_tot = np.sum((actual - np.mean(actual)) ** 2)
+            r2 = 1 - (ss_res / (ss_tot + 1e-8))
+
+            metrics = {
+                "mse": float(mse),
+                "mae": float(mae),
+                "rmse": float(rmse),
+                "r2": float(r2)
+            }
+        else:
+            # No ground truth available - compute prediction quality metrics
+            pred_array = predictions.get("predictions", predictions.get("market_liquidity"))
+
+            metrics = {
+                "prediction_mean": float(np.mean(pred_array)),
+                "prediction_std": float(np.std(pred_array)),
+                "prediction_range": float(np.ptp(pred_array)),
+                "stability_score": float(1.0 / (1.0 + np.std(np.diff(pred_array)))),
+                "note": "No ground truth available - showing prediction statistics"
+            }
+
+        return metrics
     
     def _save_predictions(self, predictions) -> str:
         """Save predictions to file."""
@@ -243,9 +398,42 @@ class EngineOrchestrator:
         return path
     
     def _save_explanations(self, model, predictions) -> Optional[str]:
-        """Save model explanations."""
-        # TODO: Implement SHAP values
-        return None
+        """Save model explanations and attention weights."""
+        import pandas as pd
+        import os
+
+        try:
+            explanations = {}
+
+            # Extract attention weights if model has them
+            if hasattr(model, 'get_attention_weights'):
+                attention_weights = model.get_attention_weights()
+                explanations['attention_weights'] = attention_weights
+
+            # Save feature importance based on predictions
+            if 'timestamps' in predictions:
+                explanations['timestamps'] = predictions['timestamps']
+
+            explanations['prediction_stats'] = {
+                'mean': float(predictions['predictions'].mean()) if 'predictions' in predictions else None,
+                'std': float(predictions['predictions'].std()) if 'predictions' in predictions else None,
+                'min': float(predictions['predictions'].min()) if 'predictions' in predictions else None,
+                'max': float(predictions['predictions'].max()) if 'predictions' in predictions else None
+            }
+
+            # Save to file
+            path = f"{self.output_dir}/{self.job_id}/explanations.parquet"
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+
+            df = pd.DataFrame([explanations])
+            df.to_parquet(path)
+
+            logger.info(f"[{self.job_id}] Saved explanations to {path}")
+            return path
+
+        except Exception as e:
+            logger.warning(f"[{self.job_id}] Could not save explanations: {e}")
+            return None
     
     def _get_peak_memory(self) -> float:
         """Get peak memory usage."""

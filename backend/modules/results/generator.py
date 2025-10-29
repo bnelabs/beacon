@@ -222,22 +222,68 @@ class ResultsGenerator:
         )
     
     def _generate_institutional_profiles(self, engine_result: EngineResult) -> List[InstitutionalProfile]:
-        """Generate institution-level profiles."""
-        
-        # Mock profiles
-        profiles = [
-            InstitutionalProfile(
-                institution_id="BANK_001",
-                name="Global Systemically Important Bank",
-                market_liquidity_score=68.0,
-                funding_liquidity_score=72.0,
-                systemic_importance=85.0,
-                vulnerabilities=["High interconnectedness", "Concentrated funding sources"],
-                strengths=["Strong capital position", "Diversified asset base"],
-                recommendations=["Increase liquidity coverage ratio", "Diversify funding sources"]
-            )
-        ]
-        
+        """Generate institution-level profiles from risk scores."""
+        import numpy as np
+
+        profiles = []
+
+        # Extract risk metrics
+        market_liq = engine_result.risk_scores.market_liquidity
+        funding_liq = engine_result.risk_scores.funding_liquidity
+        systemic_risk = engine_result.risk_scores.systemic_risk
+
+        # If we have institution-specific data, create individual profiles
+        # Otherwise create an aggregate profile
+        market_score = market_liq.get('overall', market_liq.get('current', 50.0))
+        funding_score = funding_liq.get('overall', funding_liq.get('current', 50.0))
+        systemic_importance = systemic_risk.get('network_risk', systemic_risk.get('current', 50.0))
+
+        # Generate vulnerabilities based on scores
+        vulnerabilities = []
+        if market_score > 70:
+            vulnerabilities.append("Elevated market liquidity risk")
+        if funding_score > 70:
+            vulnerabilities.append("Funding liquidity pressures")
+        if systemic_importance > 70:
+            vulnerabilities.append("High systemic importance")
+
+        market_volatility = market_liq.get('volatility', 0)
+        if market_volatility > 15:
+            vulnerabilities.append("High market volatility")
+
+        # Generate strengths
+        strengths = []
+        if market_score < 40:
+            strengths.append("Stable market liquidity position")
+        if funding_score < 40:
+            strengths.append("Strong funding liquidity")
+
+        trend = market_liq.get('trend', 0)
+        if trend < 0:
+            strengths.append("Improving risk trend")
+
+        # Generate recommendations
+        recommendations = []
+        if market_score > 60:
+            recommendations.append("Enhance market-making capacity during stress")
+        if funding_score > 60:
+            recommendations.append("Diversify funding sources and extend maturities")
+        if systemic_importance > 60:
+            recommendations.append("Strengthen liquidity buffers beyond regulatory minimums")
+
+        # Create aggregate institutional profile
+        profile = InstitutionalProfile(
+            institution_id="AGGREGATE_ANALYSIS",
+            name="System-Wide Assessment",
+            market_liquidity_score=float(market_score),
+            funding_liquidity_score=float(funding_score),
+            systemic_importance=float(systemic_importance),
+            vulnerabilities=vulnerabilities if vulnerabilities else ["No significant vulnerabilities detected"],
+            strengths=strengths if strengths else ["Monitoring required"],
+            recommendations=recommendations if recommendations else ["Continue monitoring key metrics"]
+        )
+
+        profiles.append(profile)
         return profiles
     
     def _generate_market_liquidity_report(self, engine_result: EngineResult) -> Dict[str, Any]:
@@ -351,9 +397,78 @@ class ReportExporter:
         self.output_dir = output_dir
     
     def export_pdf(self, report: ComprehensiveReport) -> str:
-        """Export report as PDF."""
-        # TODO: Implement PDF generation
-        return f"{self.output_dir}/{report.job_id}/report.pdf"
+        """Export report as PDF using ReportLab."""
+        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+        import os
+
+        output_path = f"{self.output_dir}/{report.job_id}/report.pdf"
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        doc = SimpleDocTemplate(output_path, pagesize=letter)
+        styles = getSampleStyleSheet()
+        story = []
+
+        # Title
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#1a237e'),
+            spaceAfter=30,
+            alignment=TA_CENTER
+        )
+        story.append(Paragraph("BEACON Liquidity Risk Report", title_style))
+        story.append(Spacer(1, 0.3*inch))
+
+        # Executive Summary
+        story.append(Paragraph("Executive Summary", styles['Heading2']))
+        summary = report.executive_summary
+        summary_data = [
+            ['Metric', 'Value'],
+            ['Overall Risk Score', f"{summary.overall_risk_score:.1f}/100"],
+            ['Risk Level', summary.risk_level.upper()],
+            ['Active Alerts', str(summary.num_alerts)],
+            ['Institutions Analyzed', str(summary.num_institutions)],
+            ['Generated', report.generated_at.strftime('%Y-%m-%d %H:%M UTC')]
+        ]
+
+        table = Table(summary_data, colWidths=[3*inch, 2.5*inch])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a237e')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 0.3*inch))
+
+        # Key Findings
+        if summary.key_findings:
+            story.append(Paragraph("Key Findings", styles['Heading2']))
+            for finding in summary.key_findings[:5]:
+                story.append(Paragraph(f"• {finding}", styles['Normal']))
+                story.append(Spacer(1, 0.1*inch))
+
+        story.append(PageBreak())
+
+        # Recommendations
+        story.append(Paragraph("Recommendations", styles['Heading2']))
+        for i, rec in enumerate(report.recommendations[:10], 1):
+            story.append(Paragraph(f"{i}. <b>{rec.priority.upper()}</b>: {rec.action}", styles['Normal']))
+            story.append(Spacer(1, 0.15*inch))
+
+        # Build PDF
+        doc.build(story)
+        return output_path
     
     def export_json(self, report: ComprehensiveReport) -> str:
         """Export report as JSON."""
@@ -377,6 +492,62 @@ class ReportExporter:
         return path
     
     def export_excel(self, report: ComprehensiveReport) -> str:
-        """Export report as Excel."""
-        # TODO: Implement Excel export
-        return f"{self.output_dir}/{report.job_id}/report.xlsx"
+        """Export report as Excel with multiple sheets."""
+        import pandas as pd
+        import os
+        from datetime import datetime
+
+        output_path = f"{self.output_dir}/{report.job_id}/report.xlsx"
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+            # Executive Summary Sheet
+            summary = report.executive_summary
+            summary_df = pd.DataFrame({
+                'Metric': [
+                    'Overall Risk Score',
+                    'Risk Level',
+                    'Active Alerts',
+                    'Institutions Analyzed',
+                    'Data Points Processed',
+                    'Generated At'
+                ],
+                'Value': [
+                    f"{summary.overall_risk_score:.2f}",
+                    summary.risk_level,
+                    summary.num_alerts,
+                    summary.num_institutions,
+                    summary.data_points_analyzed,
+                    report.generated_at.strftime('%Y-%m-%d %H:%M UTC')
+                ]
+            })
+            summary_df.to_excel(writer, sheet_name='Executive Summary', index=False)
+
+            # Key Findings Sheet
+            if summary.key_findings:
+                findings_df = pd.DataFrame({
+                    'Finding': summary.key_findings
+                })
+                findings_df.to_excel(writer, sheet_name='Key Findings', index=False)
+
+            # Recommendations Sheet
+            recs_df = pd.DataFrame([
+                {
+                    'Priority': rec.priority,
+                    'Category': rec.category,
+                    'Action': rec.action,
+                    'Rationale': rec.rationale,
+                    'Impact': rec.expected_impact
+                }
+                for rec in report.recommendations
+            ])
+            recs_df.to_excel(writer, sheet_name='Recommendations', index=False)
+
+            # Metadata Sheet
+            metadata_df = pd.DataFrame({
+                'Property': ['Job ID', 'Version', 'Generated At'],
+                'Value': [report.job_id, report.version, report.generated_at.isoformat()]
+            })
+            metadata_df.to_excel(writer, sheet_name='Metadata', index=False)
+
+        return output_path
