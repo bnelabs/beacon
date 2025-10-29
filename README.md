@@ -16,10 +16,11 @@ BEACON is an intelligent financial risk monitoring system that analyzes **system
 
 ### Key Risk Types Monitored
 
-1. **Market Liquidity Risk** - Ability to trade assets without price impact
-2. **Funding Liquidity Risk** - Ability to meet cash obligations
-3. **Systemic Risk** - Financial system stability and contagion
-4. **Operational Risk** - Process failures and operational stress
+1. **Market Liquidity Risk** - Ability to trade assets without significant price impact
+2. **Funding Liquidity Risk** - Ability to obtain funding and meet cash obligations
+3. **Systemic Risk** - Risk of collapse of entire financial system or market
+4. **Operational Risk** - Risk from failed internal processes or external events
+5. **Credit Risk** - Counterparty and credit quality risk
 
 ---
 
@@ -118,7 +119,7 @@ BEACON uses a modular **DATA → ENGINE → RESULTS** pipeline for complete obse
 
 ## 📊 Comprehensive Data Catalogue
 
-### 50+ Pre-Configured Financial Data Sources
+### 48 Pre-Configured Financial Data Sources
 
 #### Exchange Rates (5 pairs)
 - EUR/USD, EUR/GBP, EUR/JPY, EUR/CHF, EUR/CNY
@@ -296,37 +297,111 @@ curl http://localhost:3456/api/v1/pipeline/{job_id}/download/excel -o report.xls
 ### Pipeline Endpoints
 
 ```
-POST /api/v1/pipeline              - Start complete pipeline
-GET  /api/v1/pipeline/{job_id}     - Monitor status
-GET  /api/v1/pipeline/{job_id}/data    - DATA quality report
-GET  /api/v1/pipeline/{job_id}/engine  - BNE ENGINE metrics
-GET  /api/v1/pipeline/{job_id}/results - RESULTS summary
+POST /api/v1/pipeline                           - Start complete DATA→ENGINE→RESULTS pipeline
+GET  /api/v1/pipeline/{job_id}                  - Monitor pipeline status & progress
+GET  /api/v1/pipeline/{job_id}/data             - DATA module quality report
+GET  /api/v1/pipeline/{job_id}/engine           - BNE ENGINE performance metrics
+GET  /api/v1/pipeline/{job_id}/results          - RESULTS module summary
 GET  /api/v1/pipeline/{job_id}/download/{format} - Download results (json/pdf/excel)
 ```
+
+### Job Management Endpoints
+
+```
+GET  /api/v1/jobs                    - List all jobs (filter by type, status)
+POST /api/v1/jobs                    - Create new job (data_collection, training, prediction, backtest)
+GET  /api/v1/jobs/{id}               - Get job details and progress
+DELETE /api/v1/jobs/{id}             - Cancel running job
+```
+
+**Job Types**:
+- `data_collection` - Collect and validate financial data
+- `training` - Train ML models (HGT, GNN, LSTM, Transformer)
+- `prediction` - Generate predictions using trained models
+- `backtest` - Validate model performance on historical data
 
 ### Data Catalogue Endpoints
 
 ```
-GET  /api/v1/catalogue             - List all data sources
-GET  /api/v1/catalogue/summary     - Statistics
-GET  /api/v1/catalogue/defaults    - Default selection (40+ items)
-GET  /api/v1/catalogue/categories  - Available categories
-GET  /api/v1/catalogue/regions     - Available regions
-GET  /api/v1/catalogue/risk-types  - Risk types
+GET  /api/v1/catalogue                - List all 48 data sources (filter by category/region/risk)
+GET  /api/v1/catalogue/summary        - Statistics by category, region, risk type
+GET  /api/v1/catalogue/defaults       - Get default 41 recommended sources
+GET  /api/v1/catalogue/categories     - List all categories (exchange_rates, interest_rates, etc.)
+GET  /api/v1/catalogue/regions        - List all regions (north_america, europe, asia, etc.)
+GET  /api/v1/catalogue/risk-types     - List risk types (market_liquidity, funding_liquidity, etc.)
+GET  /api/v1/catalogue/{id}           - Get specific catalogue item details
+POST /api/v1/catalogue/{id}/test      - Test data source connectivity
 ```
 
-### Other Endpoints
+### Data Source Management
 
 ```
-GET  /api/v1/data-sources          - Manage data sources
-GET  /api/v1/assets                - Manage assets
-GET  /api/v1/jobs                  - Background jobs
-GET  /api/v1/config                - System configuration
-GET  /api/v1/system/status         - System health
-GET  /api/v1/errors                - Error logs
+GET  /api/v1/data-sources          - List all configured data sources
+POST /api/v1/data-sources          - Add new data source
+GET  /api/v1/data-sources/{id}     - Get data source details
+PUT  /api/v1/data-sources/{id}     - Update data source configuration
+DELETE /api/v1/data-sources/{id}   - Remove data source
 ```
 
-**Interactive Docs**: http://localhost:3456/docs
+**Supported Plugins**: `ecb`, `fred`, `yfinance`, `alpha_vantage`, `sec_edgar`, `world_bank`, `bis`, `imf`
+
+### Asset Management
+
+```
+GET  /api/v1/assets              - List all monitored assets
+POST /api/v1/assets              - Add new asset to monitor
+POST /api/v1/assets/bulk         - Add multiple assets at once
+GET  /api/v1/assets/{id}         - Get asset details
+PUT  /api/v1/assets/{id}         - Update asset configuration
+DELETE /api/v1/assets/{id}       - Stop monitoring asset
+```
+
+### Results & Explainability
+
+```
+GET  /api/v1/results/                          - List all completed jobs with results
+GET  /api/v1/results/{job_id}                  - Get complete job results
+GET  /api/v1/results/{job_id}/executive-summary - Get executive summary
+GET  /api/v1/results/{job_id}/data-quality     - Get data quality metrics
+GET  /api/v1/results/{job_id}/risk-scores      - Get risk score breakdown
+GET  /api/v1/results/{job_id}/visualizations   - List available visualizations
+
+GET  /api/v1/explainability/{job_id}/explanation      - EU AI Act compliant model explanations
+GET  /api/v1/explainability/{job_id}/bank-risks       - Per-bank risk analysis
+GET  /api/v1/explainability/{job_id}/contagion-analysis - Network contagion effects
+GET  /api/v1/explainability/{job_id}/executive-summary - Training/prediction summary
+GET  /api/v1/explainability/{job_id}/visualizations/{name} - Download visualization (PNG)
+GET  /api/v1/explainability/{job_id}/download/predictions  - Download predictions (CSV)
+```
+
+### Configuration Management
+
+```
+GET  /api/v1/config           - Get current system configuration
+PUT  /api/v1/config/model     - Update model parameters (hidden_dim, num_heads, layers, dropout, lr)
+PUT  /api/v1/config/data      - Update data parameters (look_back, correlation_threshold, rate_limit)
+PUT  /api/v1/config/training  - Update training parameters (batch_size, epochs, early_stopping)
+```
+
+### System Monitoring
+
+```
+GET  /api/v1/system/status                    - System health (CPU, memory, GPU, disk)
+GET  /api/v1/system/resources/recommendations - Get resource optimization suggestions
+```
+
+### Error Management
+
+```
+GET  /api/v1/errors              - List all error logs (filter by severity, category)
+GET  /api/v1/errors/statistics   - Error statistics and analytics
+GET  /api/v1/errors/{id}         - Get error details with solutions
+POST /api/v1/errors/report       - Report client-side error
+POST /api/v1/errors/{id}/resolve - Mark error as resolved
+DELETE /api/v1/errors/{id}       - Delete error log
+```
+
+**Interactive API Docs**: http://localhost:3456/docs (Swagger UI)
 
 ---
 
@@ -434,17 +509,22 @@ For complete system architecture, module specifications, and context recovery:
 
 ## 🎯 Key Features
 
-✅ **Modular Architecture** - DATA-ENGINE-RESULTS pipeline
-✅ **BNE Engine** - Banking Network Engine with state-of-the-art ML
-✅ **Comprehensive Catalogue** - 50+ pre-configured sources
-✅ **Global Coverage** - US, Europe, Asia markets
-✅ **Risk-Focused** - 4 types of liquidity risk
-✅ **Real-Time Monitoring** - Every stage observable
-✅ **Quality Assurance** - Data certification before processing
-✅ **SOTA ML** - HGT, GNN, Transformers
-✅ **Actionable Reports** - For regulators, banks, payment systems
-✅ **Multiple Exports** - JSON, PDF, Excel
-✅ **Production-Ready** - Database-backed, error handling, monitoring
+✅ **Modular Architecture** - DATA-ENGINE-RESULTS pipeline with full observability
+✅ **BNE Engine** - Banking Network Engine with state-of-the-art ML models
+✅ **Comprehensive Catalogue** - 48 pre-configured financial data sources
+✅ **Global Coverage** - US, Europe, Asia, Latin America, Middle East, Africa
+✅ **Risk-Focused** - 5 types of liquidity and systemic risk
+✅ **Real-Time Monitoring** - Live job progress tracking and status updates
+✅ **Quality Assurance** - Automated data validation and certification
+✅ **SOTA ML Models** - HGT, GNN, Transformers, LSTM
+✅ **EU AI Act Compliant** - Full model explainability and transparency
+✅ **Job Management** - Data collection, training, prediction, backtesting
+✅ **Actionable Reports** - Recommendations for regulators, banks, payment systems
+✅ **Multiple Exports** - JSON, PDF, Excel formats
+✅ **Error Management** - Comprehensive error logging and resolution tracking
+✅ **Configuration API** - Dynamic model, data, and training parameter tuning
+✅ **Production-Ready** - PostgreSQL database, Celery workers, Redis cache
+✅ **API-First Design** - 55+ REST endpoints with Swagger documentation
 
 ---
 
@@ -479,14 +559,16 @@ For complete system architecture, module specifications, and context recovery:
 
 ### Database Schema
 
-- **pipeline_jobs** - Main orchestration tracking
-- **data_jobs** - DATA module metrics
-- **engine_jobs** - BNE ENGINE module metrics
-- **result_jobs** - RESULTS module outputs
-- **data_catalogue** - 50+ financial data items
-- **data_sources** - Configured connections
-- **assets** - Monitored assets
-- **error_logs** - System errors
+- **pipeline_jobs** - Main orchestration tracking (full pipeline status)
+- **data_jobs** - DATA module metrics (quality scores, completeness)
+- **engine_jobs** - BNE ENGINE module metrics (model performance, risk scores)
+- **result_jobs** - RESULTS module outputs (reports, visualizations)
+- **jobs** - Individual job tracking (data_collection, training, prediction, backtest)
+- **data_catalogue** - 48 financial data items (categories, regions, risk types)
+- **data_sources** - 8 configured data providers (ECB, FRED, Yahoo, etc.)
+- **assets** - Monitored assets and securities
+- **error_logs** - Comprehensive error tracking with resolution status
+- **config** - Dynamic system configuration (model, data, training parameters)
 
 ---
 
@@ -515,8 +597,11 @@ Copyright © 2025 BNE (Banking Network Engine). All rights reserved.
 
 **Version**: 2.0.0
 **Architecture**: Modular (DATA-BNE ENGINE-RESULTS)
-**ML Models**: HGT, GNN, Transformers
-**Data Sources**: 50+ (ECB, FRED, Yahoo, Alpha Vantage, SEC)
-**Coverage**: Global (US, Europe, Asia)
+**ML Models**: HGT, GNN, Transformers, LSTM
+**Data Sources**: 48 pre-configured (ECB, FRED, Yahoo Finance, Alpha Vantage, SEC, World Bank, BIS, IMF)
+**Coverage**: Global (US, Europe, Asia, Latin America, Middle East, Africa)
+**API Endpoints**: 55+ REST endpoints
+**Job Types**: data_collection, training, prediction, backtest
+**Explainability**: EU AI Act compliant
 **Repository**: https://github.com/rahatimrahat/beacon
 **License**: Copyright © 2025 BNE (Banking Network Engine). All rights reserved.
