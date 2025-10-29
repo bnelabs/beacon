@@ -608,14 +608,20 @@ def run_backtest(self, job_id: int, parameters: dict):
         self.update_progress(job_id, 60.0)
 
         # Generate predictions on test set
-        test_predictions = engine.predict(test_data)
+        prediction_result = engine.predict(test_data)
 
         # Calculate backtest metrics
         if 'actual_risk' in test_data.columns or 'target' in test_data.columns:
             target_col = 'actual_risk' if 'actual_risk' in test_data.columns else 'target'
             actuals = test_data[target_col].values
 
-            pred_values = np.array([p.get('risk_score', p.get('prediction', 0)) for p in test_predictions])
+            # Extract prediction values from PredictionResult
+            if 'risk_score' in prediction_result.predictions_df.columns:
+                pred_values = prediction_result.predictions_df['risk_score'].values
+            elif 'prediction' in prediction_result.predictions_df.columns:
+                pred_values = prediction_result.predictions_df['prediction'].values
+            else:
+                pred_values = prediction_result.predictions_df.iloc[:, -1].values
 
             # Align lengths
             min_len = min(len(actuals), len(pred_values))
@@ -648,7 +654,13 @@ def run_backtest(self, job_id: int, parameters: dict):
             }
         else:
             # No ground truth - compute prediction statistics
-            pred_values = np.array([p.get('risk_score', p.get('prediction', 0)) for p in test_predictions])
+            if 'risk_score' in prediction_result.predictions_df.columns:
+                pred_values = prediction_result.predictions_df['risk_score'].values
+            elif 'prediction' in prediction_result.predictions_df.columns:
+                pred_values = prediction_result.predictions_df['prediction'].values
+            else:
+                pred_values = prediction_result.predictions_df.iloc[:, -1].values
+
             backtest_metrics = {
                 "mean_prediction": float(np.mean(pred_values)),
                 "std_prediction": float(np.std(pred_values)),
@@ -663,12 +675,23 @@ def run_backtest(self, job_id: int, parameters: dict):
         end_memory = process.memory_info().rss / (1024 ** 2)
         peak_memory = end_memory - start_memory
 
+        # Convert NaN to None for JSON serialization
+        import math
+        def clean_nan(obj):
+            if isinstance(obj, dict):
+                return {k: clean_nan(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [clean_nan(v) for v in obj]
+            elif isinstance(obj, float) and math.isnan(obj):
+                return None
+            return obj
+
         # Prepare results summary
         result = {
             "status": "completed",
             "train_samples": len(train_data),
             "test_samples": len(test_data),
-            "backtest_metrics": backtest_metrics,
+            "backtest_metrics": clean_nan(backtest_metrics),
             "completed_at": datetime.utcnow().isoformat()
         }
 
