@@ -60,7 +60,7 @@ export default function DataSourceSelector({
       setLoading(true);
       setError(null);
       try {
-        const response = await axios.get('http://localhost:3456/api/v1/sources');
+        const response = await axios.get('http://localhost:3456/api/v1/data-sources');
         setDataSources(response.data.filter((ds: DataSource) => ds.enabled));
       } catch (err) {
         console.error('Failed to fetch data sources:', err);
