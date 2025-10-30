@@ -1,10 +1,15 @@
 """RESULTS Module Generator - Comprehensive reporting and visualization."""
 
 import logging
-from typing import Dict, List, Any
+import os
+from typing import Dict, List, Any, Optional
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
+
+import pandas as pd
+import numpy as np
 
 from modules.engine.orchestrator import EngineResult, RiskScores
 
@@ -27,11 +32,16 @@ class ExecutiveSummary:
     """Executive summary of risk analysis."""
     overall_risk_score: float  # 0-100
     risk_level: str  # low, medium, high, critical
-    
+
     critical_alerts: List[Dict[str, str]]
     top_risk_factors: List[Dict[str, Any]]
     key_recommendations: List[str]
-    
+    key_findings: List[str]
+
+    num_alerts: int
+    num_institutions: int
+    data_points_analyzed: int
+
     period: str
     generated_at: datetime
 
@@ -107,6 +117,40 @@ class ResultsGenerator:
     def __init__(self, job_id: str, output_dir: str):
         self.job_id = job_id
         self.output_dir = output_dir
+
+    def _load_predictions_dataframe(self, predictions_path: Optional[str]) -> Optional[pd.DataFrame]:
+        """Load predictions file into a DataFrame if available."""
+        if not predictions_path:
+            return None
+
+        path = Path(predictions_path)
+        if not path.exists():
+            logger.warning(f"[{self.job_id}] Predictions file not found at {predictions_path}")
+            return None
+
+        try:
+            if path.suffix == ".parquet":
+                return pd.read_parquet(path)
+            if path.suffix == ".csv":
+                return pd.read_csv(path)
+            if path.suffix == ".json":
+                return pd.read_json(path)
+        except Exception as exc:
+            logger.error(f"[{self.job_id}] Failed to load predictions from {predictions_path}: {exc}")
+            return None
+
+        logger.warning(f"[{self.job_id}] Unsupported predictions format: {predictions_path}")
+        return None
+
+    @staticmethod
+    def _safe_float(value: Any) -> float:
+        """Coerce values to float, returning NaN on failure."""
+        try:
+            if value is None:
+                return float('nan')
+            return float(value)
+        except (TypeError, ValueError):
+            return float('nan')
     
     def generate(self, engine_result: EngineResult) -> ComprehensiveReport:
         """
@@ -123,7 +167,7 @@ class ResultsGenerator:
             
             # Section 1: Executive Summary
             logger.info(f"[{self.job_id}] Generating executive summary")
-            exec_summary = self._generate_executive_summary(engine_result.risk_scores)
+            exec_summary = self._generate_executive_summary(engine_result)
             
             # Section 2: Geographic Analysis
             logger.info(f"[{self.job_id}] Analyzing geographic risks")
@@ -168,149 +212,353 @@ class ResultsGenerator:
             logger.error(f"[{self.job_id}] Report generation failed: {e}")
             raise
     
-    def _generate_executive_summary(self, risk_scores: RiskScores) -> ExecutiveSummary:
+    def _generate_executive_summary(self, engine_result: EngineResult) -> ExecutiveSummary:
         """Generate executive summary."""
-        
+
+        risk_scores = engine_result.risk_scores
+        predictions_df = self._load_predictions_dataframe(engine_result.predictions_path)
+
+        num_institutions = 0
+        data_points = 0
+        analysis_period = "Not available"
+        key_findings: List[str] = []
+
+        if predictions_df is not None and not predictions_df.empty:
+            data_points = len(predictions_df)
+
+            entity_columns = ['bank_id', 'institution_id', 'institution', 'source', 'counterparty']
+            id_col = next((col for col in entity_columns if col in predictions_df.columns), None)
+            if id_col:
+                num_institutions = int(predictions_df[id_col].nunique())
+
+            # Determine analysis period
+            if 'date' in predictions_df.columns:
+                dates = pd.to_datetime(predictions_df['date'], errors='coerce').dropna()
+                if not dates.empty:
+                    analysis_period = f"{dates.min().date()} to {dates.max().date()}"
+            elif 'timestamp' in predictions_df.columns:
+                dates = pd.to_datetime(predictions_df['timestamp'], errors='coerce').dropna()
+                if not dates.empty:
+                    analysis_period = f"{dates.min().date()} to {dates.max().date()}"
+
+            if 'prediction' in predictions_df.columns:
+                predictions_numeric = pd.to_numeric(predictions_df['prediction'], errors='coerce').dropna()
+                if not predictions_numeric.empty:
+                    key_findings.append(f"Average predicted liquidity stress: {predictions_numeric.mean():.2f}")
+                    key_findings.append(f"Maximum predicted liquidity stress: {predictions_numeric.max():.2f}")
+                    key_findings.append(f"Prediction volatility (std dev): {predictions_numeric.std():.2f}")
+
+            if 'error' in predictions_df.columns:
+                errors_numeric = pd.to_numeric(predictions_df['error'], errors='coerce').dropna()
+                if not errors_numeric.empty:
+                    key_findings.append(f"Mean prediction error: {errors_numeric.mean():.4f}")
+
+        # Add fallbacks based on available risk scores
+        market_liq = risk_scores.market_liquidity
+        funding_liq = risk_scores.funding_liquidity
+        systemic = risk_scores.systemic_risk
+
+        market_overall = self._safe_float(market_liq.get('overall', market_liq.get('current')))
+        funding_overall = self._safe_float(funding_liq.get('overall', funding_liq.get('current')))
+        systemic_overall = self._safe_float(systemic.get('network_risk', systemic.get('current')))
+
+        if not key_findings:
+            if np.isfinite(market_overall):
+                key_findings.append(f"Market liquidity score (overall): {market_overall:.2f}")
+            if np.isfinite(funding_overall):
+                key_findings.append(f"Funding liquidity score (overall): {funding_overall:.2f}")
+            if np.isfinite(systemic_overall):
+                key_findings.append(f"Systemic network risk: {systemic_overall:.2f}")
+
         critical_alerts = []
         if risk_scores.overall_score > 80:
             critical_alerts.append({
                 "level": "critical",
                 "message": "Systemic risk at critical levels - immediate action required"
             })
-        
+
         top_risk_factors = [
-            {"factor": "Market Liquidity Stress", "score": list(risk_scores.market_liquidity.values())[0], "trend": "increasing"},
-            {"factor": "Funding Pressure", "score": list(risk_scores.funding_liquidity.values())[0], "trend": "stable"},
-            {"factor": "Network Contagion Risk", "score": list(risk_scores.systemic_risk.values())[0], "trend": "increasing"}
+            {"factor": "Market Liquidity Stress", "score": market_overall, "trend": self._safe_float(market_liq.get('trend', 0.0))},
+            {"factor": "Funding Pressure", "score": funding_overall, "trend": self._safe_float(funding_liq.get('trend', 0.0))},
+            {"factor": "Network Contagion Risk", "score": systemic_overall, "trend": self._safe_float(systemic.get('trend', 0.0))}
         ]
-        
+
         key_recommendations = [
             "Increase liquidity buffers for high-risk institutions",
             "Enhance cross-border coordination mechanisms",
             "Implement additional stress testing scenarios"
         ]
-        
+
         return ExecutiveSummary(
             overall_risk_score=risk_scores.overall_score,
             risk_level=risk_scores.risk_level,
             critical_alerts=critical_alerts,
             top_risk_factors=top_risk_factors,
             key_recommendations=key_recommendations,
-            period="2024-01-01 to 2024-12-31",
+            key_findings=key_findings,
+            num_alerts=len(critical_alerts),
+            num_institutions=num_institutions,
+            data_points_analyzed=data_points,
+            period=analysis_period,
             generated_at=datetime.utcnow()
         )
     
     def _generate_geographic_analysis(self, engine_result: EngineResult) -> GeographicAnalysis:
         """Generate geographic risk analysis."""
-        
-        regional_scores = {
-            "North America": 65.0,
-            "Europe": 58.0,
-            "Asia": 72.0
-        }
-        
-        cross_border_risks = [
-            {"from": "Asia", "to": "Europe", "risk": 45.0, "channel": "trade_finance"},
-            {"from": "North America", "to": "Asia", "risk": 38.0, "channel": "derivatives"}
-        ]
-        
+
+        predictions_df = self._load_predictions_dataframe(engine_result.predictions_path)
+
+        regional_scores: Dict[str, float] = {}
+        cross_border_risks: List[Dict[str, Any]] = []
+        contagion_paths: List[Dict[str, Any]] = []
+        visualizations: Dict[str, Any] = {}
+
+        if predictions_df is not None and not predictions_df.empty:
+            if {'region', 'prediction'}.issubset(predictions_df.columns):
+                grouped = (
+                    predictions_df
+                    .dropna(subset=['region', 'prediction'])
+                    .assign(prediction=lambda df: pd.to_numeric(df['prediction'], errors='coerce'))
+                    .dropna(subset=['prediction'])
+                    .groupby('region')['prediction']
+                    .mean()
+                    .sort_values(ascending=False)
+                )
+                regional_scores = {str(region): float(score) for region, score in grouped.items()}
+                if regional_scores:
+                    visualizations['regional_average_risk'] = {
+                        "type": "bar",
+                        "labels": list(regional_scores.keys()),
+                        "values": list(regional_scores.values())
+                    }
+
+            cross_border_cols = {'from_region', 'to_region', 'exposure'}
+            if cross_border_cols.issubset(predictions_df.columns):
+                flows = (
+                    predictions_df
+                    .dropna(subset=list(cross_border_cols))
+                    .assign(exposure=lambda df: pd.to_numeric(df['exposure'], errors='coerce'))
+                    .dropna(subset=['exposure'])
+                    .groupby(['from_region', 'to_region'])['exposure']
+                    .sum()
+                    .reset_index()
+                    .sort_values('exposure', ascending=False)
+                )
+                cross_border_risks = [
+                    {
+                        "from": str(row['from_region']),
+                        "to": str(row['to_region']),
+                        "exposure": float(row['exposure'])
+                    }
+                    for _, row in flows.head(10).iterrows()
+                ]
+
+            if {'path_id', 'regions_in_path', 'probability'}.issubset(predictions_df.columns):
+                contagion_paths = [
+                    {
+                        "path_id": str(row['path_id']),
+                        "regions": row['regions_in_path'],
+                        "probability": float(row['probability'])
+                    }
+                    for _, row in predictions_df.dropna(subset=['path_id']).iterrows()
+                ]
+
         return GeographicAnalysis(
             regional_scores=regional_scores,
             cross_border_risks=cross_border_risks,
-            contagion_paths=[],
-            visualizations={}
+            contagion_paths=contagion_paths,
+            visualizations=visualizations
         )
     
     def _generate_institutional_profiles(self, engine_result: EngineResult) -> List[InstitutionalProfile]:
         """Generate institution-level profiles from risk scores."""
-        import numpy as np
 
-        profiles = []
+        predictions_df = self._load_predictions_dataframe(engine_result.predictions_path)
+        profiles: List[InstitutionalProfile] = []
 
-        # Extract risk metrics
-        market_liq = engine_result.risk_scores.market_liquidity
-        funding_liq = engine_result.risk_scores.funding_liquidity
-        systemic_risk = engine_result.risk_scores.systemic_risk
+        entity_columns = ['bank_id', 'institution_id', 'institution', 'source']
+        metric_candidates = ['prediction', 'predicted', 'risk_score', 'market_liquidity']
+        funding_candidates = ['funding_liquidity', 'funding_score']
+        systemic_candidates = ['systemic_risk', 'systemic_score']
 
-        # If we have institution-specific data, create individual profiles
-        # Otherwise create an aggregate profile
-        market_score = market_liq.get('overall', market_liq.get('current', 50.0))
-        funding_score = funding_liq.get('overall', funding_liq.get('current', 50.0))
-        systemic_importance = systemic_risk.get('network_risk', systemic_risk.get('current', 50.0))
+        if predictions_df is not None and not predictions_df.empty:
+            id_col = next((col for col in entity_columns if col in predictions_df.columns), None)
+            metric_col = next((col for col in metric_candidates if col in predictions_df.columns), None)
 
-        # Generate vulnerabilities based on scores
-        vulnerabilities = []
-        if market_score > 70:
-            vulnerabilities.append("Elevated market liquidity risk")
-        if funding_score > 70:
-            vulnerabilities.append("Funding liquidity pressures")
-        if systemic_importance > 70:
-            vulnerabilities.append("High systemic importance")
+            if id_col and metric_col:
+                funding_col = next((col for col in funding_candidates if col in predictions_df.columns), None)
+                systemic_col = next((col for col in systemic_candidates if col in predictions_df.columns), None)
 
-        market_volatility = market_liq.get('volatility', 0)
-        if market_volatility > 15:
-            vulnerabilities.append("High market volatility")
+                grouped = predictions_df.groupby(id_col)
 
-        # Generate strengths
-        strengths = []
-        if market_score < 40:
-            strengths.append("Stable market liquidity position")
-        if funding_score < 40:
-            strengths.append("Strong funding liquidity")
+                for entity_id, group in grouped:
+                    market_values = pd.to_numeric(group[metric_col], errors='coerce').dropna()
+                    if market_values.empty:
+                        continue
 
-        trend = market_liq.get('trend', 0)
-        if trend < 0:
-            strengths.append("Improving risk trend")
+                    funding_values = pd.to_numeric(group[funding_col], errors='coerce').dropna() if funding_col else market_values
+                    systemic_values = pd.to_numeric(group[systemic_col], errors='coerce').dropna() if systemic_col else market_values
 
-        # Generate recommendations
-        recommendations = []
-        if market_score > 60:
-            recommendations.append("Enhance market-making capacity during stress")
-        if funding_score > 60:
-            recommendations.append("Diversify funding sources and extend maturities")
-        if systemic_importance > 60:
-            recommendations.append("Strengthen liquidity buffers beyond regulatory minimums")
+                    vulnerabilities: List[str] = []
+                    strengths: List[str] = []
 
-        # Create aggregate institutional profile
-        profile = InstitutionalProfile(
-            institution_id="AGGREGATE_ANALYSIS",
-            name="System-Wide Assessment",
-            market_liquidity_score=float(market_score),
-            funding_liquidity_score=float(funding_score),
-            systemic_importance=float(systemic_importance),
-            vulnerabilities=vulnerabilities if vulnerabilities else ["No significant vulnerabilities detected"],
-            strengths=strengths if strengths else ["Monitoring required"],
-            recommendations=recommendations if recommendations else ["Continue monitoring key metrics"]
-        )
+                    market_mean = float(market_values.mean())
+                    funding_mean = float(funding_values.mean())
+                    systemic_mean = float(systemic_values.mean())
 
-        profiles.append(profile)
+                    if market_mean > 70:
+                        vulnerabilities.append("Market liquidity risk above supervisory comfort zone")
+                    if funding_mean > 70:
+                        vulnerabilities.append("Sustained funding pressures detected")
+                    if systemic_mean > 70:
+                        vulnerabilities.append("High contagion centrality")
+
+                    if market_values.std() < 10:
+                        strengths.append("Stable market liquidity conditions")
+                    if funding_mean < 40:
+                        strengths.append("Resilient funding profile")
+                    if systemic_mean < 40:
+                        strengths.append("Low network contagion influence")
+
+                    recommendations: List[str] = []
+                    if market_mean > 60:
+                        recommendations.append("Deploy additional market-making capacity and pre-arranged funding lines")
+                    if funding_mean > 60:
+                        recommendations.append("Broaden tenor mix and diversify liability sources")
+                    if systemic_mean > 60:
+                        recommendations.append("Coordinate with peer institutions on joint liquidity drills")
+
+                    profiles.append(
+                        InstitutionalProfile(
+                            institution_id=str(entity_id),
+                            name=str(entity_id),
+                            market_liquidity_score=market_mean,
+                            funding_liquidity_score=funding_mean,
+                            systemic_importance=systemic_mean,
+                            vulnerabilities=vulnerabilities or ["No acute vulnerabilities detected"],
+                            strengths=strengths or ["Maintain current liquidity governance"],
+                            recommendations=recommendations or ["Continue monitoring risk dashboards"]
+                        )
+                    )
+
+        if not profiles:
+            # Fallback to aggregate profile derived from risk scores
+            market_liq = engine_result.risk_scores.market_liquidity
+            funding_liq = engine_result.risk_scores.funding_liquidity
+            systemic_risk = engine_result.risk_scores.systemic_risk
+
+            market_score = float(market_liq.get('overall', market_liq.get('current', np.nan)))
+            funding_score = float(funding_liq.get('overall', funding_liq.get('current', np.nan)))
+            systemic_importance = float(systemic_risk.get('network_risk', systemic_risk.get('current', np.nan)))
+
+            vulnerabilities = []
+            if np.isfinite(market_score) and market_score > 70:
+                vulnerabilities.append("Elevated market liquidity stress")
+            if np.isfinite(funding_score) and funding_score > 70:
+                vulnerabilities.append("Intensifying funding outflows")
+            if np.isfinite(systemic_importance) and systemic_importance > 70:
+                vulnerabilities.append("High contagion sensitivity")
+
+            strengths = []
+            if np.isfinite(market_score) and market_score < 40:
+                strengths.append("Stable market-making conditions")
+            if np.isfinite(funding_score) and funding_score < 40:
+                strengths.append("Comfortable funding buffers")
+            if market_liq.get('trend', 0) < 0:
+                strengths.append("Improving market liquidity trajectory")
+
+            recommendations = []
+            if np.isfinite(market_score) and market_score > 60:
+                recommendations.append("Enhance secondary market liquidity provision")
+            if np.isfinite(funding_score) and funding_score > 60:
+                recommendations.append("Accelerate contingency funding planning")
+            if np.isfinite(systemic_importance) and systemic_importance > 60:
+                recommendations.append("Review interbank exposure limits")
+
+            profiles.append(
+                InstitutionalProfile(
+                    institution_id="AGGREGATE",
+                    name="System Aggregate Profile",
+                    market_liquidity_score=market_score if np.isfinite(market_score) else 0.0,
+                    funding_liquidity_score=funding_score if np.isfinite(funding_score) else 0.0,
+                    systemic_importance=systemic_importance if np.isfinite(systemic_importance) else 0.0,
+                    vulnerabilities=vulnerabilities or ["No critical vulnerabilities detected"],
+                    strengths=strengths or ["Monitoring recommended"],
+                    recommendations=recommendations or ["Continue supervisory monitoring"]
+                )
+            )
+
         return profiles
     
     def _generate_market_liquidity_report(self, engine_result: EngineResult) -> Dict[str, Any]:
         """Generate market liquidity analysis."""
-        return {
-            "overall_liquidity": "moderate",
-            "stressed_markets": ["corporate_bonds", "emerging_market_debt"],
-            "bid_ask_spreads": {"avg": 0.25, "max": 1.2},
-            "market_depth_score": 68.0
+        metrics = engine_result.risk_scores.market_liquidity
+        predictions_df = self._load_predictions_dataframe(engine_result.predictions_path)
+
+        report = {
+            "overall_score": self._safe_float(metrics.get('overall', metrics.get('current'))),
+            "current_score": self._safe_float(metrics.get('current', np.nan)),
+            "trend": self._safe_float(metrics.get('trend', 0.0)),
+            "volatility": self._safe_float(metrics.get('volatility', np.nan)),
+            "percentile_95": self._safe_float(metrics.get('percentile_95', np.nan)),
+            "data_points": 0,
+            "recent_observations": []
         }
+
+        if predictions_df is not None and not predictions_df.empty:
+            metric_col = None
+            for candidate in ['market_liquidity', 'prediction', 'predicted']:
+                if candidate in predictions_df.columns:
+                    metric_col = candidate
+                    break
+
+            if metric_col:
+                series = pd.to_numeric(predictions_df[metric_col], errors='coerce').dropna()
+                report["data_points"] = int(len(series))
+                report["recent_observations"] = [float(x) for x in series.tail(10)]
+                if not np.isfinite(report["overall_score"]) and not series.empty:
+                    report["overall_score"] = float(series.mean())
+
+        return report
     
     def _generate_funding_liquidity_report(self, engine_result: EngineResult) -> Dict[str, Any]:
         """Generate funding liquidity analysis."""
-        return {
-            "overnight_stress": "elevated",
-            "lcr_avg": 125.0,
-            "nsfr_avg": 115.0,
-            "vulnerable_institutions": 12
+        metrics = engine_result.risk_scores.funding_liquidity
+        predictions_df = self._load_predictions_dataframe(engine_result.predictions_path)
+
+        report = {
+            "overall_score": self._safe_float(metrics.get('overall', metrics.get('current'))),
+            "current_score": self._safe_float(metrics.get('current', np.nan)),
+            "trend": self._safe_float(metrics.get('trend', 0.0)),
+            "volatility": self._safe_float(metrics.get('volatility', np.nan)),
+            "percentile_95": self._safe_float(metrics.get('percentile_95', np.nan)),
+            "data_points": 0
         }
+
+        if predictions_df is not None and not predictions_df.empty:
+            if 'funding_liquidity' in predictions_df.columns:
+                series = pd.to_numeric(predictions_df['funding_liquidity'], errors='coerce').dropna()
+                report["data_points"] = int(len(series))
+                if not np.isfinite(report["overall_score"]) and not series.empty:
+                    report["overall_score"] = float(series.mean())
+
+        return report
     
     def _generate_systemic_risk_report(self, engine_result: EngineResult) -> Dict[str, Any]:
         """Generate systemic risk analysis."""
-        return {
-            "network_centrality": {"top_nodes": ["BANK_001", "BANK_003"]},
-            "contagion_probability": 0.35,
-            "cascade_simulation": {"max_failures": 8, "total_exposure": 2.5e9}
+        metrics = engine_result.risk_scores.systemic_risk
+        report = {
+            "network_risk": self._safe_float(metrics.get('network_risk', np.nan)),
+            "current": self._safe_float(metrics.get('current', np.nan)),
+            "trend": self._safe_float(metrics.get('trend', 0.0)),
+            "max_risk": self._safe_float(metrics.get('max_risk', np.nan))
         }
+
+        explanations_df = self._load_predictions_dataframe(engine_result.explanations_path) if engine_result.explanations_path else None
+        if explanations_df is not None and 'attention_weights' in explanations_df.columns:
+            report["attention_weights"] = explanations_df['attention_weights'].tolist()
+
+        return report
     
     def _generate_recommendations(self, risk_scores: RiskScores) -> List[Recommendation]:
         """Generate actionable recommendations."""
@@ -370,24 +618,78 @@ class ResultsGenerator:
     
     def _create_visualizations(self, engine_result: EngineResult) -> Dict[str, Any]:
         """Create visualization data."""
-        
-        return {
-            "risk_heatmap": {
-                "type": "heatmap",
-                "data": [[65, 58, 72], [70, 55, 68]],
-                "labels": {"x": ["North America", "Europe", "Asia"], "y": ["Market Liq", "Funding Liq"]}
-            },
-            "time_series": {
-                "type": "line",
-                "data": {"dates": ["2024-01", "2024-02"], "values": [60, 65]},
-                "title": "Risk Evolution"
-            },
-            "network_graph": {
-                "type": "network",
-                "nodes": [{"id": "BANK_001", "risk": 70}, {"id": "BANK_002", "risk": 55}],
-                "edges": [{"from": "BANK_001", "to": "BANK_002", "exposure": 1.5e8}]
-            }
+        predictions_df = self._load_predictions_dataframe(engine_result.predictions_path)
+        visuals: Dict[str, Any] = {}
+
+        if predictions_df is not None and not predictions_df.empty:
+            if {'timestamps', 'market_liquidity'}.issubset(predictions_df.columns):
+                ts_df = predictions_df[['timestamps', 'market_liquidity']].dropna()
+                if not ts_df.empty:
+                    visuals['market_liquidity_timeseries'] = {
+                        "type": "line",
+                        "data": {
+                            "timestamps": ts_df['timestamps'].tolist(),
+                            "values": [float(x) for x in pd.to_numeric(ts_df['market_liquidity'], errors='coerce').fillna(0)]
+                        },
+                        "title": "Market Liquidity Trajectory"
+                    }
+
+            if 'funding_liquidity' in predictions_df.columns:
+                funding_series = pd.to_numeric(predictions_df['funding_liquidity'], errors='coerce').dropna()
+                if not funding_series.empty:
+                    visuals['funding_liquidity_histogram'] = {
+                        "type": "histogram",
+                        "data": [float(x) for x in funding_series],
+                        "bins": 20
+                    }
+
+            id_col = next((col for col in ['bank_id', 'institution', 'source'] if col in predictions_df.columns), None)
+            risk_col = next((col for col in ['prediction', 'predicted', 'risk_score', 'systemic_risk'] if col in predictions_df.columns), None)
+            if id_col and risk_col:
+                grouped = (
+                    predictions_df[[id_col, risk_col]]
+                    .dropna()
+                    .assign(risk=lambda df: pd.to_numeric(df[risk_col], errors='coerce'))
+                    .dropna(subset=['risk'])
+                    .groupby(id_col)['risk']
+                    .mean()
+                    .reset_index()
+                )
+                if not grouped.empty:
+                    edges: List[Dict[str, Any]] = []
+                    edge_cols = {'from_node', 'to_node', 'exposure'}
+                    if edge_cols.issubset(predictions_df.columns):
+                        edges = [
+                            {
+                                "from": str(row['from_node']),
+                                "to": str(row['to_node']),
+                                "exposure": float(row['exposure'])
+                            }
+                            for _, row in (
+                                predictions_df[list(edge_cols)]
+                                .dropna()
+                                .assign(exposure=lambda df: pd.to_numeric(df['exposure'], errors='coerce'))
+                                .dropna(subset=['exposure'])
+                                .iterrows()
+                            )
+                        ]
+
+                    visuals['network_nodes'] = {
+                        "type": "network",
+                        "nodes": [
+                            {"id": str(row[id_col]), "risk": float(row['risk'])}
+                            for _, row in grouped.iterrows()
+                        ],
+                        "edges": edges
+                    }
+
+        visuals['overall_risk_gauge'] = {
+            "type": "gauge",
+            "value": float(engine_result.risk_scores.overall_score),
+            "label": engine_result.risk_scores.risk_level
         }
+
+        return visuals
 
 
 class ReportExporter:
@@ -434,6 +736,8 @@ class ReportExporter:
             ['Risk Level', summary.risk_level.upper()],
             ['Active Alerts', str(summary.num_alerts)],
             ['Institutions Analyzed', str(summary.num_institutions)],
+            ['Data Points Processed', str(summary.data_points_analyzed)],
+            ['Analysis Period', summary.period],
             ['Generated', report.generated_at.strftime('%Y-%m-%d %H:%M UTC')]
         ]
 
@@ -463,7 +767,7 @@ class ReportExporter:
         # Recommendations
         story.append(Paragraph("Recommendations", styles['Heading2']))
         for i, rec in enumerate(report.recommendations[:10], 1):
-            story.append(Paragraph(f"{i}. <b>{rec.priority.upper()}</b>: {rec.action}", styles['Normal']))
+            story.append(Paragraph(f"{i}. <b>{rec.priority.upper()}</b>: {rec.title}", styles['Normal']))
             story.append(Spacer(1, 0.15*inch))
 
         # Build PDF
@@ -510,6 +814,7 @@ class ReportExporter:
                     'Active Alerts',
                     'Institutions Analyzed',
                     'Data Points Processed',
+                    'Analysis Period',
                     'Generated At'
                 ],
                 'Value': [
@@ -518,6 +823,7 @@ class ReportExporter:
                     summary.num_alerts,
                     summary.num_institutions,
                     summary.data_points_analyzed,
+                    summary.period,
                     report.generated_at.strftime('%Y-%m-%d %H:%M UTC')
                 ]
             })
@@ -535,7 +841,7 @@ class ReportExporter:
                 {
                     'Priority': rec.priority,
                     'Category': rec.category,
-                    'Action': rec.action,
+                    'Title': rec.title,
                     'Rationale': rec.rationale,
                     'Impact': rec.expected_impact
                 }

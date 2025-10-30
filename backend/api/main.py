@@ -12,7 +12,22 @@ from contextlib import asynccontextmanager
 import logging
 import os
 
-from .routes import data_sources, assets, jobs, config, system, errors, catalogue, pipeline, results, explainability
+from .routes import (
+    data_sources,
+    assets,
+    jobs,
+    config,
+    system,
+    errors,
+    catalogue,
+    pipeline,
+    results,
+    explainability,
+    data_explorer_v2,
+    reports_v2,
+    models_v1,
+    predictions_v2,
+)
 from database import init_db, close_db
 
 logger = logging.getLogger(__name__)
@@ -90,6 +105,10 @@ app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["Jobs"])
 app.include_router(config.router, prefix="/api/v1/config", tags=["Configuration"])
 app.include_router(system.router, prefix="/api/v1/system", tags=["System"])
 app.include_router(errors.router, prefix="/api/v1/errors", tags=["Error Logging"])
+app.include_router(data_explorer_v2.router, prefix="/api/v2", tags=["Data Explorer v2"])
+app.include_router(reports_v2.router, prefix="/api/v2", tags=["Reports v2"])
+app.include_router(predictions_v2.router, prefix="/api/v2", tags=["Predictions v2"])
+app.include_router(models_v1.router, prefix="/api/v1/models", tags=["Model Catalogue"])
 
 
 @app.get("/")

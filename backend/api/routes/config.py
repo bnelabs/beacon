@@ -8,7 +8,8 @@ from schemas.config import (
     SystemConfigResponse,
     ModelParamsUpdate,
     DataParamsUpdate,
-    TrainingParamsUpdate
+    TrainingParamsUpdate,
+    TrainingDefaultsResponse,
 )
 from services.config_service import ConfigService
 from services.error_logger import ErrorLogger
@@ -133,4 +134,24 @@ async def update_training_params(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
+        )
+
+
+@router.get("/training-defaults", response_model=TrainingDefaultsResponse)
+async def get_training_defaults(db: Session = Depends(get_db)):
+    """Expose default training configuration for frontend UI."""
+    try:
+        service = ConfigService(db)
+        return service.get_training_defaults()
+    except Exception as e:
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(
+            e,
+            context="retrieving training defaults",
+            endpoint="/api/v1/config/training-defaults",
+            method="GET",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message},
         )

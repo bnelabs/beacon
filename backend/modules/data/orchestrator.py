@@ -109,11 +109,15 @@ class DataOrchestrator:
         if self.progress_callback:
             self.progress_callback(progress, message)
 
-    def run(self,
-            catalogue_items: List[int],
-            start_date: str,
-            end_date: str,
-            user_id: str) -> DataPackage:
+    def run(
+        self,
+        catalogue_items: List[int],
+        start_date: str,
+        end_date: str,
+        user_id: str,
+        countries: Optional[List[str]] = None,
+        regions: Optional[List[str]] = None,
+    ) -> DataPackage:
         """
         Execute complete DATA pipeline.
 
@@ -122,6 +126,8 @@ class DataOrchestrator:
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
             user_id: User who initiated
+            countries: Optional list of country names for filtering
+            regions: Optional list of region codes from UI
 
         Returns:
             DataPackage ready for ENGINE
@@ -137,7 +143,9 @@ class DataOrchestrator:
             raw_data = self.collector.collect(
                 catalogue_items=catalogue_items,
                 start_date=start_date,
-                end_date=end_date
+                end_date=end_date,
+                country_filters=countries,
+                region_filters=regions,
             )
 
             self._update_progress(20.0, f"Collected {len(raw_data)} datasets from sources")
@@ -209,7 +217,9 @@ class DataOrchestrator:
                 quality_report,
                 start_date,
                 end_date,
-                user_id
+                user_id,
+                regions=regions,
+                countries=countries,
             )
 
             self._update_progress(100.0, f"Data certified and ready for training")
@@ -280,7 +290,9 @@ class DataOrchestrator:
                           quality_report: DataQualityReport,
                           start_date: str,
                           end_date: str,
-                          user_id: str) -> DataPackage:
+                          user_id: str,
+                          regions: Optional[List[str]] = None,
+                          countries: Optional[List[str]] = None) -> DataPackage:
         """Save formatted data and create package."""
 
         # Create job-specific directory
@@ -315,7 +327,9 @@ class DataOrchestrator:
                 "start_date": start_date,
                 "end_date": end_date,
                 "num_sources": len(data['source'].unique()) if 'source' in data.columns else 0,
-                "frequency": "daily"
+                "frequency": "daily",
+                "regions": regions or [],
+                "countries": countries or [],
             },
             quality_report=quality_report,
             date_range=(start_date, end_date),

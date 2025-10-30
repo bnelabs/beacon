@@ -118,18 +118,18 @@ services:
     restart: unless-stopped
     command: celery -A tasks.celery_app worker --loglevel=info --concurrency=2
 
-  # Frontend (React with Vite)
+  # Frontend v2 (React, react-three-fiber)
   frontend:
     build:
-      context: ./frontend
+      context: ./frontend-v2
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: http://localhost:3456
-    container_name: beacon-frontend
+    container_name: beacon-frontend-v2
     ports:
-      - "6789:6789"
+      - "5173:5173"
     environment:
-      PORT: 6789
+      PORT: 5173
       VITE_API_BASE_URL: http://localhost:3456
     depends_on:
       - backend

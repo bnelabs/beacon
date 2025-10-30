@@ -139,18 +139,28 @@ def run_data_collection(self, job_id: int, parameters: dict):
             catalogue_items = [item.id for item in default_items]
             logger.info(f"No items specified, using {len(catalogue_items)} default catalogue items")
 
+        selected_regions = [str(region) for region in parameters.get('regions', []) if region]
+        selected_countries = [str(country) for country in parameters.get('countries', []) if country]
+
         # Default to 5 years of history for better coverage of annual/quarterly data
         start_date = parameters.get('start_date', '2019-01-01')
         end_date = parameters.get('end_date', '2024-12-31')
 
-        logger.info(f"Running data collection with {len(catalogue_items)} catalogue items...")
+        logger.info(
+            "Running data collection with %d catalogue items (regions=%s, countries=%s)...",
+            len(catalogue_items),
+            selected_regions or "all",
+            selected_countries or "all",
+        )
 
         # Run the complete data pipeline
         data_package = orchestrator.run(
             catalogue_items=catalogue_items,
             start_date=start_date,
             end_date=end_date,
-            user_id="system"
+            user_id="system",
+            countries=selected_countries or None,
+            regions=selected_regions or None,
         )
 
         self.update_progress(job_id, 95.0)
@@ -166,7 +176,9 @@ def run_data_collection(self, job_id: int, parameters: dict):
             "fit_for_engine": data_package.quality_report.fit_for_engine,
             "anomalies_detected": data_package.quality_report.anomalies_detected,
             "output_path": data_package.timeseries_path,
-            "completed_at": datetime.utcnow().isoformat()
+            "completed_at": datetime.utcnow().isoformat(),
+            "regions": selected_regions,
+            "countries": selected_countries,
         })
 
         service.update_job_status(
@@ -226,7 +238,11 @@ def run_training(self, job_id: int, parameters: dict):
         output_dir = f"/app/data/jobs/{job_id}"
         os.makedirs(output_dir, exist_ok=True)
 
-        config = parameters.get('config', {'model': 'HGT'})
+        raw_config = parameters.get('config', {'model': 'HGT'})
+        config = dict(raw_config) if isinstance(raw_config, dict) else {'model': 'HGT'}
+        if 'num_epochs' in config and 'epochs' not in config:
+            config['epochs'] = config['num_epochs']
+        config.setdefault('model', 'HGT')
         orchestrator = EngineOrchestrator(f"job_{job_id}", output_dir, config)
 
         # For training, we need existing data package
@@ -400,6 +416,10 @@ def run_training(self, job_id: int, parameters: dict):
             "completed_at": datetime.utcnow().isoformat()
         }
 
+        data_scope = data_job.result if (data_job and isinstance(data_job.result, dict)) else {}
+        result["regions"] = data_scope.get("regions")
+        result["countries"] = data_scope.get("countries")
+
         # Add per-source metrics if available
         if hasattr(training_metrics, 'per_source_metrics'):
             result["per_source_metrics"] = training_metrics.per_source_metrics
@@ -486,10 +506,12 @@ def run_prediction(self, job_id: int, parameters: dict):
 
         # Get the original data from the data collection job (not predictions)
         data_path = None
+        data_scope = {}
         if data_source_job:
             data_job = service.get_job(data_source_job)
             if data_job and isinstance(data_job.result, dict):
                 data_path = data_job.result.get("output_path")
+                data_scope = data_job.result
 
         logger.info(f"Model path: {model_path}, Data path: {data_path}")
 
@@ -516,6 +538,10 @@ def run_prediction(self, job_id: int, parameters: dict):
         data = pd.read_parquet(data_path)
 
         self.update_progress(job_id, 50.0)
+
+        data_scope = {}
+        if data_job and isinstance(data_job.result, dict):
+            data_scope = data_job.result
 
         # Generate predictions
         prediction_result = engine.predict(data)
@@ -547,7 +573,10 @@ def run_prediction(self, job_id: int, parameters: dict):
             "mean_risk": float(prediction_result.predictions_df['risk_score'].mean()) if 'risk_score' in prediction_result.predictions_df.columns else None,
             "completed_at": datetime.utcnow().isoformat(),
             "feature_importances": clean_nan(prediction_result.feature_importances),
-            "metrics": clean_nan(prediction_result.metrics)
+            "metrics": clean_nan(prediction_result.metrics),
+            "regions": parameters.get("regions") or data_scope.get("regions"),
+            "countries": parameters.get("countries") or data_scope.get("countries"),
+            "data_source_job": data_source_job
         }
 
         service.update_job_status(

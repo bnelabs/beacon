@@ -36,3 +36,10 @@ class TrainingParamsUpdate(BaseModel):
     num_epochs: Optional[int] = Field(None, ge=1, le=1000)
     early_stopping_patience: Optional[int] = Field(None, ge=1, le=100)
     validation_split: Optional[float] = Field(None, ge=0.1, le=0.5)
+
+
+class TrainingDefaultsResponse(BaseModel):
+    """Default training configuration exposed to the frontend."""
+
+    defaults: Dict[str, Any]
+    recommended_ranges: Dict[str, Any]

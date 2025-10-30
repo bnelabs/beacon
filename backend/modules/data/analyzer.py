@@ -41,8 +41,11 @@ class DataAnalyzer:
             quality_factors.append(validation_score * 0.4)
 
         # Factor 2: Data completeness (30% weight)
-        if 'value' in data.columns:
-            completeness = 1.0 - (data['value'].isnull().sum() / len(data))
+        value_col = 'value' if 'value' in data.columns else 'Value' if 'Value' in data.columns else None
+
+        if value_col:
+            value_series = pd.to_numeric(data[value_col], errors='coerce')
+            completeness = 1.0 - (value_series.isnull().sum() / len(data))
             quality_factors.append(completeness * 0.3)
 
         # Factor 3: Cleaning success (30% weight)
@@ -55,8 +58,8 @@ class DataAnalyzer:
         report.accuracy_score = float(sum(quality_factors)) if quality_factors else 0.5
 
         # Additional statistics
-        if 'value' in data.columns:
-            values = data['value'].dropna()
+        if value_col:
+            values = pd.to_numeric(data[value_col], errors='coerce').dropna()
             if len(values) > 0:
                 report.statistics.update({
                     "mean": float(values.mean()),

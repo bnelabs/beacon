@@ -43,6 +43,23 @@ class DataFormatter:
                 if column_mapping:
                     df = df.rename(columns=column_mapping)
 
+                # Ensure datetime parsing and lowercase aliases for downstream compatibility
+                if 'Date' in df.columns:
+                    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+                    df['date'] = df['Date']
+                if 'Value' in df.columns:
+                    df['value'] = pd.to_numeric(df['Value'], errors='coerce')
+                if 'Open' in df.columns and 'open' not in df.columns:
+                    df['open'] = pd.to_numeric(df['Open'], errors='coerce')
+                if 'High' in df.columns and 'high' not in df.columns:
+                    df['high'] = pd.to_numeric(df['High'], errors='coerce')
+                if 'Low' in df.columns and 'low' not in df.columns:
+                    df['low'] = pd.to_numeric(df['Low'], errors='coerce')
+                if 'Close' in df.columns and 'close' not in df.columns:
+                    df['close'] = pd.to_numeric(df['Close'], errors='coerce')
+                if 'Volume' in df.columns and 'volume' not in df.columns:
+                    df['volume'] = pd.to_numeric(df['Volume'], errors='coerce')
+
                 df['source_code'] = code
                 all_data.append(df)
 
@@ -59,10 +76,17 @@ class DataFormatter:
         
         features = pd.DataFrame(index=data.index)
         
+        value_col = None
         if 'value' in data.columns:
-            features['value_mean'] = data['value'].rolling(7).mean()
-            features['value_std'] = data['value'].rolling(7).std()
-        
+            value_col = 'value'
+        elif 'Value' in data.columns:
+            value_col = 'Value'
+
+        if value_col:
+            value_series = pd.to_numeric(data[value_col], errors='coerce')
+            features['value_mean'] = value_series.rolling(7, min_periods=1).mean()
+            features['value_std'] = value_series.rolling(7, min_periods=1).std().fillna(0)
+
         return features
 
     def build_graph(self, data: pd.DataFrame) -> dict:
@@ -81,37 +105,39 @@ class DataFormatter:
         nodes = []
         node_features = {}
 
-        if 'source_code' in data.columns:
+        value_col = 'value' if 'value' in data.columns else 'Value' if 'Value' in data.columns else None
+        date_col = 'date' if 'date' in data.columns else 'Date' if 'Date' in data.columns else None
+
+        if 'source_code' in data.columns and value_col:
             unique_sources = data['source_code'].unique()
 
             for source in unique_sources:
                 source_data = data[data['source_code'] == source]
 
-                if 'value' in source_data.columns:
-                    # Compute node features
-                    values = source_data['value'].dropna()
+                # Compute node features
+                values = pd.to_numeric(source_data[value_col], errors='coerce').dropna()
 
-                    if len(values) > 0:
-                        node_features[source] = {
-                            'mean': float(values.mean()),
-                            'std': float(values.std()),
-                            'min': float(values.min()),
-                            'max': float(values.max()),
-                            'count': int(len(values))
-                        }
-                        nodes.append(source)
+                if len(values) > 0:
+                    node_features[source] = {
+                        'mean': float(values.mean()),
+                        'std': float(values.std()),
+                        'min': float(values.min()),
+                        'max': float(values.max()),
+                        'count': int(len(values))
+                    }
+                    nodes.append(source)
 
         # Build edges based on correlations between time series
         edges = []
         edge_weights = {}
 
-        if len(nodes) > 1 and 'value' in data.columns and 'date' in data.columns:
+        if len(nodes) > 1 and value_col and date_col:
             # Pivot data to have sources as columns
             try:
                 pivot_data = data.pivot_table(
-                    index='date',
+                    index=date_col,
                     columns='source_code',
-                    values='value',
+                    values=value_col,
                     aggfunc='mean'
                 )
 

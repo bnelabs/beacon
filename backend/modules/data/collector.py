@@ -1,7 +1,7 @@
 """Data Collector - Multi-source data collection."""
 
 import logging
-from typing import List, Dict
+from typing import List, Dict, Optional
 from datetime import datetime
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -10,6 +10,7 @@ import os
 from models.data_catalogue import DataCatalogueItem
 from models.data_source import DataSource
 from plugins.base import get_plugin
+from .country_utils import CountryMatcher
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,14 @@ class DataCollector:
         self.job_id = job_id
         self.output_dir = output_dir
 
-    def collect(self, catalogue_items: List[int], start_date: str, end_date: str) -> Dict[str, pd.DataFrame]:
+    def collect(
+        self,
+        catalogue_items: List[int],
+        start_date: str,
+        end_date: str,
+        country_filters: Optional[List[str]] = None,
+        region_filters: Optional[List[str]] = None,
+    ) -> Dict[str, pd.DataFrame]:
         """
         Collect data from selected catalogue items.
 
@@ -32,6 +40,8 @@ class DataCollector:
         logger.info(f"[{self.job_id}] Collecting {len(catalogue_items)} datasets")
 
         collected = {}
+        matcher = CountryMatcher(country_filters, region_filters)
+        matched_codes = []
 
         for item_id in catalogue_items:
             item = self.db.query(DataCatalogueItem).filter(DataCatalogueItem.id == item_id).first()
@@ -39,13 +49,27 @@ class DataCollector:
                 logger.warning(f"Catalogue item {item_id} not found")
                 continue
 
+            if not matcher.should_collect(item):
+                logger.info(
+                    "[%s] Skipping %s (%s) - outside selected country scope '%s'",
+                    self.job_id,
+                    item.code,
+                    getattr(item, "region", None),
+                    matcher.describe(),
+                )
+                continue
+
             try:
                 df = self._fetch_item_data(item, start_date, end_date)
                 collected[item.code] = df
                 logger.info(f"Collected {len(df)} records for {item.code}")
+                matched_codes.append(item.code)
             except Exception as e:
                 logger.error(f"Failed to collect {item.code}: {e}")
                 collected[item.code] = pd.DataFrame()  # Empty on failure
+
+        if matcher.active and not matched_codes:
+            raise ValueError("Selected country filters did not match any catalogue data sets.")
 
         return collected
 

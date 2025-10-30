@@ -56,6 +56,12 @@ class RealPredictionEngine:
         self.model_path = model_path
         self.device = device
         self.config = config
+        self.sequence_length = self.config.get('sequence_length', 30)
+
+        self.model_config = {}
+        self.source_stats: Dict[str, Dict[str, float]] = {}
+        self.sources: List[str] = []
+        self.source_to_id: Dict[str, int] = {}
 
         # Load trained model
         self.model = self._load_model(model_path)
@@ -63,7 +69,13 @@ class RealPredictionEngine:
 
         # Initialize explainability
         self.explainer = ModelExplainer(self.model, device)
-        self.bank_analyzer = BankRiskAnalyzer(self.model, device)
+        self.bank_analyzer = BankRiskAnalyzer(
+            self.model,
+            device,
+            sequence_length=self.sequence_length,
+            source_stats=self.source_stats,
+            source_to_id=self.source_to_id
+        )
 
         logger.info(f"Loaded model from {model_path}")
 
@@ -76,11 +88,18 @@ class RealPredictionEngine:
 
         # Get config from checkpoint
         config = checkpoint.get('config', {})
-        num_sources = len(checkpoint.get('sources', []))
+        self.model_config = config
+        self.sequence_length = config.get('sequence_length', self.config.get('sequence_length', 30))
+        self.source_stats = checkpoint.get('source_stats', {}) or {}
+        self.sources = checkpoint.get('sources', []) or []
+        self.source_to_id = {src: idx for idx, src in enumerate(self.sources)}
+
+        sources = checkpoint.get('sources', [])
+        num_sources = max(len(sources), 1)
 
         model = MultiScaleTemporalAttentionModel(
             num_sources=num_sources,
-            sequence_length=config.get('sequence_length', 30),
+            sequence_length=self.sequence_length,
             d_model=config.get('d_model', 128),
             nhead=config.get('nhead', 8),
             num_layers=config.get('num_layers', 3),
@@ -132,27 +151,30 @@ class RealPredictionEngine:
             source_data = source_data.sort_values('Date')
 
             # Get source ID
-            source_id = 0  # Would map from source_code to ID
+            source_id = self._map_source_id(source_code)
 
             # Prepare sequence - use 'Close' column from timeseries data
             value_column = 'Close' if 'Close' in source_data.columns else 'Value'
-            values = source_data[value_column].values
-            if len(values) < 30:
-                values = np.pad(values, (30 - len(values), 0), mode='edge')
-
-            sequence = torch.FloatTensor(values[-30:])
+            series = source_data[value_column].astype(float)
+            series = series.ffill().bfill()
+            values = series.fillna(0).values
+            sequence, stats = self._prepare_sequence(values, source_code)
 
             # Get explanation
             explanation = self.explainer.explain_prediction(
                 sequence,
                 source_id,
-                [f"t-{i}" for i in range(30)],
-                actual_value=values[-1]
+                [f"t-{i}" for i in range(self.sequence_length)],
+                actual_value=float(values[-1]) if len(values) else None
             )
+
+            normalized_prediction = float(explanation.prediction_value)
+            denorm_prediction = self._denormalize_prediction(normalized_prediction, stats)
 
             predictions_list.append({
                 'source': source_code,
-                'prediction': explanation.prediction_value,
+                'prediction': denorm_prediction,
+                'risk_score': normalized_prediction,
                 'confidence_lower': explanation.confidence_lower,
                 'confidence_upper': explanation.confidence_upper,
                 'explanation': explanation.explanation_text
@@ -162,13 +184,19 @@ class RealPredictionEngine:
 
             # Aggregate feature importances
             for feature, importance in explanation.feature_contributions.items():
-                feature_importances_total[feature] = feature_importances_total.get(feature, 0) + importance
+                if np.isnan(importance):
+                    continue
+                feature_importances_total[feature] = feature_importances_total.get(feature, 0.0) + importance
 
         predictions_df = pd.DataFrame(predictions_list)
 
         # Generate executive summary
-        avg_risk = predictions_df['prediction'].mean()
-        max_risk = predictions_df['prediction'].max()
+        if not predictions_df.empty:
+            avg_risk = float(predictions_df['risk_score'].mean())
+            max_risk = float(predictions_df['risk_score'].max())
+            min_risk = float(predictions_df['risk_score'].min())
+        else:
+            avg_risk = max_risk = min_risk = 0.0
 
         executive_summary = f"""
 LIQUIDITY RISK PREDICTION SUMMARY
@@ -197,9 +225,12 @@ All predictions include confidence intervals and feature attributions.
             },
             explanation_report=self._generate_explanation_report(explanations),
             metrics={
-                'avg_prediction': float(avg_risk),
-                'max_prediction': float(max_risk),
-                'min_prediction': float(predictions_df['prediction'].min())
+                'avg_risk_score': avg_risk,
+                'max_risk_score': max_risk,
+                'min_risk_score': min_risk,
+                'avg_prediction_value': float(predictions_df['prediction'].mean()) if not predictions_df.empty else 0.0,
+                'max_prediction_value': float(predictions_df['prediction'].max()) if not predictions_df.empty else 0.0,
+                'min_prediction_value': float(predictions_df['prediction'].min()) if not predictions_df.empty else 0.0
             },
             executive_summary=executive_summary
         )
@@ -221,7 +252,8 @@ All predictions include confidence intervals and feature attributions.
         # Run multi-bank analysis
         multi_bank_analysis = self.bank_analyzer.analyze_multiple_banks(
             bank_data,
-            bank_exposures
+            bank_exposures,
+            feature_names=[f"t-{i}" for i in range(self.sequence_length)]
         )
 
         # Extract predictions
@@ -277,6 +309,43 @@ All predictions include confidence intervals and feature attributions.
             },
             executive_summary=executive_summary
         )
+
+    def _map_source_id(self, source_code: str) -> int:
+        if self.source_to_id and source_code in self.source_to_id:
+            return int(self.source_to_id[source_code])
+        if self.source_to_id:
+            logger.warning(f"Source '{source_code}' not seen during training - defaulting to source id 0")
+            return 0
+        return 0
+
+    def _prepare_sequence(self, values: np.ndarray, source_code: str) -> tuple[torch.Tensor, Dict[str, float]]:
+        values = np.asarray(values, dtype=np.float32)
+        stats = self.source_stats.get(source_code, {})
+        mean = float(stats.get('mean', np.mean(values) if len(values) else 0.0))
+        std = float(stats.get('std', np.std(values) + 1e-8 if len(values) else 1.0))
+        if std == 0.0:
+            std = 1.0
+
+        normalized = (values - mean) / std if len(values) else np.zeros(self.sequence_length, dtype=np.float32)
+
+        if len(normalized) >= self.sequence_length:
+            normalized = normalized[-self.sequence_length:]
+        else:
+            pad_value = normalized[0] if len(normalized) else 0.0
+            normalized = np.pad(
+                normalized,
+                (self.sequence_length - len(normalized), 0),
+                mode='constant',
+                constant_values=pad_value
+            )
+
+        sequence = torch.FloatTensor(normalized)
+        return sequence, {'mean': mean, 'std': std}
+
+    def _denormalize_prediction(self, normalized_value: float, stats: Dict[str, float]) -> float:
+        mean = stats.get('mean', 0.0)
+        std = stats.get('std', 1.0)
+        return float(normalized_value * std + mean)
 
     def _generate_key_findings(self, predictions_df: pd.DataFrame, explanations: Dict) -> str:
         """Generate key findings text."""

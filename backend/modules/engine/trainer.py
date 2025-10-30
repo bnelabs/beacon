@@ -159,7 +159,7 @@ class ModelTrainer:
         )
 
         # Training loop
-        epochs = self.config.get('epochs', 50)
+        epochs = self.config.get('epochs', self.config.get('num_epochs', 50))
         train_losses = []
         val_losses = []
         best_epoch = 0

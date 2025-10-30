@@ -104,11 +104,21 @@ class BankRiskAnalyzer:
     - Systemic risk computation
     """
 
-    def __init__(self, model: torch.nn.Module, device: torch.device):
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        device: torch.device,
+        sequence_length: int,
+        source_stats: Dict[str, Dict[str, float]],
+        source_to_id: Dict[str, int]
+    ):
         self.model = model
         self.device = device
         self.explainer = ModelExplainer(model, device)
         self.network_explainer = NetworkExplainer()
+        self.sequence_length = sequence_length
+        self.source_stats = source_stats or {}
+        self.source_to_id = source_to_id or {}
 
     def analyze_multiple_banks(
         self,
@@ -207,31 +217,38 @@ class BankRiskAnalyzer:
 
         # Prepare data for model
         # Assume df has 'Date' and 'Value' columns
-        if 'source_code' in df.columns:
-            # Use first source if multiple
-            df = df[df['source_code'] == df['source_code'].iloc[0]]
+        if len(df) == 0:
+            raise ValueError(f"No data provided for bank {bank_id}")
 
-        values = df['Value'].values
-        if len(values) < 30:
+        if 'source_code' in df.columns and df['source_code'].notna().any():
+            source_code = df['source_code'].dropna().iloc[0]
+            df = df[df['source_code'] == source_code]
+        else:
+            source_code = None
+
+        value_column = 'Close' if 'Close' in df.columns else 'Value'
+        series = df[value_column].astype(float)
+        series = series.ffill().bfill()
+        values = series.fillna(0).values
+
+        if len(values) < self.sequence_length:
             logger.warning(f"Bank {bank_id} has only {len(values)} data points")
-            # Pad if needed
-            values = np.pad(values, (30 - len(values), 0), mode='edge')
 
-        # Take last 30 values
-        sequence = torch.FloatTensor(values[-30:]).to(self.device)
+        sequence, stats = self._prepare_sequence(values, source_code)
+        sequence = sequence.to(self.device)
 
         # Get source ID (assume 0 if not specified)
-        source_id = 0
+        source_id = self._map_source_id(source_code)
 
         # Get prediction with explanation
         explanation = self.explainer.explain_prediction(
             sequence, source_id,
-            feature_names or [f"t-{i}" for i in range(30)],
-            actual_value=values[-1] if len(values) > 0 else None
+            feature_names or [f"t-{i}" for i in range(self.sequence_length)],
+            actual_value=float(values[-1]) if len(values) > 0 else None
         )
 
         # Classify risk level
-        risk_value = explanation.prediction_value
+        risk_value = float(explanation.prediction_value)
         if risk_value < RISK_THRESHOLD_LOW:
             risk_level = "low"
         elif risk_value < RISK_THRESHOLD_MODERATE:
@@ -271,6 +288,37 @@ class BankRiskAnalyzer:
             top_strengths=top_strengths,
             recommendations=recommendations
         )
+
+    def _map_source_id(self, source_code: Optional[str]) -> int:
+        if source_code and source_code in self.source_to_id:
+            return int(self.source_to_id[source_code])
+        if self.source_to_id:
+            logger.warning(f"Source '{source_code}' not seen during training - defaulting to 0")
+        return 0
+
+    def _prepare_sequence(self, values: np.ndarray, source_code: Optional[str]) -> Tuple[torch.Tensor, Dict[str, float]]:
+        values = np.asarray(values, dtype=np.float32)
+        stats = self.source_stats.get(source_code, {}) if source_code else {}
+        mean = float(stats.get('mean', np.mean(values) if len(values) else 0.0))
+        std = float(stats.get('std', np.std(values) + 1e-8 if len(values) else 1.0))
+        if std == 0.0:
+            std = 1.0
+
+        normalized = (values - mean) / std if len(values) else np.zeros(self.sequence_length, dtype=np.float32)
+
+        if len(normalized) >= self.sequence_length:
+            normalized = normalized[-self.sequence_length:]
+        else:
+            pad_value = normalized[0] if len(normalized) else 0.0
+            normalized = np.pad(
+                normalized,
+                (self.sequence_length - len(normalized), 0),
+                mode='constant',
+                constant_values=pad_value
+            )
+
+        sequence = torch.FloatTensor(normalized)
+        return sequence, {'mean': mean, 'std': std}
 
     def _compute_market_liquidity_risk(self, bank_data: torch.Tensor, overall_risk: float) -> float:
         """Compute market liquidity risk component from bank data features."""

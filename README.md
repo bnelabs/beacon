@@ -255,6 +255,23 @@ curl http://localhost:3456/api/v1/pipeline/{job_id}/download/excel -o report.xls
 
 ---
 
+### Docker Integration Smoke (Country Scope)
+
+```bash
+# Bring services up
+docker compose up -d postgres redis backend celery-worker
+
+# Run scope regression (requires docker CLI on host)
+RUN_DOCKER_SCOPE_TESTS=1 docker compose run --rm backend pytest tests/test_country_scope.py
+
+# Tear services down
+docker compose down
+```
+
+This optional regression creates a PACIFIC/Japan data job and asserts `/api/v2/reports/brief/{job}` returns the requested region/country filters.
+
+---
+
 ## 🛠️ Technologies
 
 ### Backend Stack

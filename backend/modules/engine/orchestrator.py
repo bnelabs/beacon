@@ -177,10 +177,16 @@ class EngineOrchestrator:
         from modules.engine.models import HeterogeneousGraphTransformer
         import os
 
-        model_path = f"{self.output_dir}/{self.job_id}/model.pt"
+        base_path = f"{self.output_dir}/{self.job_id}"
+        candidate_paths = [
+            os.path.join(base_path, "model.pt"),
+            os.path.join(base_path, "best_model.pt")
+        ]
+
+        model_path = next((path for path in candidate_paths if os.path.exists(path)), None)
 
         # Check if trained model exists
-        if os.path.exists(model_path):
+        if model_path:
             logger.info(f"[{self.job_id}] Loading trained model from {model_path}")
             checkpoint = torch.load(model_path, map_location=self.device)
 
@@ -204,7 +210,7 @@ class EngineOrchestrator:
             return model
         else:
             raise FileNotFoundError(
-                f"Trained model not found at {model_path}. "
+                f"Trained model not found in {base_path}. "
                 "Please run training job first before using ENGINE orchestrator."
             )
     
@@ -220,17 +226,27 @@ class EngineOrchestrator:
         features_df = data["features"]
 
         # Ensure we have numeric data
-        if 'value' not in df.columns:
-            raise ValueError("Timeseries data must contain 'value' column")
+        value_col = None
+        if 'value' in df.columns:
+            value_col = 'value'
+        elif 'Value' in df.columns:
+            value_col = 'Value'
+        else:
+            raise ValueError("Timeseries data must contain 'value' or 'Value' column")
 
         # Create sequences
-        values = df['value'].values
+        values = pd.to_numeric(df[value_col], errors='coerce').fillna(method='ffill').fillna(method='bfill').values
         sequences = []
         timestamps = []
 
+        date_col = 'date' if 'date' in df.columns else 'Date' if 'Date' in df.columns else None
+
         for i in range(len(values) - sequence_length):
             sequences.append(values[i:i+sequence_length])
-            timestamps.append(df.iloc[i+sequence_length].get('date', i+sequence_length))
+            if date_col:
+                timestamps.append(df.iloc[i+sequence_length][date_col])
+            else:
+                timestamps.append(i + sequence_length)
 
         if len(sequences) == 0:
             raise ValueError(f"Not enough data for prediction. Need at least {sequence_length} samples.")

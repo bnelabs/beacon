@@ -11,7 +11,8 @@ from schemas.config import (
     SystemConfigResponse,
     ModelParamsUpdate,
     DataParamsUpdate,
-    TrainingParamsUpdate
+    TrainingParamsUpdate,
+    TrainingDefaultsResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -146,3 +147,30 @@ class ConfigService:
         logger.info(f"Updated training parameters: {params.dict(exclude_none=True)}")
 
         return self.get_system_config()
+
+    def get_training_defaults(self) -> TrainingDefaultsResponse:
+        """Expose default training configuration and recommended ranges."""
+        config = self._load_config()
+        training_cfg = config.get("training", {})
+
+        defaults = {
+            "sequence_length": training_cfg.get("sequence_length", 60),
+            "batch_size": training_cfg.get("batch_size", 32),
+            "num_epochs": training_cfg.get("num_epochs", 100),
+            "learning_rate": training_cfg.get("learning_rate", 0.0008),
+            "early_stopping_patience": training_cfg.get("early_stopping_patience", 12),
+            "validation_split": training_cfg.get("validation_split", 0.2),
+            "optimizer": training_cfg.get("optimizer", "adamw"),
+            "model": training_cfg.get("model", "temporal_attention"),
+        }
+
+        recommended_ranges = {
+            "sequence_length": {"min": 30, "max": 120},
+            "batch_size": {"min": 16, "max": 128},
+            "num_epochs": {"min": 20, "max": 200},
+            "learning_rate": {"min": 1e-5, "max": 5e-3},
+            "validation_split": {"min": 0.1, "max": 0.4},
+            "early_stopping_patience": {"min": 5, "max": 25},
+        }
+
+        return TrainingDefaultsResponse(defaults=defaults, recommended_ranges=recommended_ranges)
