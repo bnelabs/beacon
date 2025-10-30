@@ -117,9 +117,16 @@ class MultiSourceDataset(Dataset):
 
     def denormalize(self, values, source_ids):
         """Denormalize predictions back to original scale per source."""
+        # Create reverse mapping from id to source name
+        id_to_source = {v: k for k, v in self.source_to_id.items()}
+
         denormalized = []
         for val, src_id in zip(values, source_ids):
-            source = self.sources[src_id]
+            # Map numeric id back to source name
+            source = id_to_source.get(src_id)
+            if source is None or source not in self.source_stats:
+                # Use first source as fallback if source not found
+                source = self.sources[0]
             stats = self.source_stats[source]
             denorm_val = val * stats['std'] + stats['mean']
             denormalized.append(denorm_val)
@@ -511,8 +518,9 @@ class MultiScaleTrainer:
         ss_tot = np.sum((targets_denorm - targets_denorm.mean()) ** 2)
         r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
 
-        # Get source names
-        source_names = [dataset.sources[sid] for sid in all_source_ids]
+        # Get source names - map from numeric id to source name
+        id_to_source = {v: k for k, v in dataset.source_to_id.items()}
+        source_names = [id_to_source.get(sid, dataset.sources[0]) for sid in all_source_ids]
 
         # Create predictions dataframe
         predictions_df = pd.DataFrame({
