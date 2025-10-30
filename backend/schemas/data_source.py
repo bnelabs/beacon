@@ -12,6 +12,10 @@ class DataSourceConfigBase(BaseModel):
     config: Dict[str, Any] = Field(..., description="Plugin-specific configuration")
     description: Optional[str] = Field(None, description="Human-readable description")
     enabled: bool = Field(default=True, description="Whether this data source is enabled")
+    registration_url: Optional[str] = Field(None, description="URL where users can register for API access")
+    registration_required: Optional[bool] = Field(None, description="Whether API key registration is required")
+    free_tier_limits: Optional[str] = Field(None, description="Description of free tier limitations")
+    coverage_description: Optional[str] = Field(None, description="Description of data coverage")
 
 
 class DataSourceCreate(DataSourceConfigBase):
