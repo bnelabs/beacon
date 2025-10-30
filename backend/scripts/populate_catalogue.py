@@ -636,41 +636,105 @@ def populate_catalogue():
                 "frequency": "quarterly",
                 "granularity": "macro",
                 "unit": "USD billions",
-                "default_selected": True,  # BIS now working with XML parser
+                "default_selected": True,
                 "priority": 90,
                 "tags": ["global", "cross_border", "credit_flows"]
             },
             {
-                "code": "BIS_CREDIT_TO_GDP",
-                "name": "BIS Credit-to-GDP Gap",
-                "description": "Credit-to-GDP gap indicator for systemic risk assessment",
+                "code": "BIS_CREDIT_TO_GDP_US",
+                "name": "BIS Credit-to-GDP Gap (US)",
+                "description": "Credit-to-GDP gap indicator for systemic risk assessment - United States",
                 "category": DataCategory.CREDIT_MARKETS,
-                "region": DataRegion.GLOBAL,
+                "region": DataRegion.NORTH_AMERICA,
                 "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.CREDIT_RISK.value],
                 "data_source_id": sources["BIS"].id,
                 "endpoint": "WS_CREDIT_GAP/Q.US",
                 "frequency": "quarterly",
                 "granularity": "macro",
                 "unit": "percentage_points",
-                "default_selected": True,  # BIS now working with XML parser
+                "default_selected": True,
                 "priority": 95,
-                "tags": ["credit_gap", "early_warning", "systemic"]
+                "tags": ["credit_gap", "early_warning", "systemic", "us"]
             },
             {
-                "code": "BIS_DEBT_SERVICE_RATIO",
-                "name": "BIS Debt Service Ratio",
-                "description": "Debt service ratio tracking debt sustainability",
+                "code": "BIS_CREDIT_TO_GDP_EU",
+                "name": "BIS Credit-to-GDP Gap (Euro Area)",
+                "description": "Credit-to-GDP gap indicator for systemic risk assessment - Euro Area",
                 "category": DataCategory.CREDIT_MARKETS,
-                "region": DataRegion.GLOBAL,
+                "region": DataRegion.EUROPE,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.CREDIT_RISK.value],
+                "data_source_id": sources["BIS"].id,
+                "endpoint": "WS_CREDIT_GAP/Q.XM",
+                "frequency": "quarterly",
+                "granularity": "macro",
+                "unit": "percentage_points",
+                "default_selected": True,
+                "priority": 95,
+                "tags": ["credit_gap", "early_warning", "systemic", "europe"]
+            },
+            {
+                "code": "BIS_CREDIT_TO_GDP_JP",
+                "name": "BIS Credit-to-GDP Gap (Japan)",
+                "description": "Credit-to-GDP gap indicator for systemic risk assessment - Japan",
+                "category": DataCategory.CREDIT_MARKETS,
+                "region": DataRegion.ASIA,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.CREDIT_RISK.value],
+                "data_source_id": sources["BIS"].id,
+                "endpoint": "WS_CREDIT_GAP/Q.JP",
+                "frequency": "quarterly",
+                "granularity": "macro",
+                "unit": "percentage_points",
+                "default_selected": True,
+                "priority": 95,
+                "tags": ["credit_gap", "early_warning", "systemic", "japan", "asia"]
+            },
+            {
+                "code": "BIS_DEBT_SERVICE_RATIO_US",
+                "name": "BIS Debt Service Ratio (US Households)",
+                "description": "Debt service ratio tracking debt sustainability - US Households",
+                "category": DataCategory.CREDIT_MARKETS,
+                "region": DataRegion.NORTH_AMERICA,
                 "risk_types": [RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
                 "data_source_id": sources["BIS"].id,
                 "endpoint": "WS_DSR/Q.US.H.N",
                 "frequency": "quarterly",
                 "granularity": "macro",
                 "unit": "percentage",
-                "default_selected": True,  # BIS now working with XML parser
+                "default_selected": True,
                 "priority": 85,
-                "tags": ["debt_sustainability", "household_debt"]
+                "tags": ["debt_sustainability", "household_debt", "us"]
+            },
+            {
+                "code": "BIS_DEBT_SERVICE_RATIO_EU",
+                "name": "BIS Debt Service Ratio (Euro Area Households)",
+                "description": "Debt service ratio tracking debt sustainability - Euro Area Households",
+                "category": DataCategory.CREDIT_MARKETS,
+                "region": DataRegion.EUROPE,
+                "risk_types": [RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["BIS"].id,
+                "endpoint": "WS_DSR/Q.XM.H.N",
+                "frequency": "quarterly",
+                "granularity": "macro",
+                "unit": "percentage",
+                "default_selected": True,
+                "priority": 85,
+                "tags": ["debt_sustainability", "household_debt", "europe"]
+            },
+            {
+                "code": "BIS_DEBT_SERVICE_RATIO_JP",
+                "name": "BIS Debt Service Ratio (Japan Households)",
+                "description": "Debt service ratio tracking debt sustainability - Japan Households",
+                "category": DataCategory.CREDIT_MARKETS,
+                "region": DataRegion.ASIA,
+                "risk_types": [RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["BIS"].id,
+                "endpoint": "WS_DSR/Q.JP.H.N",
+                "frequency": "quarterly",
+                "granularity": "macro",
+                "unit": "percentage",
+                "default_selected": True,
+                "priority": 85,
+                "tags": ["debt_sustainability", "household_debt", "japan", "asia"]
             },
 
             # ============================================
@@ -710,10 +774,10 @@ def populate_catalogue():
             },
 
             # ============================================
-            # WORLD BANK - DEVELOPMENT DATA
+            # WORLD BANK - DEVELOPMENT DATA - US
             # ============================================
             {
-                "code": "WB_BANK_CAPITAL_RATIO",
+                "code": "WB_BANK_CAPITAL_RATIO_US",
                 "name": "World Bank Bank Capital to Assets Ratio (US)",
                 "description": "Bank regulatory capital to risk-weighted assets",
                 "category": DataCategory.BANKING,
@@ -726,10 +790,10 @@ def populate_catalogue():
                 "unit": "percentage",
                 "default_selected": True,
                 "priority": 80,
-                "tags": ["capital_adequacy", "regulatory_capital"]
+                "tags": ["capital_adequacy", "regulatory_capital", "us"]
             },
             {
-                "code": "WB_BANK_NPL",
+                "code": "WB_BANK_NPL_US",
                 "name": "World Bank Bank Non-Performing Loans (US)",
                 "description": "Bank nonperforming loans to gross loans ratio",
                 "category": DataCategory.CREDIT_MARKETS,
@@ -742,10 +806,10 @@ def populate_catalogue():
                 "unit": "percentage",
                 "default_selected": True,
                 "priority": 90,
-                "tags": ["credit_quality", "npl", "loan_quality"]
+                "tags": ["credit_quality", "npl", "loan_quality", "us"]
             },
             {
-                "code": "WB_DOMESTIC_CREDIT",
+                "code": "WB_DOMESTIC_CREDIT_US",
                 "name": "World Bank Domestic Credit to Private Sector (US)",
                 "description": "Domestic credit provided by financial sector",
                 "category": DataCategory.CREDIT_MARKETS,
@@ -758,7 +822,111 @@ def populate_catalogue():
                 "unit": "percentage_of_gdp",
                 "default_selected": True,
                 "priority": 80,
-                "tags": ["domestic_credit", "private_sector"]
+                "tags": ["domestic_credit", "private_sector", "us"]
+            },
+
+            # ============================================
+            # WORLD BANK - EUROPE
+            # ============================================
+            {
+                "code": "WB_BANK_CAPITAL_RATIO_EU",
+                "name": "World Bank Bank Capital to Assets Ratio (EU)",
+                "description": "Bank regulatory capital to risk-weighted assets - Euro Area",
+                "category": DataCategory.BANKING,
+                "region": DataRegion.EUROPE,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.CREDIT_RISK.value],
+                "data_source_id": sources["World Bank"].id,
+                "endpoint": "EMU.FB.BNK.CAPA.ZS",
+                "frequency": "annual",
+                "granularity": "macro",
+                "unit": "percentage",
+                "default_selected": True,
+                "priority": 80,
+                "tags": ["capital_adequacy", "regulatory_capital", "europe"]
+            },
+            {
+                "code": "WB_BANK_NPL_EU",
+                "name": "World Bank Bank Non-Performing Loans (EU)",
+                "description": "Bank nonperforming loans to gross loans ratio - Euro Area",
+                "category": DataCategory.CREDIT_MARKETS,
+                "region": DataRegion.EUROPE,
+                "risk_types": [RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["World Bank"].id,
+                "endpoint": "EMU.FB.AST.NPER.ZS",
+                "frequency": "annual",
+                "granularity": "macro",
+                "unit": "percentage",
+                "default_selected": True,
+                "priority": 90,
+                "tags": ["credit_quality", "npl", "loan_quality", "europe"]
+            },
+            {
+                "code": "WB_DOMESTIC_CREDIT_EU",
+                "name": "World Bank Domestic Credit to Private Sector (EU)",
+                "description": "Domestic credit provided by financial sector - Euro Area",
+                "category": DataCategory.CREDIT_MARKETS,
+                "region": DataRegion.EUROPE,
+                "risk_types": [RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["World Bank"].id,
+                "endpoint": "EMU.FS.AST.PRVT.GD.ZS",
+                "frequency": "annual",
+                "granularity": "macro",
+                "unit": "percentage_of_gdp",
+                "default_selected": True,
+                "priority": 80,
+                "tags": ["domestic_credit", "private_sector", "europe"]
+            },
+
+            # ============================================
+            # WORLD BANK - ASIA
+            # ============================================
+            {
+                "code": "WB_BANK_CAPITAL_RATIO_JP",
+                "name": "World Bank Bank Capital to Assets Ratio (Japan)",
+                "description": "Bank regulatory capital to risk-weighted assets - Japan",
+                "category": DataCategory.BANKING,
+                "region": DataRegion.ASIA,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.CREDIT_RISK.value],
+                "data_source_id": sources["World Bank"].id,
+                "endpoint": "JPN.FB.BNK.CAPA.ZS",
+                "frequency": "annual",
+                "granularity": "macro",
+                "unit": "percentage",
+                "default_selected": True,
+                "priority": 80,
+                "tags": ["capital_adequacy", "regulatory_capital", "japan", "asia"]
+            },
+            {
+                "code": "WB_BANK_NPL_JP",
+                "name": "World Bank Bank Non-Performing Loans (Japan)",
+                "description": "Bank nonperforming loans to gross loans ratio - Japan",
+                "category": DataCategory.CREDIT_MARKETS,
+                "region": DataRegion.ASIA,
+                "risk_types": [RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["World Bank"].id,
+                "endpoint": "JPN.FB.AST.NPER.ZS",
+                "frequency": "annual",
+                "granularity": "macro",
+                "unit": "percentage",
+                "default_selected": True,
+                "priority": 90,
+                "tags": ["credit_quality", "npl", "loan_quality", "japan", "asia"]
+            },
+            {
+                "code": "WB_DOMESTIC_CREDIT_CN",
+                "name": "World Bank Domestic Credit to Private Sector (China)",
+                "description": "Domestic credit provided by financial sector - China",
+                "category": DataCategory.CREDIT_MARKETS,
+                "region": DataRegion.ASIA,
+                "risk_types": [RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["World Bank"].id,
+                "endpoint": "CHN.FS.AST.PRVT.GD.ZS",
+                "frequency": "annual",
+                "granularity": "macro",
+                "unit": "percentage_of_gdp",
+                "default_selected": True,
+                "priority": 80,
+                "tags": ["domestic_credit", "private_sector", "china", "asia"]
             },
 
             # ============================================
