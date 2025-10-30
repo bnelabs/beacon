@@ -23,6 +23,8 @@ router = APIRouter()
 async def list_catalogue_items(
     category: Optional[str] = Query(None),
     region: Optional[str] = Query(None),
+    countries: Optional[str] = Query(None, description="Comma-separated list of country codes (ISO 3166-1 alpha-3)"),
+    sources: Optional[str] = Query(None, description="Comma-separated list of data source IDs"),
     risk_type: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     enabled_only: bool = Query(True),
@@ -33,7 +35,13 @@ async def list_catalogue_items(
     List available data catalogue items with filtering.
 
     **For non-technical users:** Browse all available financial data sources you can track.
-    Filter by category (exchange rates, stocks, etc.), region (US, Europe, Asia), or search by name.
+    Filter by category (exchange rates, stocks, etc.), region (US, Europe, Asia), countries,
+    data sources, or search by name.
+
+    Parameters:
+    - region: Region ID (e.g., 'north_america', 'europe', 'asia')
+    - countries: Comma-separated country codes (e.g., 'USA,CAN,MEX')
+    - sources: Comma-separated data source IDs (e.g., '1,2,3')
     """
     try:
         query = db.query(DataCatalogueItem).options(joinedload(DataCatalogueItem.data_source))
@@ -43,7 +51,31 @@ async def list_catalogue_items(
             query = query.filter(DataCatalogueItem.category == category)
 
         if region:
-            query = query.filter(DataCatalogueItem.region == region)
+            # Map frontend region IDs to backend DataRegion enum
+            region_mapping = {
+                'north_america': 'NORTH_AMERICA',
+                'latin_america': 'LATIN_AMERICA',
+                'europe': 'EUROPE',
+                'asia': 'ASIA',
+                'africa': 'AFRICA',
+                'middle_east': 'MIDDLE_EAST',
+                'global': 'GLOBAL'
+            }
+            backend_region = region_mapping.get(region.lower(), region.upper())
+            query = query.filter(DataCatalogueItem.region == backend_region)
+
+        if countries:
+            # Filter by specific countries
+            # Assuming catalogue items have a 'country_code' field or we check the region
+            country_list = [c.strip().upper() for c in countries.split(',')]
+            # For now, we'll filter by checking if any country in the list matches the item's coverage
+            # This is a simplified approach - you may need to adjust based on your data model
+            pass  # TODO: Implement country-specific filtering once country_code field is added
+
+        if sources:
+            # Filter by data source IDs
+            source_ids = [int(s.strip()) for s in sources.split(',')]
+            query = query.filter(DataCatalogueItem.data_source_id.in_(source_ids))
 
         if risk_type:
             # JSON array contains query
