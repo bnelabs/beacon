@@ -40,7 +40,11 @@ class DataSourceService:
             raise ValueError(f"Data source with name '{data_source.name}' already exists")
 
         # Validate plugin type
-        valid_plugins = ["yfinance", "fred", "alpha_vantage", "csv", "custom_api"]
+        valid_plugins = [
+            "yfinance", "fred", "alpha_vantage", "csv", "custom_api",
+            "ecb", "sec_edgar", "bis", "imf", "world_bank",
+            "ecb_banking", "fmp"
+        ]
         if data_source.plugin_type not in valid_plugins:
             raise ValueError(f"Invalid plugin type. Must be one of: {', '.join(valid_plugins)}")
 
