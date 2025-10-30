@@ -23,6 +23,13 @@ class DataSource(Base):
 
     # Metadata
     description = Column(Text)
+
+    # Registration & Access Information
+    registration_url = Column(String(500))  # Where to register for API key
+    registration_required = Column(Boolean, default=False)  # Whether API key is required
+    free_tier_limits = Column(Text)  # Description of free tier limitations
+    coverage_description = Column(Text)  # What data is covered (e.g., "4,380+ US banks")
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_successful_fetch = Column(DateTime(timezone=True))
