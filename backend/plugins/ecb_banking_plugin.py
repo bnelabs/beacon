@@ -20,18 +20,59 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import logging
 
-from plugins.base_plugin import BasePlugin
+from .base import DataSourcePlugin, register_plugin
 
 logger = logging.getLogger(__name__)
 
 
-class ECBBankingPlugin(BasePlugin):
+class ECBBankingPlugin(DataSourcePlugin):
     """Plugin for ECB Banking Supervision data API."""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config: Dict[str, Any] = None):
+        super().__init__(config or {})
         self.base_url = "https://data-api.ecb.europa.eu/service/data"
         self.plugin_type = "ecb_banking"
+
+    def validate_config(self) -> None:
+        """No configuration required for ECB Banking API."""
+        pass
+
+    def test_connection(self) -> Dict[str, Any]:
+        """Test ECB Banking API connection."""
+        try:
+            response = requests.get(f"{self.base_url}/SSI", timeout=10)
+            response.raise_for_status()
+            return {
+                "success": True,
+                "message": "Successfully connected to ECB Banking API"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Failed to connect: {str(e)}"
+            }
+
+    def fetch_indicator_data(self, indicator_id: str, start_date: datetime, end_date: datetime) -> Optional[pd.DataFrame]:
+        """Alias for fetch_data to match base class interface."""
+        return self.fetch_data(indicator_id, start_date, end_date)
+
+    @classmethod
+    def get_config_schema(cls) -> Dict[str, Any]:
+        """ECB Banking API requires no configuration."""
+        return {}
+
+    @classmethod
+    def get_plugin_info(cls) -> Dict[str, Any]:
+        """Get plugin metadata."""
+        return {
+            "name": "ECB Banking Supervision",
+            "description": "European Central Bank Banking Supervision Data",
+            "version": "1.0.0",
+            "author": "BEACON",
+            "free": True,
+            "registration_required": False,
+            "registration_url": None
+        }
 
     def fetch_data(
         self,
@@ -169,3 +210,7 @@ class ECBBankingPlugin(BasePlugin):
             "ROE": "Return on equity",
             "COST_INCOME": "Cost-to-income ratio",
         }
+
+
+# Register the plugin
+register_plugin("ecb_banking", ECBBankingPlugin)

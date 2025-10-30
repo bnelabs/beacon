@@ -22,6 +22,8 @@ from .ecb_plugin import ECBPlugin
 from .bis_plugin import BISPlugin
 from .imf_plugin import IMFPlugin
 from .world_bank_plugin import WorldBankPlugin
+from .ecb_banking_plugin import ECBBankingPlugin
+from .fmp_plugin import FMPPlugin
 
 __all__ = [
     "DataSourcePlugin",
@@ -37,5 +39,7 @@ __all__ = [
     "ECBPlugin",
     "BISPlugin",
     "IMFPlugin",
-    "WorldBankPlugin"
+    "WorldBankPlugin",
+    "ECBBankingPlugin",
+    "FMPPlugin"
 ]

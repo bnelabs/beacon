@@ -22,22 +22,80 @@ from typing import Dict, Any, Optional, List
 import logging
 import time
 
-from plugins.base_plugin import BasePlugin
+from .base import DataSourcePlugin, register_plugin
 
 logger = logging.getLogger(__name__)
 
 
-class FMPPlugin(BasePlugin):
+class FMPPlugin(DataSourcePlugin):
     """Plugin for Financial Modeling Prep API."""
 
-    def __init__(self, api_key: Optional[str] = None):
-        super().__init__()
+    def __init__(self, config: Dict[str, Any] = None):
+        super().__init__(config or {})
         self.base_url = "https://financialmodelingprep.com/api/v3"
         self.plugin_type = "fmp"
         # API key should be stored in environment variable or config
-        self.api_key = api_key or "demo"  # Use demo key for testing
+        self.api_key = self.config.get('api_key', 'demo')  # Use demo key for testing
         self._last_call_time = 0
         self._min_interval = 0.25  # 250/day = ~4 calls per second max
+
+    def validate_config(self) -> None:
+        """Validate FMP configuration."""
+        # API key is optional (demo key available)
+        pass
+
+    def test_connection(self) -> Dict[str, Any]:
+        """Test FMP API connection."""
+        try:
+            endpoint = f"{self.base_url}/profile/JPM"
+            params = {"apikey": self.api_key}
+            response = requests.get(endpoint, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            if data and isinstance(data, list) and len(data) > 0:
+                return {
+                    "success": True,
+                    "message": "Successfully connected to Financial Modeling Prep API"
+                }
+            return {
+                "success": False,
+                "message": "Invalid API response"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Failed to connect: {str(e)}"
+            }
+
+    def fetch_indicator_data(self, indicator_id: str, start_date: datetime, end_date: datetime) -> Optional[pd.DataFrame]:
+        """Alias for fetch_data to match base class interface."""
+        return self.fetch_data(indicator_id, start_date, end_date)
+
+    @classmethod
+    def get_config_schema(cls) -> Dict[str, Any]:
+        """FMP API configuration schema."""
+        return {
+            "api_key": {
+                "type": "string",
+                "required": False,
+                "label": "API Key",
+                "help": "Get your free API key from https://site.financialmodelingprep.com/developer/docs",
+                "default": "demo"
+            }
+        }
+
+    @classmethod
+    def get_plugin_info(cls) -> Dict[str, Any]:
+        """Get plugin metadata."""
+        return {
+            "name": "Financial Modeling Prep",
+            "description": "Global bank fundamentals and financial data",
+            "version": "1.0.0",
+            "author": "BEACON",
+            "free": True,
+            "registration_required": True,
+            "registration_url": "https://site.financialmodelingprep.com/developer/docs"
+        }
 
     def _rate_limit(self):
         """Enforce rate limiting (250 calls/day for free tier)."""
@@ -429,3 +487,7 @@ class FMPPlugin(BasePlugin):
         }
 
         return symbols.get(country, {})
+
+
+# Register the plugin
+register_plugin("fmp", FMPPlugin)
