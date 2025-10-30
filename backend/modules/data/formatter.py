@@ -13,18 +13,42 @@ class DataFormatter:
 
     def format(self, data: Dict[str, pd.DataFrame], target_schema: str) -> pd.DataFrame:
         logger.info(f"[{self.job_id}] Formatting to {target_schema}")
-        
+
         # Combine all datasets
         all_data = []
         for code, df in data.items():
             if not df.empty:
                 df = df.copy()
+
+                # Standardize column names to match expected schema
+                # Different plugins return different capitalizations
+                column_mapping = {}
+                for col in df.columns:
+                    col_lower = col.lower()
+                    if col_lower == 'date':
+                        column_mapping[col] = 'Date'
+                    elif col_lower == 'value':
+                        column_mapping[col] = 'Value'
+                    elif col_lower == 'open':
+                        column_mapping[col] = 'Open'
+                    elif col_lower == 'high':
+                        column_mapping[col] = 'High'
+                    elif col_lower == 'low':
+                        column_mapping[col] = 'Low'
+                    elif col_lower == 'close':
+                        column_mapping[col] = 'Close'
+                    elif col_lower == 'volume':
+                        column_mapping[col] = 'Volume'
+
+                if column_mapping:
+                    df = df.rename(columns=column_mapping)
+
                 df['source_code'] = code
                 all_data.append(df)
-        
+
         if not all_data:
             return pd.DataFrame()
-        
+
         combined = pd.concat(all_data, ignore_index=True)
         return combined
 

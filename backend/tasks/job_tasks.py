@@ -139,7 +139,8 @@ def run_data_collection(self, job_id: int, parameters: dict):
             catalogue_items = [item.id for item in default_items]
             logger.info(f"No items specified, using {len(catalogue_items)} default catalogue items")
 
-        start_date = parameters.get('start_date', '2024-01-01')
+        # Default to 5 years of history for better coverage of annual/quarterly data
+        start_date = parameters.get('start_date', '2019-01-01')
         end_date = parameters.get('end_date', '2024-12-31')
 
         logger.info(f"Running data collection with {len(catalogue_items)} catalogue items...")
