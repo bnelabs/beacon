@@ -29,6 +29,39 @@ class WorldBankPlugin(DataSourcePlugin):
         # World Bank API is open, no authentication required
         pass
 
+    def test_item(self, item_identifier: str) -> Dict[str, Any]:
+        """Test World Bank indicator with appropriate date range for annual data."""
+        try:
+            from datetime import timedelta
+            # World Bank data is annual/quarterly, use last 5 years
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=1825)  # ~5 years
+
+            df = self.fetch_indicator_data(item_identifier, start_date, end_date)
+
+            if df is not None and not df.empty:
+                return {
+                    "success": True,
+                    "message": f"Successfully accessed {item_identifier}. Found {len(df)} data points.",
+                    "details": {
+                        "data_points": len(df),
+                        "date_range": f"{df['date'].min().date()} to {df['date'].max().date()}"
+                    }
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": f"No data found for {item_identifier}. It may not exist or have no recent data.",
+                    "details": {"error": "Empty dataset"}
+                }
+        except Exception as e:
+            logger.error(f"Error testing World Bank item {item_identifier}: {e}")
+            return {
+                "success": False,
+                "message": f"Failed to access {item_identifier}: {str(e)}",
+                "details": {"error": str(e)}
+            }
+
     def test_connection(self) -> Dict[str, Any]:
         """Test World Bank API connectivity."""
         try:
