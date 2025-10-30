@@ -282,9 +282,13 @@ All predictions include confidence intervals and feature attributions.
         """Generate key findings text."""
         findings = []
 
-        # Find highest risk source
-        max_risk_row = predictions_df.loc[predictions_df['prediction'].idxmax()]
-        findings.append(f"- Highest risk in: {max_risk_row['source']} ({max_risk_row['prediction'] * 100:.1f}%)")
+        # Find highest risk source (skip if all NaN)
+        valid_predictions = predictions_df['prediction'].dropna()
+        if len(valid_predictions) > 0:
+            max_risk_row = predictions_df.loc[valid_predictions.idxmax()]
+            findings.append(f"- Highest risk in: {max_risk_row['source']} ({max_risk_row['prediction'] * 100:.1f}%)")
+        else:
+            findings.append("- No valid risk predictions available")
 
         # Find most important features
         all_features = {}

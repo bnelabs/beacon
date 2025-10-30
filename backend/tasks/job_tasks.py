@@ -638,12 +638,14 @@ def run_backtest(self, job_id: int, parameters: dict):
         if 'date' in data.columns and start_date and end_date:
             data['date'] = pd.to_datetime(data['date'])
             test_data = data[(data['date'] >= start_date) & (data['date'] <= end_date)]
+            train_data = data[data['date'] < start_date]
         else:
             # If no date column or params, use last 20% as test
             split_idx = int(len(data) * 0.8)
+            train_data = data[:split_idx]
             test_data = data[split_idx:]
 
-        logger.info(f"Backtest: {len(test_data)} test samples")
+        logger.info(f"Backtest: {len(train_data)} train samples, {len(test_data)} test samples")
 
         self.update_progress(job_id, 40.0)
 
