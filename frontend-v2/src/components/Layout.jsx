@@ -1,7 +1,7 @@
 export function Shell({ header, children, sidebar }) {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-bne-ice via-white to-bne-silver/30">
-      <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col">
+    <div className="min-h-screen w-full bg-gradient-to-br from-bne-ice via-white to-bne-silver/30">
+      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-2 sm:px-0">
         <header className="px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
           <div className="flex flex-col gap-4 rounded-3xl bg-white/70 px-6 py-5 shadow-bne-panel backdrop-blur-halo sm:flex-row sm:items-center sm:justify-between lg:px-8">
             {header}

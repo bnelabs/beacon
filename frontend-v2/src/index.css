@@ -15,5 +15,6 @@ body {
 }
 
 #root {
-  @apply min-h-screen;
+  @apply min-h-screen w-full;
+  max-width: 100%;
 }
