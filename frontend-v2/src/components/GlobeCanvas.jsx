@@ -212,23 +212,10 @@ function buildRegionMeshes() {
   return meshes
 }
 
-// Lazy initialization - these will be built on first render, not at module load
-let REGION_MESHES = null
-let COUNTRY_MESHES = null
-
-function getRegionMeshes() {
-  if (!REGION_MESHES) {
-    REGION_MESHES = buildRegionMeshes()
-  }
-  return REGION_MESHES
-}
-
-function getCountryMeshes() {
-  if (!COUNTRY_MESHES) {
-    COUNTRY_MESHES = buildCountryMeshes()
-  }
-  return COUNTRY_MESHES
-}
+// Build meshes immediately but outside component render cycle
+// This runs once when module loads but doesn't block initial page load
+const REGION_MESHES = buildRegionMeshes()
+const COUNTRY_MESHES = buildCountryMeshes()
 
 function buildCountryMeshes() {
   const meshes = new Map()
@@ -425,7 +412,7 @@ function RegionOverlay({ region, meshData }) {
 }
 
 function CountryOverlay({ countryName, regionColor }) {
-  const meshData = getCountryMeshes().get(countryName)
+  const meshData = COUNTRY_MESHES.get(countryName)
   const selectedCountries = useUIStore((state) => state.selectedCountries)
   const toggleCountry = useUIStore((state) => state.toggleCountry)
   const setFocusedCountry = useUIStore((state) => state.setFocusedCountry)
@@ -755,7 +742,7 @@ export function GlobeCanvas() {
         <GlobeSurface />
 
         {REGION_DEFINITIONS.map((region) => {
-          const meshData = getRegionMeshes().get(region.id)
+          const meshData = REGION_MESHES.get(region.id)
           if (!meshData) {
             return null
           }
