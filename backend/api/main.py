@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI):
         count = db.query(DataCatalogueItem).count()
         if count == 0:
             logger.info("Catalogue is empty, populating with default items...")
-            from scripts.populate_catalogue import populate_catalogue
+            from backend.scripts.populate_catalogue import populate_catalogue
             populate_catalogue()
             logger.info("Catalogue populated successfully")
         else:
@@ -74,21 +74,28 @@ app = FastAPI(
 
 # CORS middleware for frontend access
 # In production, set ALLOWED_ORIGINS environment variable
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",") if os.getenv("ALLOWED_ORIGINS") else [
+default_allowed_origins = [
     "http://localhost:3000",
     "http://localhost:5173",
+    "http://127.0.0.1:5173",
     "http://localhost:6789",
     "http://127.0.0.1:6789",
 ]
 
-# For Docker deployments, allow all origins (less secure, but necessary for dynamic IPs)
-if os.getenv("ENVIRONMENT", "development") == "development":
-    allowed_origins = ["*"]
+if os.getenv("ALLOWED_ORIGINS"):
+    allowed_origins = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "").split(",") if origin.strip()]
+else:
+    allowed_origins = default_allowed_origins
+
+allow_credentials = os.getenv("ALLOW_CREDENTIALS", "true").lower() not in {"false", "0", "no"}
+
+if "*" in allowed_origins:
+    allow_credentials = False
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=False if "*" in allowed_origins else True,  # Can't use credentials with wildcard
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],

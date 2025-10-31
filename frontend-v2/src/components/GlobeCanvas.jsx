@@ -11,6 +11,12 @@ import earthDayMap from '../assets/globe/earth-day.jpg'
 import earthBumpMap from '../assets/globe/earth-topology.png'
 import earthNightMap from '../assets/globe/earth-night.jpg'
 import countriesTopology from '../assets/geo/countries-50m.json'
+import earcut from 'earcut'
+
+// Ensure earcut is available for three-geojson-geometry internals.
+if (typeof globalThis !== 'undefined' && !globalThis.earcut) {
+  globalThis.earcut = earcut
+}
 
 const BASE_RADIUS = 1.6
 const DEFAULT_CAMERA_POSITION = new THREE.Vector3(0, 0, 4.2)
@@ -24,6 +30,8 @@ const COUNTRIES_BY_NAME = new Map(COUNTRY_FEATURES.map((feature) => [feature.pro
 const INTERPOLATION_MAX_DEG = 0.75
 const MIN_POLYGON_AREA = 2e-5
 const GEOJSON_RESOLUTION = Math.max(2, Math.round(5 / INTERPOLATION_MAX_DEG))
+const MANUAL_OVERRIDE_MS = 4500
+const FOCUS_RESUME_DELAY_MS = 3000
 
 function latLongToVector(lat, lon, radius) {
   const phi = THREE.MathUtils.degToRad(90 - lat)
@@ -132,41 +140,6 @@ function normalizeRing(ring) {
     }
   }
   return cleaned
-}
-
-function triangulatePolygon(rings) {
-  const vertices = []
-  const holes = []
-
-  rings.forEach((ring, index) => {
-    const normalized = normalizeRing(ring)
-    if (normalized.length < 3) {
-      return
-    }
-    if (index > 0) {
-      holes.push(vertices.length / 2)
-    }
-    normalized.forEach(([lon, lat]) => {
-      vertices.push(lon, lat)
-    })
-  })
-
-  if (vertices.length < 6) {
-    return []
-  }
-
-  const indices = earcut(vertices, holes, 2)
-  const positions = []
-
-  for (let i = 0; i < indices.length; i += 1) {
-    const index = indices[i] * 2
-    const lon = vertices[index]
-    const lat = vertices[index + 1]
-    const vector = latLongToVector(lat, lon, REGION_FILL_ALTITUDE)
-    positions.push(vector.x, vector.y, vector.z)
-  }
-
-  return positions
 }
 
 function buildRegionMeshes() {
@@ -303,14 +276,11 @@ function RegionOverlay({ region, meshData }) {
   const selectedRegions = useUIStore((state) => state.selectedRegions)
   const toggleRegion = useUIStore((state) => state.toggleRegion)
   const setFocusedRegion = useUIStore((state) => state.setFocusedRegion)
+  const focusedRegion = useUIStore((state) => state.focusedRegion)
   const removeCountries = useUIStore((state) => state.removeCountries)
   const [hovered, setHovered] = useState(false)
   const pointerDownRef = useRef(null)
   const draggingRef = useRef(false)
-
-  if (!meshData) {
-    return null
-  }
 
   const isSelected = selectedRegions.includes(region.id)
   const baseColor = useMemo(() => new THREE.Color(region.color), [region.color])
@@ -332,15 +302,29 @@ function RegionOverlay({ region, meshData }) {
 
   const handlePointerOver = (event) => {
     event.stopPropagation()
-    setHovered(true)
-    setFocusedRegion(region.id)
+    if (draggingRef.current) {
+      return
+    }
+    if (!hovered) {
+      setHovered(true)
+    }
+    if (focusedRegion !== region.id) {
+      setFocusedRegion(region.id)
+    }
     document.body.style.cursor = 'pointer'
   }
 
   const handlePointerOut = (event) => {
     event.stopPropagation()
-    setHovered(false)
-    setFocusedRegion(null)
+    if (draggingRef.current) {
+      return
+    }
+    if (hovered) {
+      setHovered(false)
+    }
+    if (focusedRegion === region.id) {
+      setFocusedRegion(null)
+    }
     document.body.style.cursor = ''
   }
 
@@ -369,6 +353,10 @@ function RegionOverlay({ region, meshData }) {
       removeCountries(region.countryNames)
     }
     toggleRegion(region.id)
+  }
+
+  if (!meshData) {
+    return null
   }
 
   return (
@@ -414,7 +402,7 @@ function RegionOverlay({ region, meshData }) {
           }}
           renderOrder={2}
         >
-          <lineBasicMaterial color={outlineColor} transparent opacity={outlineOpacity} toneMapped={false} depthTest={false} />
+          <lineBasicMaterial color={outlineColor} transparent opacity={outlineOpacity} toneMapped={false} depthTest />
         </line>
       ))}
     </group>
@@ -426,13 +414,10 @@ function CountryOverlay({ countryName, regionColor }) {
   const selectedCountries = useUIStore((state) => state.selectedCountries)
   const toggleCountry = useUIStore((state) => state.toggleCountry)
   const setFocusedCountry = useUIStore((state) => state.setFocusedCountry)
+  const focusedCountry = useUIStore((state) => state.focusedCountry)
   const [hovered, setHovered] = useState(false)
   const pointerDownRef = useRef(null)
   const draggingRef = useRef(false)
-
-  if (!meshData) {
-    return null
-  }
 
   const isSelected = selectedCountries.includes(countryName)
   const baseColor = useMemo(() => new THREE.Color(regionColor || '#38bdf8'), [regionColor])
@@ -454,15 +439,29 @@ function CountryOverlay({ countryName, regionColor }) {
 
   const handlePointerOver = (event) => {
     event.stopPropagation()
-    setHovered(true)
-    setFocusedCountry(countryName)
+    if (draggingRef.current) {
+      return
+    }
+    if (!hovered) {
+      setHovered(true)
+    }
+    if (focusedCountry !== countryName) {
+      setFocusedCountry(countryName)
+    }
     document.body.style.cursor = 'pointer'
   }
 
   const handlePointerOut = (event) => {
     event.stopPropagation()
-    setHovered(false)
-    setFocusedCountry(null)
+    if (draggingRef.current) {
+      return
+    }
+    if (hovered) {
+      setHovered(false)
+    }
+    if (focusedCountry === countryName) {
+      setFocusedCountry(null)
+    }
     document.body.style.cursor = ''
   }
 
@@ -488,6 +487,10 @@ function CountryOverlay({ countryName, regionColor }) {
     event.stopPropagation()
     pointerDownRef.current = null
     toggleCountry(countryName)
+  }
+
+  if (!meshData) {
+    return null
   }
 
   return (
@@ -534,7 +537,7 @@ function CountryOverlay({ countryName, regionColor }) {
           }}
           renderOrder={11}
         >
-          <lineBasicMaterial color={outlineColor} transparent opacity={outlineOpacity} toneMapped={false} depthTest={false} />
+          <lineBasicMaterial color={outlineColor} transparent opacity={outlineOpacity} toneMapped={false} depthTest />
         </line>
       ))}
     </group>
@@ -551,13 +554,15 @@ export function GlobeCanvas() {
   const isInteractingRef = useRef(false)
   const lastFocusedRegionRef = useRef(null)
   const manualOverrideRef = useRef(0)
+  const focusSuppressedRef = useRef(false)
+  const focusResumeTimeoutRef = useRef(null)
   const lastZoomDistanceRef = useRef(DEFAULT_CAMERA_POSITION.length())
 
   useEffect(() => {
     const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
-    const manualOverrideActive = now - manualOverrideRef.current < 2800
+    const manualOverrideActive = now - manualOverrideRef.current < MANUAL_OVERRIDE_MS
 
-    if (manualOverrideActive) {
+    if (manualOverrideActive || focusSuppressedRef.current) {
       return
     }
 
@@ -616,6 +621,11 @@ export function GlobeCanvas() {
       isInteractingRef.current = true
       controls.autoRotate = false
       manualOverrideRef.current = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
+      focusSuppressedRef.current = true
+      if (focusResumeTimeoutRef.current) {
+        clearTimeout(focusResumeTimeoutRef.current)
+        focusResumeTimeoutRef.current = null
+      }
     }
 
     const handleEnd = () => {
@@ -623,6 +633,9 @@ export function GlobeCanvas() {
       manualOverrideRef.current = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
       focusTargetRef.current.copy(controls.target)
       cameraTargetRef.current.copy(controls.object.position)
+      focusResumeTimeoutRef.current = setTimeout(() => {
+        focusSuppressedRef.current = false
+      }, FOCUS_RESUME_DELAY_MS)
     }
 
     controls.addEventListener('change', handleChange)
@@ -633,6 +646,9 @@ export function GlobeCanvas() {
       controls.removeEventListener('change', handleChange)
       controls.removeEventListener('start', handleStart)
       controls.removeEventListener('end', handleEnd)
+      if (focusResumeTimeoutRef.current) {
+        clearTimeout(focusResumeTimeoutRef.current)
+      }
     }
   }, [])
 
@@ -641,11 +657,11 @@ export function GlobeCanvas() {
       const controls = orbitRef.current
       if (!controls) return
       const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
-      const manualOverrideActive = now - manualOverrideRef.current < 2800
+      const manualOverrideActive = now - manualOverrideRef.current < MANUAL_OVERRIDE_MS
       const currentDistance = controls.getDistance()
       const zoomChanged = Math.abs(currentDistance - lastZoomDistanceRef.current) > 0.003
 
-      if (!isInteractingRef.current && !manualOverrideActive && !zoomChanged) {
+      if (!isInteractingRef.current && !manualOverrideActive && !zoomChanged && !focusSuppressedRef.current) {
         controls.target.lerp(focusTargetRef.current, delta * 1.2)
         state.camera.position.lerp(cameraTargetRef.current, delta * 1.2)
       } else {
@@ -657,6 +673,54 @@ export function GlobeCanvas() {
     })
     return null
   }
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined
+    }
+
+    const readState = () => {
+      const controls = orbitRef.current
+      if (!controls || !controls.object) {
+        return null
+      }
+      const { target, object } = controls
+      const targetVector = target.clone()
+      const cameraPosition = object.position.clone()
+      const relative = cameraPosition.clone().sub(targetVector)
+      const spherical = new THREE.Spherical().setFromVector3(relative)
+
+      return {
+        target: targetVector.toArray(),
+        position: cameraPosition.toArray(),
+        azimuthalAngle: typeof controls.getAzimuthalAngle === 'function' ? controls.getAzimuthalAngle() : null,
+        polarAngle: typeof controls.getPolarAngle === 'function' ? controls.getPolarAngle() : null,
+        radius: spherical.radius
+      }
+    }
+
+    window.__BEACON_GLOBE__ = {
+      getState: () => {
+        const controls = orbitRef.current
+        const base = readState()
+        if (!base || !controls?.object) {
+          return null
+        }
+        return {
+          ...base,
+          quaternion: controls.object.quaternion.toArray()
+        }
+      },
+      getTarget: () => readState()?.target ?? null,
+      getPosition: () => readState()?.position ?? null
+    }
+
+    return () => {
+      if (window.__BEACON_GLOBE__) {
+        delete window.__BEACON_GLOBE__
+      }
+    }
+  }, [])
 
   return (
     <Canvas

@@ -7,13 +7,6 @@ export const REGION_DEFINITIONS = [
     scale: [1.7, 1.2],
     color: '#4EA8DE',
     gradient: 'from-bne-azure to-bne-emerald',
-    metrics: {
-      liquidityStress: 0.62,
-      fundingSpread: 42,
-      systemicPulse: 0.58
-    },
-    narrative:
-      'US and Canadian wholesale markets stable; monitor cross-border USD funding channels for seasonal tightness.',
     countryNames: [
       'Canada',
       'United States of America',
@@ -29,13 +22,6 @@ export const REGION_DEFINITIONS = [
     scale: [1.6, 1.1],
     color: '#F59E0B',
     gradient: 'from-amber-400 to-bne-amber',
-    metrics: {
-      liquidityStress: 0.71,
-      fundingSpread: 68,
-      systemicPulse: 0.64
-    },
-    narrative:
-      'FX-linked liquidity buffers remain under pressure. Mexico and Brazil interbank corridors require closer tracking.',
     countryNames: [
       'Belize',
       'Costa Rica',
@@ -79,13 +65,6 @@ export const REGION_DEFINITIONS = [
     scale: [1.5, 1.1],
     color: '#F5B942',
     gradient: 'from-bne-steel to-bne-amber',
-    metrics: {
-      liquidityStress: 0.54,
-      fundingSpread: 36,
-      systemicPulse: 0.49
-    },
-    narrative:
-      'Energy-linked sovereign flows stabilising Gulf interbank markets; monitor Egypt and Turkey for rollover risk.',
     countryNames: [
       'Morocco',
       'Algeria',
@@ -122,13 +101,6 @@ export const REGION_DEFINITIONS = [
     scale: [1.8, 1.2],
     color: '#3ED2A1',
     gradient: 'from-bne-emerald to-bne-azure',
-    metrics: {
-      liquidityStress: 0.48,
-      fundingSpread: 28,
-      systemicPulse: 0.52
-    },
-    narrative:
-      'Eurozone core banking network remains resilient; focus on collateral market depth as EUR funding demand rises.',
     countryNames: [
       'United Kingdom',
       'Ireland',
@@ -162,13 +134,6 @@ export const REGION_DEFINITIONS = [
     scale: [1.6, 1.15],
     color: '#1F7CC1',
     gradient: 'from-bne-steel to-bne-azure',
-    metrics: {
-      liquidityStress: 0.63,
-      fundingSpread: 53,
-      systemicPulse: 0.61
-    },
-    narrative:
-      'Monitor cross-border liquidity channels with EU core; heightened sensitivity to energy price swings persists.',
     countryNames: [
       'Poland',
       'Czechia',
@@ -204,13 +169,6 @@ export const REGION_DEFINITIONS = [
     scale: [2.0, 1.1],
     color: '#5465FF',
     gradient: 'from-bne-azure to-indigo-400',
-    metrics: {
-      liquidityStress: 0.57,
-      fundingSpread: 39,
-      systemicPulse: 0.68
-    },
-    narrative:
-      'Asia-Pacific interbank grid shows elevated systemic pulse driven by yen volatility and CNH offshore demand.',
     countryNames: [
       'China',
       'Japan',

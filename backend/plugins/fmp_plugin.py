@@ -15,6 +15,7 @@ Data includes:
 - Earnings and estimates
 """
 
+import os
 import pandas as pd
 import requests
 from datetime import datetime
@@ -31,18 +32,24 @@ class FMPPlugin(DataSourcePlugin):
     """Plugin for Financial Modeling Prep API."""
 
     def __init__(self, config: Dict[str, Any] = None):
-        super().__init__(config or {})
+        config = config or {}
+        super().__init__(config)
         self.base_url = "https://financialmodelingprep.com/api/v3"
         self.plugin_type = "fmp"
         # API key should be stored in environment variable or config
-        self.api_key = self.config.get('api_key', 'demo')  # Use demo key for testing
+        self.api_key = self.config.get('api_key') or os.getenv('FMP_API_KEY')
+        if not self.api_key:
+            raise ValueError("Financial Modeling Prep API key is required. Set it in connector config or FMP_API_KEY env var.")
+        # Persist resolved key in config to keep downstream consumers consistent
+        self.config['api_key'] = self.api_key
         self._last_call_time = 0
         self._min_interval = 0.25  # 250/day = ~4 calls per second max
 
     def validate_config(self) -> None:
         """Validate FMP configuration."""
-        # API key is optional (demo key available)
-        pass
+        api_key = (self.config or {}).get('api_key') or os.getenv('FMP_API_KEY')
+        if not api_key:
+            raise ValueError("Financial Modeling Prep API key is required. Obtain one at https://site.financialmodelingprep.com/developer/docs and set FMP_API_KEY or provide it in plugin config.")
 
     def test_connection(self) -> Dict[str, Any]:
         """Test FMP API connection."""
@@ -77,10 +84,10 @@ class FMPPlugin(DataSourcePlugin):
         return {
             "api_key": {
                 "type": "string",
-                "required": False,
+                "required": True,
                 "label": "API Key",
-                "help": "Get your free API key from https://site.financialmodelingprep.com/developer/docs",
-                "default": "demo"
+                "help": "Get your API key from https://site.financialmodelingprep.com/developer/docs",
+                "secret": True
             }
         }
 

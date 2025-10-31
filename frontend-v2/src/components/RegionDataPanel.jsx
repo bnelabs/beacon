@@ -9,9 +9,6 @@ import {
   fetchBriefReport,
   fetchDetailedReport,
   fetchTrainingDefaults,
-  fetchModels,
-  fetchPredictionReport,
-  fetchBacktestReport,
   API_BASE,
 } from '../api/dataExplorer.js'
 import { useUIStore } from '../state/uiStore.js'
@@ -23,8 +20,8 @@ import { BacktestPanel } from './BacktestPanel.jsx'
 
 function PanelHeader({ title, subtitle, onBack }) {
   return (
-    <div className="flex items-center justify-between">
-      <div>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="text-center sm:text-left">
         <p className="text-xs font-semibold uppercase tracking-[0.32em] text-bne-azure">{subtitle}</p>
         <h2 className="mt-2 text-xl font-semibold text-bne-ink">{title}</h2>
       </div>
@@ -63,8 +60,8 @@ function DataSourceCard({ source, selected, onToggle }) {
           : 'border-bne-silver/60 bg-white/60 hover:border-bne-azure/50'
       }`}
     >
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-center sm:text-left">
           <h3 className="text-sm font-semibold text-bne-ink">{source.name}</h3>
           <p className="text-xs uppercase tracking-[0.18em] text-bne-steel/70">{source.plugin_type}</p>
         </div>
@@ -100,12 +97,12 @@ function CatalogueCard({ asset, selected, onToggle }) {
           : 'border-bne-silver/60 bg-white/70 hover:border-bne-azure/50'
       }`}
     >
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-center sm:text-left">
           <p className="text-sm font-semibold text-bne-ink">{asset.name}</p>
           <p className="text-xs uppercase tracking-[0.2em] text-bne-steel/60">{asset.code}</p>
         </div>
-        <div className="text-right text-xs text-bne-steel/70">
+        <div className="text-xs text-bne-steel/70 sm:text-right">
           <p>{asset.category.replace('_', ' ')}</p>
           <p>{asset.region.replace('_', ' ')}</p>
         </div>
@@ -284,7 +281,6 @@ function DownloadPanel({ selectedRegions, selectedCountries, selectedSourceIds, 
   const setPanelStage = useUIStore((state) => state.setPanelStage)
   const resetAssets = useUIStore((state) => state.resetAssets)
   const setDataJobId = useUIStore((state) => state.setDataJobId)
-  const dataJobId = useUIStore((state) => state.dataJobId)
   const setConfirmedScope = useUIStore((state) => state.setConfirmedScope)
   const confirmedRegions = useUIStore((state) => state.confirmedRegions)
   const confirmedCountries = useUIStore((state) => state.confirmedCountries)
@@ -809,9 +805,11 @@ export function RegionDataPanel() {
   const dataJobId = useUIStore((state) => state.dataJobId)
   const selectedModelId = useUIStore((state) => state.selectedModelId)
 
+  const regionKey = useMemo(() => selectedRegions.join(','), [selectedRegions])
+
   useEffect(() => {
     resetWorkflow()
-  }, [selectedRegions.join(',')])
+  }, [resetWorkflow, regionKey])
 
   if (selectedRegions.length === 0) {
     return (

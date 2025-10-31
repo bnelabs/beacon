@@ -12,8 +12,8 @@ const BRAND_NAME = 'BEACON'
 
 function Header() {
   return (
-    <div className="flex w-full items-center justify-between">
-      <div className="flex items-center gap-4">
+    <div className="flex w-full flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center">
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-bne-azure/10 text-bne-azure">
           <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
             <circle cx="16" cy="16" r="14" stroke="currentColor" strokeWidth="2.2" />
@@ -31,20 +31,22 @@ function Header() {
             />
           </svg>
         </div>
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.24em] text-bne-steel">
+        <div className="text-center sm:text-left">
+          <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-bne-steel">
             Banking Network Engine
           </p>
-          <h1 className="text-2xl font-semibold tracking-tight text-bne-ink">{BRAND_NAME}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-bne-ink sm:text-3xl">
+            {BRAND_NAME}
+          </h1>
         </div>
       </div>
 
-      <div className="flex items-center gap-8">
-        <div className="flex items-center gap-3 rounded-full bg-white/70 px-5 py-2 shadow-bne-panel">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
+        <div className="flex items-center justify-center gap-3 rounded-full bg-white/70 px-5 py-2 text-center shadow-bne-panel">
           <div className="h-2 w-2 rounded-full bg-bne-emerald" />
           <span className="text-sm font-medium text-bne-steel">Systems Operational</span>
         </div>
-        <button className="rounded-full border border-white/60 bg-white/80 px-5 py-2 text-sm font-medium text-bne-steel transition hover:border-bne-azure/40 hover:text-bne-azure">
+        <button className="w-full rounded-full border border-white/60 bg-white/80 px-5 py-2 text-sm font-medium text-bne-steel transition hover:border-bne-azure/40 hover:text-bne-azure sm:w-auto">
           User Console
         </button>
       </div>
@@ -68,14 +70,14 @@ function PlaceholderSidebar() {
 
   return (
     <div className="flex h-full flex-col gap-6">
-      <div>
+      <div className="text-center sm:text-left">
         <p className="text-xs uppercase tracking-[0.32em] text-bne-azure">Navigator</p>
-        <h2 className="mt-2 text-xl font-semibold text-bne-ink">
+        <h2 className="mt-2 text-xl font-semibold text-bne-ink sm:text-2xl">
           Region Intelligence Console
         </h2>
       </div>
       <div className="space-y-4 text-sm text-bne-steel">
-        <p>
+        <p className="text-center leading-relaxed sm:text-left">
           The interactive globe provides a macro liquidity overview. Click or drag to explore
           BEACON&apos;s multi-region sensing mesh.
         </p>
@@ -98,7 +100,7 @@ function PlaceholderSidebar() {
 
 function GlobePanel() {
   return (
-    <div className="relative h-[600px] overflow-hidden rounded-3xl bg-gradient-to-br from-[#03050a] via-[#060912] to-[#010204]">
+    <div className="relative min-h-[360px] overflow-hidden rounded-3xl bg-gradient-to-br from-[#03050a] via-[#060912] to-[#010204] sm:min-h-[420px] lg:h-[600px]">
       <motion.div
         className="absolute inset-0"
         initial={{ opacity: 0 }}
@@ -107,8 +109,8 @@ function GlobePanel() {
       >
         <GlobeCanvas />
       </motion.div>
-      <div className="pointer-events-none absolute inset-x-10 bottom-10 flex justify-center">
-        <div className="rounded-full border border-white/20 bg-white/10 px-6 py-3 text-sm font-medium uppercase tracking-[0.3em] text-white/80 shadow-lg backdrop-blur-lg">
+      <div className="pointer-events-none absolute inset-x-4 bottom-6 flex justify-center sm:inset-x-8 sm:bottom-8 lg:inset-x-10 lg:bottom-10">
+        <div className="rounded-full border border-white/20 bg-white/10 px-5 py-2.5 text-xs font-medium uppercase tracking-[0.24em] text-white/80 shadow-lg backdrop-blur-lg sm:px-6 sm:py-3 sm:text-sm sm:tracking-[0.3em]">
           Global Liquidity Network
         </div>
       </div>

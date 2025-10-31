@@ -4,9 +4,11 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 from datetime import datetime
+import json
 
 from models.job import Job
 from schemas.job import JobCreate
+from .enhanced_error_translator import translate_error_enhanced
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +73,8 @@ class JobService:
             # Update job status to failed
             db_job.status = "failed"
             db_job.error_message = str(e)
-            from .error_translator import translate_error
-            db_job.user_friendly_error = translate_error(e, context="starting job")
+            translated = translate_error_enhanced(e, context="starting job")
+            db_job.user_friendly_error = json.dumps(translated)
             self.db.commit()
             logger.error(f"Failed to submit job {db_job.id} to Celery: {e}")
 

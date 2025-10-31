@@ -1,20 +1,20 @@
 export function Shell({ header, children, sidebar }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-bne-ice via-white to-bne-silver/30">
-      <div className="flex min-h-screen flex-col">
-        <header className="px-8 py-6">
-          <div className="flex items-center justify-between rounded-3xl bg-white/70 px-8 py-5 shadow-bne-panel backdrop-blur-halo">
+      <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col">
+        <header className="px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
+          <div className="flex flex-col gap-4 rounded-3xl bg-white/70 px-6 py-5 shadow-bne-panel backdrop-blur-halo sm:flex-row sm:items-center sm:justify-between lg:px-8">
             {header}
           </div>
         </header>
 
-        <main className="flex flex-1 flex-col gap-6 px-8 pb-10 lg:flex-row">
-          <section className="flex-1 rounded-3xl bg-white/70 shadow-bne-panel backdrop-blur-halo">
+        <main className="flex flex-1 flex-col gap-6 px-4 pb-12 sm:px-6 lg:flex-row lg:items-start lg:px-8">
+          <section className="flex-1 rounded-3xl bg-white/70 p-4 shadow-bne-panel backdrop-blur-halo sm:p-6 lg:p-8">
             {children}
           </section>
 
           {sidebar ? (
-            <aside className="w-full max-w-sm rounded-3xl bg-white/80 p-6 shadow-bne-panel backdrop-blur-halo">
+            <aside className="w-full rounded-3xl bg-white/80 p-6 shadow-bne-panel backdrop-blur-halo sm:p-7 lg:max-w-sm">
               {sidebar}
             </aside>
           ) : null}

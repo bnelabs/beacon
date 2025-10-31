@@ -44,6 +44,7 @@ async def list_catalogue_items(
     - sources: Comma-separated data source IDs (e.g., '1,2,3')
     """
     try:
+        country_filters: Optional[List[str]] = None
         query = db.query(DataCatalogueItem).options(joinedload(DataCatalogueItem.data_source))
 
         # Apply filters
@@ -65,12 +66,8 @@ async def list_catalogue_items(
             query = query.filter(DataCatalogueItem.region == backend_region)
 
         if countries:
-            # Filter by specific countries
-            # Assuming catalogue items have a 'country_code' field or we check the region
-            country_list = [c.strip().upper() for c in countries.split(',')]
-            # For now, we'll filter by checking if any country in the list matches the item's coverage
-            # This is a simplified approach - you may need to adjust based on your data model
-            pass  # TODO: Implement country-specific filtering once country_code field is added
+            # Capture country filters for post-query filtering until dedicated column is available
+            country_filters = [c.strip().upper() for c in countries.split(',') if c.strip()]
 
         if sources:
             # Filter by data source IDs
@@ -102,6 +99,18 @@ async def list_catalogue_items(
         )
 
         items = query.all()
+
+        if country_filters:
+            def item_matches_country(item: DataCatalogueItem) -> bool:
+                params = item.parameters or {}
+                # Accept several common parameter keys
+                raw_countries = params.get('country_codes') or params.get('countries') or []
+                if isinstance(raw_countries, str):
+                    raw_countries = [code.strip() for code in raw_countries.split(',')]
+                normalized = {str(code).strip().upper() for code in raw_countries if code}
+                return bool(normalized.intersection(country_filters))
+
+            items = [item for item in items if item_matches_country(item)]
         return items
 
     except Exception as e:

@@ -11,6 +11,17 @@ from models.data_catalogue import DataCatalogueItem, DataCategory, DataRegion, R
 from models.data_source import DataSource
 
 
+REGION_COUNTRY_CODES = {
+    DataRegion.NORTH_AMERICA: ["USA", "CAN", "MEX"],
+    DataRegion.EUROPE: ["DEU", "FRA", "ESP", "ITA", "GBR"],
+    DataRegion.ASIA: ["JPN", "CHN", "KOR", "SGP", "HKG"],
+    DataRegion.LATIN_AMERICA: ["BRA", "ARG", "CHL", "COL", "PER"],
+    DataRegion.MIDDLE_EAST: ["SAU", "ARE", "QAT", "BHR", "OMN", "ISR"],
+    DataRegion.AFRICA: ["ZAF", "EGY", "NGA", "KEN", "MAR"],
+    DataRegion.GLOBAL: ["USA", "GBR", "DEU", "JPN", "AUS"],
+}
+
+
 def populate_catalogue():
     """Populate comprehensive financial data catalogue."""
     db = SessionLocal()
@@ -1336,6 +1347,11 @@ def populate_catalogue():
 
         # Insert all catalogue items
         for item_data in catalogue_items:
+            params = item_data.setdefault("parameters", {})
+            region = item_data.get("region")
+            if region in REGION_COUNTRY_CODES and "country_codes" not in params:
+                params["country_codes"] = REGION_COUNTRY_CODES[region]
+
             item = DataCatalogueItem(**item_data)
             db.add(item)
 

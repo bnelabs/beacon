@@ -371,7 +371,7 @@ If context is lost, read this file and continue from:
 2. Review `backend/api/routes/` for API endpoints
 3. Check `backend/tasks/` for Celery tasks
 4. Review `backend/models/` for database schemas
-5. Frontend is in `frontend/src/pages/` and `frontend/src/components/`
+5. Frontend lives in `frontend-v2/src/` (React + react-three-fiber stack)
 
 **Key Files to Review:**
 - `backend/modules/data/orchestrator.py` - DATA module entry

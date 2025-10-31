@@ -268,8 +268,8 @@ echo ""
 
 # Check and populate catalogue if needed
 echo -e "${BLUE}Checking data catalogue...${NC}"
-CATALOGUE_CHECK=$(curl -fsS http://localhost:3456/api/v1/catalogue/stats 2>/dev/null || echo '{"total":0}')
-CATALOGUE_COUNT=$(echo "$CATALOGUE_CHECK" | grep -o '"total":[0-9]*' | grep -o '[0-9]*' || echo "0")
+CATALOGUE_CHECK=$(curl -fsS http://localhost:3456/api/v1/catalogue/summary 2>/dev/null || echo '{"total_items":0}')
+CATALOGUE_COUNT=$(echo "$CATALOGUE_CHECK" | grep -o '"total_items":[0-9]*' | grep -o '[0-9]*' || echo "0")
 
 if [ "$CATALOGUE_COUNT" -eq 0 ]; then
     echo -e "${YELLOW}⚠ Data catalogue is empty (0 items)${NC}"
@@ -278,8 +278,8 @@ if [ "$CATALOGUE_COUNT" -eq 0 ]; then
     echo ""
     echo -e "${BLUE}Waiting for catalogue auto-population...${NC}"
     sleep 10
-    CATALOGUE_CHECK=$(curl -fsS http://localhost:3456/api/v1/catalogue/stats 2>/dev/null || echo '{"total":0}')
-    CATALOGUE_COUNT=$(echo "$CATALOGUE_CHECK" | grep -o '"total":[0-9]*' | grep -o '[0-9]*' || echo "0")
+    CATALOGUE_CHECK=$(curl -fsS http://localhost:3456/api/v1/catalogue/summary 2>/dev/null || echo '{"total_items":0}')
+    CATALOGUE_COUNT=$(echo "$CATALOGUE_CHECK" | grep -o '"total_items":[0-9]*' | grep -o '[0-9]*' || echo "0")
     if [ "$CATALOGUE_COUNT" -gt 0 ]; then
         echo -e "${GREEN}✓ Catalogue populated: $CATALOGUE_COUNT items available${NC}"
     else

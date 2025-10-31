@@ -77,6 +77,9 @@ class MultiSourceDataset(Dataset):
             # Extract values - use 'Close' column from timeseries data
             value_column = 'Close' if 'Close' in source_data.columns else 'Value'
             values = source_data[value_column].ffill().fillna(0).values
+            if len(values) < 2:
+                logger.warning("Skipping source '%s' – not enough points (%d)", source, len(values))
+                continue
 
             # Store normalization stats PER SOURCE
             mean = float(np.mean(values))
@@ -92,9 +95,19 @@ class MultiSourceDataset(Dataset):
                 logger.warning(f"Skipping source '{source}' - not in training set")
                 continue
 
-            for i in range(len(normalized) - sequence_length):
-                self.sequences.append(normalized[i:i + sequence_length])
-                self.targets.append(normalized[i + sequence_length])
+            # Allow shorter sequences by shrinking the window and padding
+            window = min(sequence_length, len(normalized) - 1)
+            if window < 1:
+                logger.warning("Skipping source '%s' – unable to form sequences", source)
+                continue
+
+            for i in range(len(normalized) - window):
+                seq = normalized[i:i + window]
+                if len(seq) < sequence_length:
+                    pad_width = sequence_length - len(seq)
+                    seq = np.pad(seq, (pad_width, 0), mode='edge')
+                self.sequences.append(seq)
+                self.targets.append(normalized[i + window])
                 self.source_ids.append(self.source_to_id[source])
 
         self.sequences = np.array(self.sequences)
@@ -481,7 +494,7 @@ class MultiScaleTrainer:
                 'mae': 0.0,
                 'rmse': 0.0,
                 'r2': 0.0,
-                'predictions_df': pd.DataFrame()
+                'predictions_df': pd.DataFrame(columns=['source', 'actual', 'predicted', 'error', 'abs_error', 'pct_error'])
             }
 
         self.model.eval()
@@ -542,6 +555,9 @@ class MultiScaleTrainer:
 
     def _compute_per_source_metrics(self, predictions_df: pd.DataFrame) -> Dict[str, Dict]:
         """Compute metrics per data source."""
+        if predictions_df.empty or 'source' not in predictions_df.columns:
+            return {}
+
         per_source = {}
 
         for source in predictions_df['source'].unique():

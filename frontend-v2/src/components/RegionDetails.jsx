@@ -14,19 +14,6 @@ export function RegionDetails() {
     return REGION_LOOKUP[selected[selected.length - 1]] ?? null
   }, [selected])
 
-  if (!region) {
-    return (
-      <div className="rounded-3xl border border-dashed border-bne-silver/60 bg-white/60 p-5 text-sm text-bne-steel/80">
-        <p className="font-medium text-bne-steel">
-          Awaiting region selection
-        </p>
-        <p className="mt-2 leading-relaxed">
-          Tap highlighted continents on the globe to unlock granular liquidity views and curated data catalogues.
-        </p>
-      </div>
-    )
-  }
-
   const activeCountries = useMemo(() => {
     if (confirmedCountries.length > 0) {
       return confirmedCountries
@@ -50,15 +37,28 @@ export function RegionDetails() {
     return 'Latest liquidity metrics will stream in from the completed models once the prediction pipeline finishes.'
   }, [dataJobId, trainingJobId, activeCountries, confirmedCountries])
 
+  if (!region) {
+    return (
+      <div className="rounded-3xl border border-dashed border-bne-silver/60 bg-white/60 p-5 text-sm text-bne-steel/80">
+        <p className="text-center font-medium text-bne-steel sm:text-left">
+          Awaiting region selection
+        </p>
+        <p className="mt-2 text-center leading-relaxed sm:text-left">
+          Tap highlighted continents on the globe to unlock granular liquidity views and curated data catalogues.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4 rounded-3xl bg-white/70 p-6 shadow-bne-panel">
-      <div>
+      <div className="text-center sm:text-left">
         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-bne-azure">Region Focus</p>
-        <h3 className="mt-2 text-lg font-semibold text-bne-ink">{region.name}</h3>
+        <h3 className="mt-2 text-lg font-semibold text-bne-ink sm:text-xl">{region.name}</h3>
       </div>
 
       <div className="rounded-2xl bg-bne-ice/80 p-4 text-sm text-bne-steel/80">
-        {dataStatusMessage}
+        <p className="text-center leading-relaxed sm:text-left">{dataStatusMessage}</p>
       </div>
     </div>
   )

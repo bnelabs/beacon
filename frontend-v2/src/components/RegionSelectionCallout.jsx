@@ -19,7 +19,7 @@ export function RegionSelectionCallout() {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.5, duration: 0.6 }}
-      className="pointer-events-none absolute left-8 top-8 max-w-sm rounded-3xl bg-white/80 p-5 text-sm text-bne-steel shadow-lg backdrop-blur-lg"
+      className="pointer-events-none absolute left-4 right-4 top-4 mx-auto max-w-md rounded-3xl bg-white/80 p-4 text-sm text-bne-steel shadow-lg backdrop-blur-lg sm:left-6 sm:right-auto sm:mx-0 sm:max-w-sm sm:p-5 lg:left-8 lg:top-8"
     >
       <p className="text-xs font-semibold uppercase tracking-[0.32em] text-bne-azure">
         Interaction Guide

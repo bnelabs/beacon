@@ -9,7 +9,7 @@ export function RegionBadgeList() {
   }
 
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap justify-center gap-2 sm:justify-start">
       {selected.map((code) => {
         const meta = REGION_LOOKUP[code] ?? { name: code, gradient: 'from-bne-ink to-bne-steel' }
         return (

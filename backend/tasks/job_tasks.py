@@ -3,7 +3,7 @@
 from celery import Task
 import traceback
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import psutil
 import os
 import torch
@@ -142,9 +142,12 @@ def run_data_collection(self, job_id: int, parameters: dict):
         selected_regions = [str(region) for region in parameters.get('regions', []) if region]
         selected_countries = [str(country) for country in parameters.get('countries', []) if country]
 
-        # Default to 5 years of history for better coverage of annual/quarterly data
-        start_date = parameters.get('start_date', '2019-01-01')
-        end_date = parameters.get('end_date', '2024-12-31')
+        # Default to ~5 years of history for better coverage of annual/quarterly data
+        today = datetime.utcnow().date()
+        default_start = (today - timedelta(days=5 * 365)).isoformat()
+        default_end = today.isoformat()
+        start_date = parameters.get('start_date') or default_start
+        end_date = parameters.get('end_date') or default_end
 
         logger.info(
             "Running data collection with %d catalogue items (regions=%s, countries=%s)...",
@@ -249,9 +252,10 @@ def run_training(self, job_id: int, parameters: dict):
         # Check if user provided a data_job_id to use existing collected data
         data_job_id = parameters.get("data_job_id")
 
+        from models.job import Job
+
         if not data_job_id:
             # Try to find the most recent completed data collection job
-            from models.job import Job
             recent_data_job = db.query(Job).filter(
                 Job.job_type == "data_collection",
                 Job.status == "completed"
@@ -386,6 +390,8 @@ def run_training(self, job_id: int, parameters: dict):
         peak_memory = end_memory - start_memory
 
         # Prepare results with REAL training metrics
+        data_job = service.get_job(data_job_id)
+
         result = {
             "status": "completed",
             "message": f"Model training completed successfully with {model_type.upper()}",
