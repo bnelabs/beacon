@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI):
         count = db.query(DataCatalogueItem).count()
         if count == 0:
             logger.info("Catalogue is empty, populating with default items...")
-            from backend.scripts.populate_catalogue import populate_catalogue
+            from scripts.populate_catalogue import populate_catalogue
             populate_catalogue()
             logger.info("Catalogue populated successfully")
         else:
