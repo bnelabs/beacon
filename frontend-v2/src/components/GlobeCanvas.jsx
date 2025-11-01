@@ -10,6 +10,7 @@ import { feature } from 'topojson-client'
 import earthDayMap from '../assets/globe/earth-day.jpg'
 import earthBumpMap from '../assets/globe/earth-topology.png'
 import earthNightMap from '../assets/globe/earth-night.jpg'
+import countriesTopology from '../assets/geo/countries-50m.json'
 import earcut from 'earcut'
 
 // Ensure earcut is available for three-geojson-geometry internals.
@@ -30,21 +31,13 @@ const GEOJSON_RESOLUTION = Math.max(2, Math.round(5 / INTERPOLATION_MAX_DEG))
 const MANUAL_OVERRIDE_MS = 4500
 const FOCUS_RESUME_DELAY_MS = 3000
 
-// Lazy-load GeoJSON data - don't block module initialization
-let countriesTopology = null
-let COUNTRY_FEATURES = null
-let COUNTRIES_BY_NAME = null
+// Process GeoJSON at module level but don't build meshes yet
+const COUNTRY_FEATURES = feature(countriesTopology, countriesTopology.objects.countries).features
+const COUNTRIES_BY_NAME = new Map(COUNTRY_FEATURES.map((feature) => [feature.properties.name, feature]))
 
-async function loadGeoData() {
-  if (COUNTRY_FEATURES) return { COUNTRY_FEATURES, COUNTRIES_BY_NAME }
-
-  const topology = await import('../assets/geo/countries-50m.json')
-  countriesTopology = topology.default || topology
-  COUNTRY_FEATURES = feature(countriesTopology, countriesTopology.objects.countries).features
-  COUNTRIES_BY_NAME = new Map(COUNTRY_FEATURES.map((feature) => [feature.properties.name, feature]))
-
-  return { COUNTRY_FEATURES, COUNTRIES_BY_NAME }
-}
+// Cache for built meshes - will be populated progressively
+const REGION_MESH_CACHE = new Map()
+const COUNTRY_MESH_CACHE = new Map()
 
 function latLongToVector(lat, lon, radius) {
   const phi = THREE.MathUtils.degToRad(90 - lat)
@@ -155,134 +148,139 @@ function normalizeRing(ring) {
   return cleaned
 }
 
-function buildRegionMeshes(countriesByName) {
-  const meshes = new Map()
+function buildRegionMesh(region) {
+  // Check cache first
+  if (REGION_MESH_CACHE.has(region.id)) {
+    return REGION_MESH_CACHE.get(region.id)
+  }
 
-  REGION_DEFINITIONS.forEach((region) => {
-    const aggregatedPolygons = []
+  const aggregatedPolygons = []
 
-    region.countryNames.forEach((countryName) => {
-      const countryFeature = countriesByName.get(countryName)
-      if (!countryFeature) {
+  region.countryNames.forEach((countryName) => {
+    const countryFeature = COUNTRIES_BY_NAME.get(countryName)
+    if (!countryFeature) {
+      return
+    }
+
+    const polygons =
+      countryFeature.geometry.type === 'Polygon'
+        ? [countryFeature.geometry.coordinates]
+        : countryFeature.geometry.coordinates
+
+    polygons
+      .map((polygon) => ({
+        polygon,
+        area: geoArea({ type: 'Polygon', coordinates: polygon })
+      }))
+      .filter((entry) => entry.area >= MIN_POLYGON_AREA)
+      .forEach((entry) => aggregatedPolygons.push(entry.polygon))
+  })
+
+  if (aggregatedPolygons.length === 0) {
+    return null
+  }
+
+  const geoJson = {
+    type: 'MultiPolygon',
+    coordinates: aggregatedPolygons
+  }
+
+  const fillGeometry = new GeoJsonGeometry(geoJson, REGION_FILL_ALTITUDE, GEOJSON_RESOLUTION)
+  fillGeometry.computeVertexNormals()
+
+  const outlineGeometries = []
+  aggregatedPolygons.forEach((polygon) => {
+    polygon.forEach((ring) => {
+      const points = normalizeRing(ring)
+      if (points.length < 2) {
         return
       }
-
-      const polygons =
-        countryFeature.geometry.type === 'Polygon'
-          ? [countryFeature.geometry.coordinates]
-          : countryFeature.geometry.coordinates
-
-      polygons
-        .map((polygon) => ({
-          polygon,
-          area: geoArea({ type: 'Polygon', coordinates: polygon })
-        }))
-        .filter((entry) => entry.area >= MIN_POLYGON_AREA)
-        .forEach((entry) => aggregatedPolygons.push(entry.polygon))
-    })
-
-    if (aggregatedPolygons.length === 0) {
-      return
-    }
-
-    const geoJson = {
-      type: 'MultiPolygon',
-      coordinates: aggregatedPolygons
-    }
-
-    const fillGeometry = new GeoJsonGeometry(geoJson, REGION_FILL_ALTITUDE, GEOJSON_RESOLUTION)
-    fillGeometry.computeVertexNormals()
-
-    const outlineGeometries = []
-    aggregatedPolygons.forEach((polygon) => {
-      polygon.forEach((ring) => {
-        const points = normalizeRing(ring)
-        if (points.length < 2) {
-          return
-        }
-        const outlinePositions = new Float32Array((points.length + 1) * 3)
-        points.forEach(([lon, lat], idx) => {
-          const position = latLongToVector(lat, lon, REGION_OUTLINE_ALTITUDE)
-          outlinePositions[idx * 3] = position.x
-          outlinePositions[idx * 3 + 1] = position.y
-          outlinePositions[idx * 3 + 2] = position.z
-        })
-        const first = latLongToVector(points[0][1], points[0][0], REGION_OUTLINE_ALTITUDE)
-        outlinePositions[outlinePositions.length - 3] = first.x
-        outlinePositions[outlinePositions.length - 2] = first.y
-        outlinePositions[outlinePositions.length - 1] = first.z
-
-        const outlineGeometry = new THREE.BufferGeometry()
-        outlineGeometry.setAttribute('position', new THREE.BufferAttribute(outlinePositions, 3))
-        outlineGeometry.computeBoundingSphere()
-        outlineGeometries.push(outlineGeometry)
+      const outlinePositions = new Float32Array((points.length + 1) * 3)
+      points.forEach(([lon, lat], idx) => {
+        const position = latLongToVector(lat, lon, REGION_OUTLINE_ALTITUDE)
+        outlinePositions[idx * 3] = position.x
+        outlinePositions[idx * 3 + 1] = position.y
+        outlinePositions[idx * 3 + 2] = position.z
       })
-    })
+      const first = latLongToVector(points[0][1], points[0][0], REGION_OUTLINE_ALTITUDE)
+      outlinePositions[outlinePositions.length - 3] = first.x
+      outlinePositions[outlinePositions.length - 2] = first.y
+      outlinePositions[outlinePositions.length - 1] = first.z
 
-    meshes.set(region.id, { fillGeometry, outlineGeometries })
+      const outlineGeometry = new THREE.BufferGeometry()
+      outlineGeometry.setAttribute('position', new THREE.BufferAttribute(outlinePositions, 3))
+      outlineGeometry.computeBoundingSphere()
+      outlineGeometries.push(outlineGeometry)
+    })
   })
 
-  return meshes
+  const meshData = { fillGeometry, outlineGeometries }
+  REGION_MESH_CACHE.set(region.id, meshData)
+  return meshData
 }
 
-function buildCountryMeshes(countryFeatures) {
-  const meshes = new Map()
+function buildCountryMesh(countryName) {
+  // Check cache first
+  if (COUNTRY_MESH_CACHE.has(countryName)) {
+    return COUNTRY_MESH_CACHE.get(countryName)
+  }
 
-  countryFeatures.forEach((feature) => {
-    const polygons =
-      feature.geometry.type === 'Polygon'
-        ? [feature.geometry.coordinates]
-        : feature.geometry.coordinates
+  const feature = COUNTRY_FEATURES.find(f => f.properties.name === countryName)
+  if (!feature) return null
 
-    const filteredPolygons = polygons
-      .map((polygon) => ({ polygon, area: geoArea({ type: 'Polygon', coordinates: polygon }) }))
-      .filter((entry) => entry.area >= MIN_POLYGON_AREA / 10)
+  const polygons =
+    feature.geometry.type === 'Polygon'
+      ? [feature.geometry.coordinates]
+      : feature.geometry.coordinates
 
-    if (filteredPolygons.length === 0) {
-      return
-    }
+  const filteredPolygons = polygons
+    .map((polygon) => ({ polygon, area: geoArea({ type: 'Polygon', coordinates: polygon }) }))
+    .filter((entry) => entry.area >= MIN_POLYGON_AREA / 10)
 
-    const geoJson = {
-      type: 'MultiPolygon',
-      coordinates: filteredPolygons.map((entry) => entry.polygon)
-    }
+  if (filteredPolygons.length === 0) {
+    return null
+  }
 
-    const fillGeometry = new GeoJsonGeometry(geoJson, COUNTRY_FILL_ALTITUDE, GEOJSON_RESOLUTION)
-    fillGeometry.computeVertexNormals()
+  const geoJson = {
+    type: 'MultiPolygon',
+    coordinates: filteredPolygons.map((entry) => entry.polygon)
+  }
 
-    const outlineGeometries = []
-    filteredPolygons.forEach((entry) => {
-      entry.polygon.forEach((ring) => {
-        const points = normalizeRing(ring)
-        if (points.length < 2) {
-          return
-        }
-        const outlinePositions = new Float32Array((points.length + 1) * 3)
-        points.forEach(([lon, lat], idx) => {
-          const position = latLongToVector(lat, lon, COUNTRY_OUTLINE_ALTITUDE)
-          outlinePositions[idx * 3] = position.x
-          outlinePositions[idx * 3 + 1] = position.y
-          outlinePositions[idx * 3 + 2] = position.z
-        })
-        const first = latLongToVector(points[0][1], points[0][0], COUNTRY_OUTLINE_ALTITUDE)
-        outlinePositions[outlinePositions.length - 3] = first.x
-        outlinePositions[outlinePositions.length - 2] = first.y
-        outlinePositions[outlinePositions.length - 1] = first.z
+  const fillGeometry = new GeoJsonGeometry(geoJson, COUNTRY_FILL_ALTITUDE, GEOJSON_RESOLUTION)
+  fillGeometry.computeVertexNormals()
 
-        const outlineGeometry = new THREE.BufferGeometry()
-        outlineGeometry.setAttribute('position', new THREE.BufferAttribute(outlinePositions, 3))
-        outlineGeometry.computeBoundingSphere()
-        outlineGeometries.push(outlineGeometry)
+  const outlineGeometries = []
+  filteredPolygons.forEach((entry) => {
+    entry.polygon.forEach((ring) => {
+      const points = normalizeRing(ring)
+      if (points.length < 2) {
+        return
+      }
+      const outlinePositions = new Float32Array((points.length + 1) * 3)
+      points.forEach(([lon, lat], idx) => {
+        const position = latLongToVector(lat, lon, COUNTRY_OUTLINE_ALTITUDE)
+        outlinePositions[idx * 3] = position.x
+        outlinePositions[idx * 3 + 1] = position.y
+        outlinePositions[idx * 3 + 2] = position.z
       })
-    })
+      const first = latLongToVector(points[0][1], points[0][0], COUNTRY_OUTLINE_ALTITUDE)
+      outlinePositions[outlinePositions.length - 3] = first.x
+      outlinePositions[outlinePositions.length - 2] = first.y
+      outlinePositions[outlinePositions.length - 1] = first.z
 
-    meshes.set(feature.properties.name, { fillGeometry, outlineGeometries })
+      const outlineGeometry = new THREE.BufferGeometry()
+      outlineGeometry.setAttribute('position', new THREE.BufferAttribute(outlinePositions, 3))
+      outlineGeometry.computeBoundingSphere()
+      outlineGeometries.push(outlineGeometry)
+    })
   })
 
-  return meshes
+  const meshData = { fillGeometry, outlineGeometries }
+  COUNTRY_MESH_CACHE.set(countryName, meshData)
+  return meshData
 }
 
-const RegionOverlay = memo(function RegionOverlay({ region, meshData }) {
+const RegionOverlay = memo(function RegionOverlay({ region }) {
   const selectedRegions = useUIStore((state) => state.selectedRegions)
   const toggleRegion = useUIStore((state) => state.toggleRegion)
   const setFocusedRegion = useUIStore((state) => state.setFocusedRegion)
@@ -291,6 +289,9 @@ const RegionOverlay = memo(function RegionOverlay({ region, meshData }) {
   const [hovered, setHovered] = useState(false)
   const pointerDownRef = useRef(null)
   const draggingRef = useRef(false)
+
+  // Build mesh on demand (first render or when cache is cleared)
+  const meshData = useMemo(() => buildRegionMesh(region), [region])
 
   const isSelected = selectedRegions.includes(region.id)
   const baseColor = useMemo(() => new THREE.Color(region.color), [region.color])
@@ -312,9 +313,7 @@ const RegionOverlay = memo(function RegionOverlay({ region, meshData }) {
 
   const handlePointerOver = useCallback((event) => {
     event.stopPropagation()
-    if (draggingRef.current) {
-      return
-    }
+    if (draggingRef.current) return
     setHovered(true)
     setFocusedRegion(region.id)
     document.body.style.cursor = 'pointer'
@@ -322,9 +321,7 @@ const RegionOverlay = memo(function RegionOverlay({ region, meshData }) {
 
   const handlePointerOut = useCallback((event) => {
     event.stopPropagation()
-    if (draggingRef.current) {
-      return
-    }
+    if (draggingRef.current) return
     setHovered(false)
     if (focusedRegion === region.id) {
       setFocusedRegion(null)
@@ -412,8 +409,7 @@ const RegionOverlay = memo(function RegionOverlay({ region, meshData }) {
   )
 })
 
-const CountryOverlay = memo(function CountryOverlay({ countryName, regionColor, countryMeshes }) {
-  const meshData = countryMeshes.get(countryName)
+const CountryOverlay = memo(function CountryOverlay({ countryName, regionColor }) {
   const selectedCountries = useUIStore((state) => state.selectedCountries)
   const toggleCountry = useUIStore((state) => state.toggleCountry)
   const setFocusedCountry = useUIStore((state) => state.setFocusedCountry)
@@ -421,6 +417,9 @@ const CountryOverlay = memo(function CountryOverlay({ countryName, regionColor, 
   const [hovered, setHovered] = useState(false)
   const pointerDownRef = useRef(null)
   const draggingRef = useRef(false)
+
+  // Build mesh on demand
+  const meshData = useMemo(() => buildCountryMesh(countryName), [countryName])
 
   const isSelected = selectedCountries.includes(countryName)
   const baseColor = useMemo(() => new THREE.Color(regionColor || '#38bdf8'), [regionColor])
@@ -442,9 +441,7 @@ const CountryOverlay = memo(function CountryOverlay({ countryName, regionColor, 
 
   const handlePointerOver = useCallback((event) => {
     event.stopPropagation()
-    if (draggingRef.current) {
-      return
-    }
+    if (draggingRef.current) return
     setHovered(true)
     setFocusedCountry(countryName)
     document.body.style.cursor = 'pointer'
@@ -452,9 +449,7 @@ const CountryOverlay = memo(function CountryOverlay({ countryName, regionColor, 
 
   const handlePointerOut = useCallback((event) => {
     event.stopPropagation()
-    if (draggingRef.current) {
-      return
-    }
+    if (draggingRef.current) return
     setHovered(false)
     if (focusedCountry === countryName) {
       setFocusedCountry(null)
@@ -553,29 +548,10 @@ function GlobeScene() {
   const focusSuppressedRef = useRef(false)
   const focusResumeTimeoutRef = useRef(null)
   const lastZoomDistanceRef = useRef(DEFAULT_CAMERA_POSITION.length())
-  const [geoDataLoaded, setGeoDataLoaded] = useState(false)
-
-  // Lazy load GeoJSON data after component mounts
-  useEffect(() => {
-    loadGeoData().then(() => setGeoDataLoaded(true))
-  }, [])
-
-  // Build meshes lazily only after GeoJSON is loaded
-  const regionMeshes = useMemo(() => {
-    if (!geoDataLoaded || !COUNTRIES_BY_NAME) return new Map()
-    return buildRegionMeshes(COUNTRIES_BY_NAME)
-  }, [geoDataLoaded])
-
-  const countryMeshes = useMemo(() => {
-    if (!geoDataLoaded || !COUNTRY_FEATURES) return new Map()
-    return buildCountryMeshes(COUNTRY_FEATURES)
-  }, [geoDataLoaded])
 
   useEffect(() => {
-    if (geoDataLoaded) {
-      setGlobeReady(true)
-    }
-  }, [geoDataLoaded, setGlobeReady])
+    setGlobeReady(true)
+  }, [setGlobeReady])
 
   useEffect(() => {
     const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
@@ -741,10 +717,6 @@ function GlobeScene() {
     }
   }, [])
 
-  if (!geoDataLoaded) {
-    return null
-  }
-
   return (
     <>
       <ambientLight intensity={0.55} />
@@ -757,17 +729,13 @@ function GlobeScene() {
 
       <GlobeSurface />
 
-      {REGION_DEFINITIONS.map((region) => {
-        const meshData = regionMeshes.get(region.id)
-        if (!meshData) {
-          return null
-        }
-        return <RegionOverlay key={region.id} region={region} meshData={meshData} />
-      })}
+      {REGION_DEFINITIONS.map((region) => (
+        <RegionOverlay key={region.id} region={region} />
+      ))}
       {REGION_DEFINITIONS.filter((region) => selectedRegions.includes(region.id)).map((region) => (
         <group key={`countries-${region.id}`}>
           {region.countryNames.map((country) => (
-            <CountryOverlay key={country} countryName={country} regionColor={region.color} countryMeshes={countryMeshes} />
+            <CountryOverlay key={country} countryName={country} regionColor={region.color} />
           ))}
         </group>
       ))}
