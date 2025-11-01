@@ -1,9 +1,10 @@
+import { memo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import { fetchModels, fetchModelDetail } from '../api/dataExplorer.js'
 import { useUIStore } from '../state/uiStore.js'
 
-function ModelCard({ model, selected, onSelect }) {
+const ModelCard = memo(function ModelCard({ model, selected, onSelect }) {
   return (
     <motion.button
       type="button"
@@ -34,7 +35,7 @@ function ModelCard({ model, selected, onSelect }) {
       </div>
     </motion.button>
   )
-}
+})
 
 export function ModelLibrary() {
   const setPanelStage = useUIStore((state) => state.setPanelStage)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, memo } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -38,7 +38,7 @@ function PanelHeader({ title, subtitle, onBack }) {
   )
 }
 
-function DataSourceCard({ source, selected, onToggle }) {
+const DataSourceCard = memo(function DataSourceCard({ source, selected, onToggle }) {
   const coverageRange = useMemo(() => {
     if (!source.coverage.start && !source.coverage.end) {
       return 'Coverage window: not available'
@@ -83,9 +83,9 @@ function DataSourceCard({ source, selected, onToggle }) {
       </div>
     </motion.button>
   )
-}
+})
 
-function CatalogueCard({ asset, selected, onToggle }) {
+const CatalogueCard = memo(function CatalogueCard({ asset, selected, onToggle }) {
   return (
     <motion.button
       type="button"
@@ -122,9 +122,9 @@ function CatalogueCard({ asset, selected, onToggle }) {
       </div>
     </motion.button>
   )
-}
+})
 
-function DatasourceSelection({ selectedRegions }) {
+const DatasourceSelection = memo(function DatasourceSelection({ selectedRegions }) {
   const selectedSourceIds = useUIStore((state) => state.selectedSourceIds)
   const toggleSource = useUIStore((state) => state.toggleSource)
   const setPanelStage = useUIStore((state) => state.setPanelStage)
@@ -193,9 +193,9 @@ function DatasourceSelection({ selectedRegions }) {
       </button>
     </div>
   )
-}
+})
 
-function CatalogueList({ selectedSourceIds }) {
+const CatalogueList = memo(function CatalogueList({ selectedSourceIds }) {
   const setPanelStage = useUIStore((state) => state.setPanelStage)
   const selectedAssetIds = useUIStore((state) => state.selectedAssetIds)
   const toggleAsset = useUIStore((state) => state.toggleAsset)
@@ -275,9 +275,9 @@ function CatalogueList({ selectedSourceIds }) {
       </div>
     </div>
   )
-}
+})
 
-function DownloadPanel({ selectedRegions, selectedCountries, selectedSourceIds, selectedAssetIds }) {
+const DownloadPanel = memo(function DownloadPanel({ selectedRegions, selectedCountries, selectedSourceIds, selectedAssetIds }) {
   const setPanelStage = useUIStore((state) => state.setPanelStage)
   const resetAssets = useUIStore((state) => state.resetAssets)
   const setDataJobId = useUIStore((state) => state.setDataJobId)
@@ -300,8 +300,9 @@ function DownloadPanel({ selectedRegions, selectedCountries, selectedSourceIds, 
     refetchInterval: (data) => {
       if (!data) return false
       const status = data.status
-      return status && !['completed', 'failed'].includes(status) ? 3000 : false
+      return status && !['completed', 'failed'].includes(status) ? 5000 : false
     },
+    staleTime: 4000, // Reduce refetches on component re-mounts
   })
 
   const jobData = jobQuery.data
@@ -316,14 +317,14 @@ function DownloadPanel({ selectedRegions, selectedCountries, selectedSourceIds, 
     queryKey: ['v2-brief-report', jobId],
     queryFn: () => fetchBriefReport(jobId),
     enabled: Boolean(jobId) && jobCompleted,
-    staleTime: 0,
+    staleTime: Infinity, // Reports never change after job completion
   })
 
   const detailedQuery = useQuery({
     queryKey: ['v2-detailed-report', jobId],
     queryFn: () => fetchDetailedReport(jobId),
     enabled: Boolean(jobId) && jobCompleted,
-    staleTime: 0,
+    staleTime: Infinity, // Reports never change after job completion
   })
 
   const brief = briefQuery.data
@@ -485,9 +486,9 @@ function DownloadPanel({ selectedRegions, selectedCountries, selectedSourceIds, 
       ) : null}
     </div>
   )
-}
+})
 
-function TrainingPanel({ dataJobId, selectedRegions, selectedSourceIds, selectedAssetIds }) {
+const TrainingPanel = memo(function TrainingPanel({ dataJobId, selectedRegions, selectedSourceIds, selectedAssetIds }) {
   const setPanelStage = useUIStore((state) => state.setPanelStage)
   const trainingJobId = useUIStore((state) => state.trainingJobId)
   const setTrainingJobId = useUIStore((state) => state.setTrainingJobId)
@@ -524,8 +525,9 @@ function TrainingPanel({ dataJobId, selectedRegions, selectedSourceIds, selected
     refetchInterval: (data) => {
       if (!data) return false
       const status = data.status
-      return status && !['completed', 'failed'].includes(status) ? 4000 : false
+      return status && !['completed', 'failed'].includes(status) ? 6000 : false
     },
+    staleTime: 5000, // Reduce refetches on component re-mounts
   })
 
   const trainingJob = trainingJobQuery.data
@@ -793,7 +795,7 @@ function TrainingPanel({ dataJobId, selectedRegions, selectedSourceIds, selected
       ) : null}
     </div>
   )
-}
+})
 
 export function RegionDataPanel() {
   const selectedRegions = useUIStore((state) => state.selectedRegions)

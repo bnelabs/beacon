@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   fetchModelDetail,
@@ -40,15 +40,16 @@ export function BacktestPanel({ modelId }) {
     refetchInterval: (data) => {
       if (!data) return false
       const status = data.status
-      return status && !['completed', 'failed'].includes(status) ? 4000 : false
+      return status && !['completed', 'failed'].includes(status) ? 6000 : false
     },
+    staleTime: 5000, // Reduce refetches on component re-mounts
   })
 
   const reportQuery = useQuery({
     queryKey: ['backtest-report', backtestJobId],
     queryFn: () => fetchBacktestReport(backtestJobId),
     enabled: Boolean(backtestJobId) && jobQuery.data?.status === 'completed',
-    staleTime: 0,
+    staleTime: Infinity, // Backtest reports never change after job completion
   })
 
   const jobData = jobQuery.data

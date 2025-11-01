@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import {
@@ -9,7 +9,7 @@ import {
 } from '../api/dataExplorer.js'
 import { useUIStore } from '../state/uiStore.js'
 
-function PredictionNodes({ report }) {
+const PredictionNodes = memo(function PredictionNodes({ report }) {
   if (!report || report.nodes.length === 0) {
     return (
       <p className="text-xs text-bne-steel/70">No prediction nodes available.</p>
@@ -33,9 +33,9 @@ function PredictionNodes({ report }) {
       ))}
     </div>
   )
-}
+})
 
-function FeatureImportances({ report }) {
+const FeatureImportances = memo(function FeatureImportances({ report }) {
   const entries = Object.entries(report?.feature_importances ?? {}).sort((a, b) => b[1] - a[1])
   if (entries.length === 0) return null
   return (
@@ -51,7 +51,7 @@ function FeatureImportances({ report }) {
       </ul>
     </div>
   )
-}
+})
 
 export function PredictionPanel({ modelId }) {
   const setPanelStage = useUIStore((state) => state.setPanelStage)
@@ -87,15 +87,16 @@ export function PredictionPanel({ modelId }) {
     refetchInterval: (data) => {
       if (!data) return false
       const status = data.status
-      return status && !['completed', 'failed'].includes(status) ? 4000 : false
+      return status && !['completed', 'failed'].includes(status) ? 6000 : false
     },
+    staleTime: 5000, // Reduce refetches on component re-mounts
   })
 
   const reportQuery = useQuery({
     queryKey: ['prediction-report', predictionJobId],
     queryFn: () => fetchPredictionReport(predictionJobId),
     enabled: Boolean(predictionJobId) && jobQuery.data?.status === 'completed',
-    staleTime: 0,
+    staleTime: Infinity, // Prediction reports never change after job completion
   })
 
   const jobData = jobQuery.data
