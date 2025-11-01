@@ -1,6 +1,6 @@
 import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, Stars, useTexture } from '@react-three/drei'
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState, useCallback, memo } from 'react'
 import { useUIStore } from '../state/uiStore.js'
 import { REGION_DEFINITIONS, REGION_LOOKUP } from '../config/regions.js'
 import * as THREE from 'three'
@@ -10,7 +10,6 @@ import { feature } from 'topojson-client'
 import earthDayMap from '../assets/globe/earth-day.jpg'
 import earthBumpMap from '../assets/globe/earth-topology.png'
 import earthNightMap from '../assets/globe/earth-night.jpg'
-import countriesTopology from '../assets/geo/countries-50m.json'
 import earcut from 'earcut'
 
 // Ensure earcut is available for three-geojson-geometry internals.
@@ -25,13 +24,27 @@ const REGION_FILL_ALTITUDE = BASE_RADIUS + 0.018
 const REGION_OUTLINE_ALTITUDE = BASE_RADIUS + 0.026
 const COUNTRY_FILL_ALTITUDE = BASE_RADIUS + 0.03
 const COUNTRY_OUTLINE_ALTITUDE = BASE_RADIUS + 0.038
-const COUNTRY_FEATURES = feature(countriesTopology, countriesTopology.objects.countries).features
-const COUNTRIES_BY_NAME = new Map(COUNTRY_FEATURES.map((feature) => [feature.properties.name, feature]))
 const INTERPOLATION_MAX_DEG = 0.75
 const MIN_POLYGON_AREA = 2e-5
 const GEOJSON_RESOLUTION = Math.max(2, Math.round(5 / INTERPOLATION_MAX_DEG))
 const MANUAL_OVERRIDE_MS = 4500
 const FOCUS_RESUME_DELAY_MS = 3000
+
+// Lazy-load GeoJSON data - don't block module initialization
+let countriesTopology = null
+let COUNTRY_FEATURES = null
+let COUNTRIES_BY_NAME = null
+
+async function loadGeoData() {
+  if (COUNTRY_FEATURES) return { COUNTRY_FEATURES, COUNTRIES_BY_NAME }
+
+  const topology = await import('../assets/geo/countries-50m.json')
+  countriesTopology = topology.default || topology
+  COUNTRY_FEATURES = feature(countriesTopology, countriesTopology.objects.countries).features
+  COUNTRIES_BY_NAME = new Map(COUNTRY_FEATURES.map((feature) => [feature.properties.name, feature]))
+
+  return { COUNTRY_FEATURES, COUNTRIES_BY_NAME }
+}
 
 function latLongToVector(lat, lon, radius) {
   const phi = THREE.MathUtils.degToRad(90 - lat)
@@ -44,7 +57,7 @@ function latLongToVector(lat, lon, radius) {
   return new THREE.Vector3(x, y, z)
 }
 
-function GlobeSurface() {
+const GlobeSurface = memo(function GlobeSurface() {
   const [colorMap, elevationMap, nightMap] = useTexture([earthDayMap, earthBumpMap, earthNightMap])
 
   useEffect(() => {
@@ -82,7 +95,7 @@ function GlobeSurface() {
       </mesh>
     </>
   )
-}
+})
 
 function wrapLongitude(lon) {
   const normalized = ((lon + 180) % 360 + 360) % 360 - 180
@@ -142,14 +155,14 @@ function normalizeRing(ring) {
   return cleaned
 }
 
-function buildRegionMeshes() {
+function buildRegionMeshes(countriesByName) {
   const meshes = new Map()
 
   REGION_DEFINITIONS.forEach((region) => {
     const aggregatedPolygons = []
 
     region.countryNames.forEach((countryName) => {
-      const countryFeature = COUNTRIES_BY_NAME.get(countryName)
+      const countryFeature = countriesByName.get(countryName)
       if (!countryFeature) {
         return
       }
@@ -212,15 +225,10 @@ function buildRegionMeshes() {
   return meshes
 }
 
-// Build meshes immediately but outside component render cycle
-// This runs once when module loads but doesn't block initial page load
-const REGION_MESHES = buildRegionMeshes()
-const COUNTRY_MESHES = buildCountryMeshes()
-
-function buildCountryMeshes() {
+function buildCountryMeshes(countryFeatures) {
   const meshes = new Map()
 
-  COUNTRY_FEATURES.forEach((feature) => {
+  countryFeatures.forEach((feature) => {
     const polygons =
       feature.geometry.type === 'Polygon'
         ? [feature.geometry.coordinates]
@@ -274,7 +282,7 @@ function buildCountryMeshes() {
   return meshes
 }
 
-function RegionOverlay({ region, meshData }) {
+const RegionOverlay = memo(function RegionOverlay({ region, meshData }) {
   const selectedRegions = useUIStore((state) => state.selectedRegions)
   const toggleRegion = useUIStore((state) => state.toggleRegion)
   const setFocusedRegion = useUIStore((state) => state.setFocusedRegion)
@@ -302,49 +310,43 @@ function RegionOverlay({ region, meshData }) {
   const outlineOpacity = isSelected || hovered ? 0.85 : 0.45
   const fillOpacity = isSelected ? 0.65 : hovered ? 0.48 : 0.3
 
-  const handlePointerOver = (event) => {
+  const handlePointerOver = useCallback((event) => {
     event.stopPropagation()
     if (draggingRef.current) {
       return
     }
-    if (!hovered) {
-      setHovered(true)
-    }
-    if (focusedRegion !== region.id) {
-      setFocusedRegion(region.id)
-    }
+    setHovered(true)
+    setFocusedRegion(region.id)
     document.body.style.cursor = 'pointer'
-  }
+  }, [region.id, setFocusedRegion])
 
-  const handlePointerOut = (event) => {
+  const handlePointerOut = useCallback((event) => {
     event.stopPropagation()
     if (draggingRef.current) {
       return
     }
-    if (hovered) {
-      setHovered(false)
-    }
+    setHovered(false)
     if (focusedRegion === region.id) {
       setFocusedRegion(null)
     }
     document.body.style.cursor = ''
-  }
+  }, [focusedRegion, region.id, setFocusedRegion])
 
-  const handlePointerDown = (event) => {
+  const handlePointerDown = useCallback((event) => {
     pointerDownRef.current = { x: event.clientX, y: event.clientY }
     draggingRef.current = false
-  }
+  }, [])
 
-  const handlePointerMove = (event) => {
+  const handlePointerMove = useCallback((event) => {
     if (!pointerDownRef.current) return
     const dx = event.clientX - pointerDownRef.current.x
     const dy = event.clientY - pointerDownRef.current.y
     if (!draggingRef.current && Math.sqrt(dx * dx + dy * dy) > 4) {
       draggingRef.current = true
     }
-  }
+  }, [])
 
-  const handlePointerUp = (event) => {
+  const handlePointerUp = useCallback((event) => {
     if (draggingRef.current) {
       pointerDownRef.current = null
       return
@@ -355,7 +357,12 @@ function RegionOverlay({ region, meshData }) {
       removeCountries(region.countryNames)
     }
     toggleRegion(region.id)
-  }
+  }, [isSelected, region.countryNames, region.id, removeCountries, toggleRegion])
+
+  const handlePointerCancel = useCallback(() => {
+    pointerDownRef.current = null
+    draggingRef.current = false
+  }, [])
 
   if (!meshData) {
     return null
@@ -370,10 +377,7 @@ function RegionOverlay({ region, meshData }) {
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerCancel={() => {
-          pointerDownRef.current = null
-          draggingRef.current = false
-        }}
+        onPointerCancel={handlePointerCancel}
         renderOrder={1}
       >
         <meshStandardMaterial
@@ -398,10 +402,7 @@ function RegionOverlay({ region, meshData }) {
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          onPointerCancel={() => {
-            pointerDownRef.current = null
-            draggingRef.current = false
-          }}
+          onPointerCancel={handlePointerCancel}
           renderOrder={2}
         >
           <lineBasicMaterial color={outlineColor} transparent opacity={outlineOpacity} toneMapped={false} depthTest />
@@ -409,10 +410,10 @@ function RegionOverlay({ region, meshData }) {
       ))}
     </group>
   )
-}
+})
 
-function CountryOverlay({ countryName, regionColor }) {
-  const meshData = COUNTRY_MESHES.get(countryName)
+const CountryOverlay = memo(function CountryOverlay({ countryName, regionColor, countryMeshes }) {
+  const meshData = countryMeshes.get(countryName)
   const selectedCountries = useUIStore((state) => state.selectedCountries)
   const toggleCountry = useUIStore((state) => state.toggleCountry)
   const setFocusedCountry = useUIStore((state) => state.setFocusedCountry)
@@ -439,49 +440,43 @@ function CountryOverlay({ countryName, regionColor }) {
   const outlineOpacity = isSelected || hovered ? 0.9 : 0.55
   const fillOpacity = isSelected ? 0.55 : hovered ? 0.4 : 0.22
 
-  const handlePointerOver = (event) => {
+  const handlePointerOver = useCallback((event) => {
     event.stopPropagation()
     if (draggingRef.current) {
       return
     }
-    if (!hovered) {
-      setHovered(true)
-    }
-    if (focusedCountry !== countryName) {
-      setFocusedCountry(countryName)
-    }
+    setHovered(true)
+    setFocusedCountry(countryName)
     document.body.style.cursor = 'pointer'
-  }
+  }, [countryName, setFocusedCountry])
 
-  const handlePointerOut = (event) => {
+  const handlePointerOut = useCallback((event) => {
     event.stopPropagation()
     if (draggingRef.current) {
       return
     }
-    if (hovered) {
-      setHovered(false)
-    }
+    setHovered(false)
     if (focusedCountry === countryName) {
       setFocusedCountry(null)
     }
     document.body.style.cursor = ''
-  }
+  }, [countryName, focusedCountry, setFocusedCountry])
 
-  const handlePointerDown = (event) => {
+  const handlePointerDown = useCallback((event) => {
     pointerDownRef.current = { x: event.clientX, y: event.clientY }
     draggingRef.current = false
-  }
+  }, [])
 
-  const handlePointerMove = (event) => {
+  const handlePointerMove = useCallback((event) => {
     if (!pointerDownRef.current) return
     const dx = event.clientX - pointerDownRef.current.x
     const dy = event.clientY - pointerDownRef.current.y
     if (!draggingRef.current && Math.sqrt(dx * dx + dy * dy) > 4) {
       draggingRef.current = true
     }
-  }
+  }, [])
 
-  const handlePointerUp = (event) => {
+  const handlePointerUp = useCallback((event) => {
     if (draggingRef.current) {
       pointerDownRef.current = null
       return
@@ -489,7 +484,12 @@ function CountryOverlay({ countryName, regionColor }) {
     event.stopPropagation()
     pointerDownRef.current = null
     toggleCountry(countryName)
-  }
+  }, [countryName, toggleCountry])
+
+  const handlePointerCancel = useCallback(() => {
+    pointerDownRef.current = null
+    draggingRef.current = false
+  }, [])
 
   if (!meshData) {
     return null
@@ -504,10 +504,7 @@ function CountryOverlay({ countryName, regionColor }) {
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerCancel={() => {
-          pointerDownRef.current = null
-          draggingRef.current = false
-        }}
+        onPointerCancel={handlePointerCancel}
         renderOrder={10}
       >
         <meshStandardMaterial
@@ -533,10 +530,7 @@ function CountryOverlay({ countryName, regionColor }) {
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          onPointerCancel={() => {
-            pointerDownRef.current = null
-            draggingRef.current = false
-          }}
+          onPointerCancel={handlePointerCancel}
           renderOrder={11}
         >
           <lineBasicMaterial color={outlineColor} transparent opacity={outlineOpacity} toneMapped={false} depthTest />
@@ -544,9 +538,9 @@ function CountryOverlay({ countryName, regionColor }) {
       ))}
     </group>
   )
-}
+})
 
-export function GlobeCanvas() {
+function GlobeScene() {
   const setGlobeReady = useUIStore((state) => state.setGlobeReady)
   const focusedRegion = useUIStore((state) => state.focusedRegion)
   const selectedRegions = useUIStore((state) => state.selectedRegions)
@@ -559,6 +553,29 @@ export function GlobeCanvas() {
   const focusSuppressedRef = useRef(false)
   const focusResumeTimeoutRef = useRef(null)
   const lastZoomDistanceRef = useRef(DEFAULT_CAMERA_POSITION.length())
+  const [geoDataLoaded, setGeoDataLoaded] = useState(false)
+
+  // Lazy load GeoJSON data after component mounts
+  useEffect(() => {
+    loadGeoData().then(() => setGeoDataLoaded(true))
+  }, [])
+
+  // Build meshes lazily only after GeoJSON is loaded
+  const regionMeshes = useMemo(() => {
+    if (!geoDataLoaded || !COUNTRIES_BY_NAME) return new Map()
+    return buildRegionMeshes(COUNTRIES_BY_NAME)
+  }, [geoDataLoaded])
+
+  const countryMeshes = useMemo(() => {
+    if (!geoDataLoaded || !COUNTRY_FEATURES) return new Map()
+    return buildCountryMeshes(COUNTRY_FEATURES)
+  }, [geoDataLoaded])
+
+  useEffect(() => {
+    if (geoDataLoaded) {
+      setGlobeReady(true)
+    }
+  }, [geoDataLoaded, setGlobeReady])
 
   useEffect(() => {
     const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
@@ -654,7 +671,7 @@ export function GlobeCanvas() {
     }
   }, [])
 
-  const AnimationLoop = () => {
+  const AnimationLoop = useCallback(() => {
     useFrame((state, delta) => {
       const controls = orbitRef.current
       if (!controls) return
@@ -674,7 +691,7 @@ export function GlobeCanvas() {
       controls.update()
     })
     return null
-  }
+  }, [])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -724,47 +741,58 @@ export function GlobeCanvas() {
     }
   }, [])
 
+  if (!geoDataLoaded) {
+    return null
+  }
+
+  return (
+    <>
+      <ambientLight intensity={0.55} />
+      <directionalLight
+        position={[6, 2, 4]}
+        intensity={1.35}
+        color="#ffffff"
+      />
+      <directionalLight position={[-6, -4, -2]} intensity={0.35} color="#5c6c7c" />
+
+      <GlobeSurface />
+
+      {REGION_DEFINITIONS.map((region) => {
+        const meshData = regionMeshes.get(region.id)
+        if (!meshData) {
+          return null
+        }
+        return <RegionOverlay key={region.id} region={region} meshData={meshData} />
+      })}
+      {REGION_DEFINITIONS.filter((region) => selectedRegions.includes(region.id)).map((region) => (
+        <group key={`countries-${region.id}`}>
+          {region.countryNames.map((country) => (
+            <CountryOverlay key={country} countryName={country} regionColor={region.color} countryMeshes={countryMeshes} />
+          ))}
+        </group>
+      ))}
+
+      <Stars radius={16} depth={80} count={400} factor={1.6} fade speed={0.2} />
+      <OrbitControls
+        ref={orbitRef}
+        enablePan={false}
+        enableZoom
+        minPolarAngle={Math.PI / 2 - 0.9}
+        maxPolarAngle={Math.PI / 2 + 0.9}
+      />
+      <AnimationLoop />
+    </>
+  )
+}
+
+export function GlobeCanvas() {
   return (
     <Canvas
       camera={{ position: [0, 0, 4.2], fov: 45 }}
-      onCreated={() => setGlobeReady(true)}
       className="rounded-3xl"
     >
       <Suspense fallback={null}>
-        <ambientLight intensity={0.55} />
-        <directionalLight
-          position={[6, 2, 4]}
-          intensity={1.35}
-          color="#ffffff"
-        />
-        <directionalLight position={[-6, -4, -2]} intensity={0.35} color="#5c6c7c" />
-
-        <GlobeSurface />
-
-        {REGION_DEFINITIONS.map((region) => {
-          const meshData = REGION_MESHES.get(region.id)
-          if (!meshData) {
-            return null
-          }
-          return <RegionOverlay key={region.id} region={region} meshData={meshData} />
-        })}
-        {REGION_DEFINITIONS.filter((region) => selectedRegions.includes(region.id)).map((region) => (
-          <group key={`countries-${region.id}`}>
-            {region.countryNames.map((country) => (
-              <CountryOverlay key={country} countryName={country} regionColor={region.color} />
-            ))}
-          </group>
-        ))}
-
-        <Stars radius={16} depth={80} count={400} factor={1.6} fade speed={0.2} />
-        <OrbitControls
-          ref={orbitRef}
-          enablePan={false}
-          enableZoom
-          minPolarAngle={Math.PI / 2 - 0.9}
-          maxPolarAngle={Math.PI / 2 + 0.9}
-        />
-        <AnimationLoop />
+        <GlobeScene />
       </Suspense>
     </Canvas>
   )
