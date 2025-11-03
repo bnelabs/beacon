@@ -1,0 +1,20 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  font-family: 'Inter Variable', Inter, system-ui, sans-serif;
+  background-color: theme('colors.bne-ice');
+}
+
+body {
+  @apply m-0 bg-bne-ice text-bne-ink antialiased;
+}
+
+#root {
+  @apply min-h-screen w-full;
+  max-width: 100%;
+}
