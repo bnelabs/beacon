@@ -8,37 +8,29 @@ The platform combines advanced machine learning with multi-source financial data
 
 ## Highlights
 
-- **Next-Gen Frontend (V3)** – Ultra-lightweight React 19 app with **77.5MB Docker image** (66.6x smaller than v2), zero Playwright dependencies, ~323KB gzipped bundle, and <20s production builds.
+- **Ultra-lightweight Frontend** – Production-ready React 19 app with **77.5MB Docker image**, zero Playwright dependencies, ~323KB gzipped bundle, and <20s production builds.
 - **Globe-first workflow** – select regions or countries on a refined react-three-fiber globe (steady camera, precise overlays).
 - **Production-ready ML** – Heterogeneous Graph Transformers (HGT), Temporal Attention Networks, and multi-scale training with real PyTorch metrics (MSE, MAE, RMSE, R²).
 - **Comprehensive data sources** – 50+ financial indicators from 15+ integrated plugins (ECB, FRED, BIS, IMF, World Bank, Yahoo Finance, FDIC, FMP, SEC, and more).
 - **EU AI Act compliant** – Built-in explainability with SHAP values, attention weights, feature importance, and uncertainty quantification.
-- **Scope propagation** – confirmed region/country filters from data jobs persist through training, prediction, and backtest workflows with full v2 reporting.
-- **Docker-only validation** – automated integration tests with real data jobs; Playwright E2E tests for frontend globe interactions.
+- **Scope propagation** – confirmed region/country filters from data jobs persist through training, prediction, and backtest workflows with full reporting.
+- **Docker-only validation** – automated integration tests with real data jobs and comprehensive API coverage.
 - **No mocks** – every UI panel (datasources, catalogue, data pipeline, training, prediction, backtest) talks to live API endpoints.
-- **Enterprise branding** – Tailwind-driven minimal layout, corporate gradients/starfield, panel animations, and conservative typography.
+- **Enterprise branding** – Tailwind-driven minimal layout, corporate gradients, panel animations, and conservative typography.
 
 ---
 
 ## Architecture Overview
 
 ```
-Frontend V3 (Production - 77.5MB Docker image)
+Frontend (Production - 77.5MB Docker image)
   ├── React 19 + Vite 7 + Three.js + Zustand + TanStack Query
   ├── 6 Pages: Dashboard, Globe View, Models, Jobs, Results, Data Sources
   ├── GlobeCanvas (react-three-fiber, OrbitControls, 14 banking regions)
   ├── State-based routing (Zustand router, no react-router)
   ├── 20+ UI components (Button, Card, Badge, LoadingSpinner, etc.)
   ├── API hooks (useJobs, useModels, useDataSources, etc.)
-  └── Nginx production server (gzip, caching, API proxy)
-
-Frontend V2 (Legacy - 5.16GB Docker image)
-  ├── React 19 + Vite + Three.js + Zustand + React Query
-  ├── GlobeCanvas (react-three-fiber, refined OrbitControls, earcut triangulation)
-  ├── RegionDataPanel (Datasources → Catalogue → Data Download → Training)
-  ├── ModelLibrary / Prediction / Backtest panels
-  ├── PredictionPanel (forecast generation + visualization)
-  └── API layer hitting /api/v1 (jobs) and /api/v2 (reports, predictions)
+  └── Nginx production server (gzip, caching, API proxy on port 3001)
 
 Backend (FastAPI + Celery + Postgres + Redis + PyTorch)
   ├── DATA Module: 6-stage pipeline (collection, validation, cleaning, formatting, analysis, certification)
@@ -107,64 +99,48 @@ Persistent artefacts (jobs, parquet outputs, trained models, predictions) are mo
 
 ## Quick Start (Docker)
 
-### Option 1: Frontend V3 (Recommended - Production-Ready)
-
 ```bash
-# 1. Build services
-docker compose build backend celery-worker
-docker build -t beacon-frontend-v3:dev frontend-v3/
+# 1. Build all services
+docker compose build
 
-# 2. Start backend services
-docker compose up -d postgres redis backend celery-worker
+# 2. Start the platform (Postgres, Redis, API, Celery, Frontend)
+docker compose up -d
 
-# 3. Run frontend-v3 (77.5MB, production-ready)
-docker run -d --name beacon-frontend-v3 -p 3001:80 beacon-frontend-v3:dev
-
-# 4. Open the UI
+# 3. Open the UI
 open http://localhost:3001
 
-# View API docs
+# 4. View API docs
 open http://localhost:3456/docs
 ```
 
-### Option 2: Frontend V2 (Legacy - Development)
-
-```bash
-# 1. Build backend & frontend-v2 containers
-docker compose build backend celery-worker frontend
-
-# 2. Start all services
-docker compose up -d postgres redis backend celery-worker frontend
-
-# 3. Open the UI
-open http://localhost:5173
-```
-
-### Useful Commands
+**Useful Commands:**
 
 ```bash
 # Tail backend logs
 docker compose logs -f backend
 
-# Stop frontend-v3
-docker stop beacon-frontend-v3 && docker rm beacon-frontend-v3
+# Rebuild after code changes
+docker compose build backend celery-worker frontend
 
 # Stop all services
 docker compose down
+
+# View all running services
+docker compose ps
 ```
 
 ---
 
-## Frontend V3 (Production-Ready)
+## Frontend Architecture
 
-**New lightweight frontend** with dramatic performance improvements:
+**Production-ready lightweight frontend** with exceptional performance:
 
 ### Performance Metrics
-- **Docker Image**: 77.5MB (vs 5.16GB v2 = **66.6x smaller**)
-- **Bundle Size**: ~323KB gzipped (vs megabytes in v2)
+- **Docker Image**: 77.5MB (ultra-lightweight Alpine-based build)
+- **Bundle Size**: ~323KB gzipped (optimized production bundle)
 - **Build Time**: ~19 seconds (production build)
-- **Dependencies**: 14 packages (vs 50+ in v2)
-- **Zero Playwright**: Eliminated 5GB+ dependency bloat
+- **Dependencies**: 14 packages (minimal, carefully selected)
+- **Zero Playwright**: No heavyweight E2E dependencies
 
 ### Bundle Breakdown
 ```
@@ -185,7 +161,7 @@ Total:            1.14MB  → ~323KB gzip
 5. **Results** – Performance metrics, predictions, feature importance
 6. **Data Sources** – Plugin management (FDIC, ECB, FMP, etc.)
 
-### Technology Stack (V3)
+### Technology Stack
 - **React 19.1.1** – Latest concurrent features
 - **Vite 7.1.7** – Lightning-fast builds with esbuild
 - **Three.js 0.170.0** + **@react-three/fiber 8.17.10** – 3D globe
@@ -194,38 +170,12 @@ Total:            1.14MB  → ~323KB gzip
 - **Tailwind CSS 3.4.17** – Utility-first styling
 - **Nginx 1.27-alpine** – Production server with gzip & caching
 
-### Quick Start (Frontend V3)
-```bash
-# Build and run frontend-v3
-docker build -t beacon-frontend-v3:dev frontend-v3/
-docker run -d -p 3001:80 beacon-frontend-v3:dev
-
-# Open in browser
-open http://localhost:3001
-```
-
 ### Architecture Highlights
 - **Multi-stage Docker build** – Optimized 3-stage Alpine build (deps → builder → production)
 - **State-based routing** – Lightweight Zustand router (no react-router overhead)
 - **Component library** – 20+ reusable UI components (Button, Card, Badge, etc.)
 - **API integration** – React Query hooks for all backend endpoints
 - **Real-time updates** – Polling and caching with smart invalidation
-
----
-
-## Frontend V2 Workflow (Legacy)
-
-1. **Select regions/countries on the globe**  
-   Orbit/pinch now respect manual placement (no auto-snap) and overlays remain aligned while zooming.
-2. **Datasources → Catalogue → Data Download**  
-   After a data job completes the confirmed geographic scope is cached in the store and displayed in the panels.
-3. **Training**  
-   Shows server-provided defaults; the scope summary reflects the data job, not transient UI selections.
-4. **Model Library → Prediction / Backtest**  
-   When launching jobs the confirmed scope is sent alongside the model ID so backend analytics stay aligned.  
-   Once reports finish the new `/api/v2/predictions` and `/api/v2/reports/backtest` responses include the same filters.
-
-All panels rely on React Query for fetching/polling and Zustand for workflow state.
 
 ---
 
@@ -303,9 +253,7 @@ curl http://localhost:3456/api/v2/reports/backtest/{backtestJobId}
 
 ## Technology Stack
 
-**Frontend V3** (Production): React 19.1.1, Vite 7.1.7, Three.js 0.170.0, @react-three/fiber 8.17.10, Zustand 5.0.0, TanStack React Query 5.62.7, Tailwind CSS 3.4.17, Nginx 1.27-alpine
-
-**Frontend V2** (Legacy): React 19.1.1, Vite 7.1.7, Three.js 0.170.0, @react-three/fiber 9.0.0, Zustand 5.0.0, TanStack React Query 5.62.7, Tailwind CSS 3.4.17, Framer Motion 11.18.1
+**Frontend**: React 19.1.1, Vite 7.1.7, Three.js 0.170.0, @react-three/fiber 8.17.10, Zustand 5.0.0, TanStack React Query 5.62.7, Tailwind CSS 3.4.17, Nginx 1.27-alpine
 
 **Backend**: FastAPI 0.109.0, Celery 5.3.6, SQLAlchemy 2.0.25, Pydantic 2.5.3, Uvicorn with uvloop
 

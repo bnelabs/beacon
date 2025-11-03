@@ -99,13 +99,6 @@ frontend/.pnp
 frontend/.pnp.js
 frontend/coverage/
 
-# Frontend v2 artifacts
-frontend-v2/node_modules/
-frontend-v2/dist/
-frontend-v2/build/
-frontend-v2/coverage/
-frontend-v2/.pnp
-frontend-v2/.pnp.js
 
 # Frontend environment
 frontend/.env.local
