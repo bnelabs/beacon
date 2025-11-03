@@ -127,7 +127,7 @@ services:
         VITE_API_BASE_URL: http://localhost:3456
     container_name: beacon-frontend
     ports:
-      - "3001:80"
+      - "9876:80"
     depends_on:
       - backend
     networks:
