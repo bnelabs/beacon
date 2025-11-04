@@ -145,6 +145,24 @@ export function useSyncDataSource() {
       }
       return { previous }
     },
+    onSuccess: (updated) => {
+      if (!updated) {
+        return
+      }
+      const updatedId = updated.id ?? updated.source_id
+      if (!updatedId) {
+        return
+      }
+      queryClient.setQueryData(['dataSources'], old =>
+        old?.map(source => {
+          const sourceId = source.id ?? source.source_id
+          if (sourceId === updatedId) {
+            return { ...source, ...updated }
+          }
+          return source
+        }) ?? old
+      )
+    },
     onError: (_error, _variables, context) => {
       if (context?.previous) {
         queryClient.setQueryData(['dataSources'], context.previous)

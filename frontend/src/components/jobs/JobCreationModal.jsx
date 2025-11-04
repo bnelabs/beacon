@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
-import { useCreateJob, useJobs } from '../../hooks/useApi'
+import { useCatalogueItems, useCreateJob, useJobs } from '../../hooks/useApi'
 
 const JOB_TYPES = [
   {
@@ -119,7 +119,7 @@ export default function JobCreationModal({
 
   const [formError, setFormError] = useState(null)
   const [selectedDatasets, setSelectedDatasets] = useState([])
-  const [datasetIdInput, setDatasetIdInput] = useState('')
+  const [catalogueFilterTerm, setCatalogueFilterTerm] = useState('')
 
   const normalizeDatasets = useCallback((items) => {
     const map = new Map()
@@ -132,7 +132,11 @@ export default function JobCreationModal({
         code: item.code || `Dataset ${item.id}`,
         name: item.name || item.code || `Dataset ${item.id}`,
         category: item.category || '',
-        region: item.region || ''
+        region: item.region || '',
+        sourceId: item.data_source_id ?? item.data_source?.id ?? null,
+        sourceName: item.data_source?.name || item.source_name || 'Catalogue',
+        frequency: item.frequency || '',
+        unit: item.unit || ''
       })
     })
     return Array.from(map.values())
@@ -163,7 +167,7 @@ export default function JobCreationModal({
     setDropout('0.1')
     setFormError(null)
     setSelectedDatasets([])
-    setDatasetIdInput('')
+    setCatalogueFilterTerm('')
   }, [])
 
   useEffect(() => {
@@ -171,7 +175,7 @@ export default function JobCreationModal({
       return
     }
     setFormError(null)
-    setDatasetIdInput('')
+    setCatalogueFilterTerm('')
     setSelectedDatasets(normalizeDatasets(initialDatasets))
     setJobType(initialJobType || 'data_collection')
     setDataJobId(initialDataJobId ? String(initialDataJobId) : '')
@@ -205,34 +209,124 @@ export default function JobCreationModal({
     setSelectedDatasets([])
   }, [])
 
-  const handleAddDatasetById = useCallback(() => {
-    const trimmed = datasetIdInput.trim()
-    if (!trimmed) {
+  const catalogueFilters = useMemo(() => {
+    const filters = {}
+    if (region) {
+      filters.region = region
+    }
+    filters.enabled_only = true
+    return filters
+  }, [region])
+
+  const { data: catalogueMatches = [], isLoading: isCatalogueLoading } = useCatalogueItems(
+    catalogueFilters,
+    { enabled: true, staleTime: 300_000 }
+  )
+
+  const normalizedCatalogueOptions = useMemo(
+    () => normalizeDatasets(catalogueMatches),
+    [catalogueMatches, normalizeDatasets]
+  )
+
+  const groupedCatalogueOptions = useMemo(() => {
+    const groups = new Map()
+    normalizedCatalogueOptions.forEach((dataset) => {
+      const key = dataset.sourceName || 'Catalogue'
+      if (!groups.has(key)) {
+        groups.set(key, [])
+      }
+      groups.get(key).push(dataset)
+    })
+
+    return Array.from(groups.entries())
+      .map(([groupName, items]) => [
+        groupName,
+        items.sort((a, b) => a.name.localeCompare(b.name))
+      ])
+      .sort(([groupA], [groupB]) => groupA.localeCompare(groupB))
+  }, [normalizedCatalogueOptions])
+
+  const filteredCatalogueOptions = useMemo(() => {
+    const term = catalogueFilterTerm.trim().toLowerCase()
+    if (!term) {
+      return groupedCatalogueOptions
+    }
+
+    return groupedCatalogueOptions
+      .map(([groupName, items]) => [
+        groupName,
+        items.filter((dataset) => {
+          const haystack = `${dataset.code} ${dataset.name} ${dataset.category} ${dataset.region}`.toLowerCase()
+          return haystack.includes(term)
+        })
+      ])
+      .filter(([, items]) => items.length > 0)
+  }, [groupedCatalogueOptions, catalogueFilterTerm])
+
+  const filteredDatasetCount = useMemo(
+    () => filteredCatalogueOptions.reduce((total, [, items]) => total + items.length, 0),
+    [filteredCatalogueOptions]
+  )
+
+  const filteredSelectedCount = useMemo(() => {
+    const selectedIds = new Set(selectedDatasets.map((dataset) => dataset.id))
+    return filteredCatalogueOptions.reduce(
+      (total, [, items]) => total + items.filter((dataset) => selectedIds.has(dataset.id)).length,
+      0
+    )
+  }, [filteredCatalogueOptions, selectedDatasets])
+
+  const isDatasetSelected = useCallback(
+    (datasetId) => selectedDatasets.some((dataset) => dataset.id === datasetId),
+    [selectedDatasets]
+  )
+
+  const handleToggleDataset = useCallback((dataset) => {
+    if (!dataset || typeof dataset.id === 'undefined' || dataset.id === null) {
       return
     }
-    const parsed = Number(trimmed)
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      setFormError('Dataset ID must be a positive number.')
+    const [normalized] = normalizeDatasets([dataset])
+    if (!normalized) {
       return
     }
     setSelectedDatasets((prev) => {
-      if (prev.some((dataset) => dataset.id === parsed)) {
-        return prev
+      const exists = prev.some((item) => item.id === normalized.id)
+      if (exists) {
+        return prev.filter((item) => item.id !== normalized.id)
       }
-      return [
-        ...prev,
-        {
-          id: parsed,
-          code: `Dataset ${parsed}`,
-          name: `Dataset ${parsed}`,
-          category: '',
-          region: ''
-        }
-      ]
+      return [...prev, normalized]
     })
-    setDatasetIdInput('')
-    setFormError(null)
-  }, [datasetIdInput])
+  }, [normalizeDatasets])
+
+  const handleSelectAllFiltered = useCallback(() => {
+    const items = filteredCatalogueOptions.flatMap(([, groupItems]) => groupItems)
+    if (items.length === 0) {
+      return
+    }
+    setSelectedDatasets((prev) => {
+      const map = new Map(prev.map((dataset) => [dataset.id, dataset]))
+      items.forEach((dataset) => {
+        if (!dataset || typeof dataset.id === 'undefined' || dataset.id === null) {
+          return
+        }
+        const [normalized] = normalizeDatasets([dataset])
+        if (normalized) {
+          map.set(normalized.id, normalized)
+        }
+      })
+      return Array.from(map.values())
+    })
+  }, [filteredCatalogueOptions, normalizeDatasets])
+
+  const handleClearFiltered = useCallback(() => {
+    const ids = new Set(
+      filteredCatalogueOptions.flatMap(([, groupItems]) => groupItems.map((dataset) => dataset.id))
+    )
+    if (ids.size === 0) {
+      return
+    }
+    setSelectedDatasets((prev) => prev.filter((dataset) => !ids.has(dataset.id)))
+  }, [filteredCatalogueOptions])
 
   const handleSubmit = async (event) => {
     event.preventDefault()
@@ -457,7 +551,8 @@ export default function JobCreationModal({
                           <p className="text-sm font-medium text-bne-ink">{dataset.code}</p>
                           <p className="text-xs text-bne-steel">{dataset.name}</p>
                           <p className="text-[11px] text-bne-steel/80 mt-1">
-                            {dataset.category ? dataset.category.replace(/_/g, ' ') : '—'} · {dataset.region ? dataset.region.replace(/_/g, ' ') : '—'}
+                            {dataset.category ? dataset.category.replace(/_/g, ' ') : '—'} ·{' '}
+                            {dataset.region ? dataset.region.replace(/_/g, ' ') : '—'}
                           </p>
                         </div>
                         <Button
@@ -473,22 +568,95 @@ export default function JobCreationModal({
                   </div>
                 ) : (
                   <p className="text-xs text-bne-steel">
-                    Use the Data Sources “View Data” action or add a dataset ID below to include specific datasets.
+                    Nothing selected yet. Use the catalogue list below or jump to Data Sources → “View Data” to pin datasets first.
                   </p>
                 )}
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min="1"
-                    value={datasetIdInput}
-                    onChange={(event) => setDatasetIdInput(event.target.value)}
-                    placeholder="Add dataset ID"
-                    className="flex-1 rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
-                  />
-                  <Button type="button" variant="outline" size="sm" onClick={handleAddDatasetById}>
-                    Add ID
-                  </Button>
+                <div className="space-y-2">
+                  <label className="flex flex-col gap-2">
+                    <span className="text-xs font-semibold uppercase text-bne-steel">
+                      Catalogue
+                    </span>
+                    <input
+                      type="search"
+                      value={catalogueFilterTerm}
+                      onChange={(event) => setCatalogueFilterTerm(event.target.value)}
+                      placeholder="Filter by name, code, category, or region"
+                      className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    />
+                  </label>
+
+                  {isCatalogueLoading ? (
+                    <p className="text-sm text-bne-steel">Loading catalogue…</p>
+                  ) : filteredCatalogueOptions.length === 0 ? (
+                    <p className="text-sm text-bne-crimson/80">
+                      No datasets match “{catalogueFilterTerm.trim()}”.
+                    </p>
+                  ) : (
+                    <div className="rounded-lg border border-bne-frost bg-white shadow-sm">
+                      <div className="flex flex-col gap-2 border-b border-bne-frost px-3 py-2 md:flex-row md:items-center md:justify-between">
+                        <span className="text-xs text-bne-steel">
+                          Showing {filteredDatasetCount} dataset{filteredDatasetCount === 1 ? '' : 's'}
+                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleSelectAllFiltered}
+                            disabled={filteredDatasetCount === 0 || filteredDatasetCount === filteredSelectedCount}
+                          >
+                            Select all shown
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleClearFiltered}
+                            disabled={filteredSelectedCount === 0}
+                          >
+                            Clear shown
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="max-h-60 overflow-y-auto px-3 py-3 space-y-4">
+                        {filteredCatalogueOptions.map(([groupName, items]) => (
+                          <div key={groupName} className="space-y-2">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-bne-steel">
+                              {groupName}
+                            </p>
+                            <div className="space-y-1.5">
+                              {items.map((dataset) => {
+                                const checked = isDatasetSelected(dataset.id)
+                                return (
+                                  <label
+                                    key={dataset.id}
+                                    className="flex items-start gap-2 rounded-lg border border-transparent px-2 py-1.5 hover:border-bne-azure hover:bg-bne-azure/5"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      className="mt-1 h-4 w-4 rounded border-bne-frost text-bne-azure focus:ring-bne-azure"
+                                      checked={checked}
+                                      onChange={() => handleToggleDataset(dataset)}
+                                    />
+                                    <div className="flex-1">
+                                      <p className="text-sm font-medium text-bne-ink">{dataset.code}</p>
+                                      <p className="text-xs text-bne-steel">{dataset.name}</p>
+                                      <p className="text-[11px] text-bne-steel/75 mt-1">
+                                        {(dataset.category ? dataset.category.replace(/_/g, ' ') : '—')} ·{' '}
+                                        {(dataset.region ? dataset.region.replace(/_/g, ' ') : '—')} {dataset.frequency ? `· ${dataset.frequency}` : ''}{' '}
+                                        {dataset.unit ? `· ${dataset.unit}` : ''}
+                                      </p>
+                                    </div>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

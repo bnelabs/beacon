@@ -144,6 +144,45 @@ async def update_data_source(
         )
 
 
+@router.post("/{data_source_id}/sync", response_model=DataSourceResponse)
+async def sync_data_source(
+    data_source_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Mark a data source as freshly synced.
+
+    **For non-technical users:** This records the time we last refreshed data
+    from the selected provider. Connect your automated pipelines here later.
+    """
+    try:
+        service = DataSourceService(db)
+        synced = service.mark_data_source_synced(data_source_id)
+        if not synced:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "technical": f"Data source {data_source_id} not found",
+                    "user_friendly": "We couldn't locate that data source. It may have been removed."
+                }
+            )
+        return synced
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(
+            e,
+            context="syncing data source",
+            endpoint=f"/api/v1/data-sources/{data_source_id}/sync",
+            method="POST"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
+        )
+
+
 @router.delete("/{data_source_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_data_source(
     data_source_id: int,

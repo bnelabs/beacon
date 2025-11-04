@@ -1,5 +1,6 @@
 """Business logic for data source management."""
 
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
@@ -110,6 +111,27 @@ class DataSourceService:
 
         logger.info(f"Deleted data source: {db_data_source.name}")
         return True
+
+    def mark_data_source_synced(self, data_source_id: int) -> Optional[DataSource]:
+        """
+        Update bookkeeping fields when a sync completes successfully.
+
+        For now we treat sync as an immediate operation and record the timestamp.
+        Hook the actual extraction pipeline here in the future.
+        """
+        db_data_source = self.get_data_source(data_source_id)
+        if not db_data_source:
+            return None
+
+        db_data_source.last_successful_fetch = datetime.now(timezone.utc)
+        db_data_source.status = "active"
+        db_data_source.error_message = None
+
+        self.db.commit()
+        self.db.refresh(db_data_source)
+
+        logger.info("Marked data source %s as synced at %s", db_data_source.name, db_data_source.last_successful_fetch)
+        return db_data_source
 
     def test_data_source(self, test_request: DataSourceTestRequest) -> DataSourceTestResponse:
         """Test a data source configuration."""
