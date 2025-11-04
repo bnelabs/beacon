@@ -632,13 +632,14 @@ export default function JobCreationModal({
                               {items.map((dataset) => {
                                 const checked = isDatasetSelected(dataset.id)
                                 return (
-                                  <label
+                                  <div
                                     key={dataset.id}
-                                    className="flex items-start gap-2 rounded-lg border border-transparent px-2 py-1.5 hover:border-bne-azure hover:bg-bne-azure/5"
+                                    className="flex items-start gap-2 rounded-lg border border-transparent px-2 py-1.5 hover:border-bne-azure hover:bg-bne-azure/5 cursor-pointer"
+                                    onClick={() => handleDatasetSelectionChange(dataset, !checked)}
                                   >
                                     <input
                                       type="checkbox"
-                                      className="mt-1 h-4 w-4 rounded border-bne-frost text-bne-azure focus:ring-bne-azure"
+                                      className="mt-1 h-4 w-4 rounded border-bne-frost text-bne-azure focus:ring-bne-azure cursor-pointer"
                                       checked={checked}
                                       onChange={(event) => {
                                         event.stopPropagation()
@@ -654,7 +655,7 @@ export default function JobCreationModal({
                                         {dataset.unit ? `· ${dataset.unit}` : ''}
                                       </p>
                                     </div>
-                                  </label>
+                                  </div>
                                 )
                               })}
                             </div>
