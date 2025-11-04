@@ -6,7 +6,7 @@ import os
 from typing import List, Optional
 
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import json
@@ -303,7 +303,7 @@ async def simulate_model(
         predictions_df.to_json(predictions_path, orient="records")
 
         meta_path = scenario_dir / "meta.json"
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
         meta_payload = {
             "scenario_id": scenario_id,
             "model_id": model_id,
@@ -428,7 +428,7 @@ async def get_scenario(
         adjustments = [ScenarioAdjustment(**adj) for adj in adjustments_payload if isinstance(adj, dict)]
 
         created_at_str = meta.get("created_at")
-        created_at = datetime.fromisoformat(created_at_str) if created_at_str else datetime.utcnow()
+        created_at = datetime.fromisoformat(created_at_str) if created_at_str else datetime.now(timezone.utc)
 
         response = ScenarioResponse(
             scenario_id=scenario_id,

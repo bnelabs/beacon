@@ -2,7 +2,7 @@
 
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from enum import Enum
 import torch
@@ -83,7 +83,7 @@ class EngineOrchestrator:
             EngineResult with risk scores and predictions
         """
         try:
-            self.start_time = datetime.utcnow()
+            self.start_time = datetime.now(timezone.utc)
             logger.info(f"[{self.job_id}] Starting ENGINE processing")
             
             # Validate data package
@@ -129,7 +129,7 @@ class EngineOrchestrator:
             predictions_path = self._save_predictions(predictions)
             explanations_path = self._save_explanations(model, predictions)
             
-            duration = (datetime.utcnow() - self.start_time).total_seconds()
+            duration = (datetime.now(timezone.utc) - self.start_time).total_seconds()
             
             self.status = EngineStatus.COMPLETED
             self.progress = 100.0
@@ -147,7 +147,7 @@ class EngineOrchestrator:
                     "duration_seconds": duration,
                     "memory_peak_mb": self._get_peak_memory()
                 },
-                processed_at=datetime.utcnow(),
+                processed_at=datetime.now(timezone.utc),
                 duration_seconds=duration
             )
             

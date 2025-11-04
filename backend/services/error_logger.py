@@ -3,7 +3,7 @@
 import traceback
 import logging
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from models.error_log import ErrorLog
@@ -64,7 +64,7 @@ class ErrorLogger:
         if existing_error:
             # Update existing error occurrence
             existing_error.occurrence_count += 1
-            existing_error.last_occurred_at = datetime.utcnow()
+            existing_error.last_occurred_at = datetime.now(timezone.utc)
             self.db.commit()
             self.db.refresh(existing_error)
             return existing_error
@@ -115,7 +115,7 @@ class ErrorLogger:
         """
         from datetime import timedelta
 
-        cutoff_time = datetime.utcnow() - timedelta(minutes=time_window_minutes)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=time_window_minutes)
 
         query = self.db.query(ErrorLog).filter(
             ErrorLog.error_type == error_type,
@@ -169,7 +169,7 @@ class ErrorLogger:
         from sqlalchemy import func
         from datetime import timedelta
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         day_ago = now - timedelta(days=1)
         week_ago = now - timedelta(days=7)
 
@@ -252,7 +252,7 @@ class ErrorLogger:
 
         error_log.resolved = True
         error_log.resolution_notes = resolution_notes
-        error_log.resolved_at = datetime.utcnow()
+        error_log.resolved_at = datetime.now(timezone.utc)
 
         self.db.commit()
         return True

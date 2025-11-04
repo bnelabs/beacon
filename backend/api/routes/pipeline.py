@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import os
 
@@ -77,8 +77,8 @@ async def start_pipeline(
             current_stage=PipelineStage.DATA,
             status=JobStatus.PENDING,
             config=request.config,
-            started_by="user",  # TODO: Get from auth
-            started_at=datetime.utcnow()
+            started_by="user",  # TODO: Get from auth context once authentication is implemented (see SECURITY.md)
+            started_at=datetime.now(timezone.utc)
         )
 
         db.add(pipeline_job)
@@ -369,7 +369,7 @@ def _execute_pipeline(
         data_job.anomalies_detected = data_package.quality_report.anomalies_detected
         data_job.anomalies_fixed = data_package.quality_report.anomalies_fixed
         data_job.output_path = data_package.timeseries_path
-        data_job.completed_at = datetime.utcnow()
+        data_job.completed_at = datetime.now(timezone.utc)
 
         pipeline_job.progress = 33.0
         db.commit()
@@ -381,7 +381,7 @@ def _execute_pipeline(
         engine_job = EngineJob(
             pipeline_job_id=pipeline_job_id,
             status=JobStatus.RUNNING,
-            started_at=datetime.utcnow()
+            started_at=datetime.now(timezone.utc)
         )
         db.add(engine_job)
         db.commit()
@@ -401,7 +401,7 @@ def _execute_pipeline(
         engine_job.device = engine_result.compute_stats.get("device")
         engine_job.peak_memory_mb = engine_result.compute_stats.get("memory_peak_mb")
         engine_job.predictions_path = engine_result.predictions_path
-        engine_job.completed_at = datetime.utcnow()
+        engine_job.completed_at = datetime.now(timezone.utc)
 
         pipeline_job.progress = 66.0
         db.commit()
@@ -413,7 +413,7 @@ def _execute_pipeline(
         result_job = ResultJob(
             pipeline_job_id=pipeline_job_id,
             status=JobStatus.RUNNING,
-            started_at=datetime.utcnow()
+            started_at=datetime.now(timezone.utc)
         )
         db.add(result_job)
         db.commit()
@@ -435,12 +435,12 @@ def _execute_pipeline(
         result_job.report_json_path = json_path
         result_job.report_pdf_path = pdf_path
         result_job.report_excel_path = excel_path
-        result_job.completed_at = datetime.utcnow()
+        result_job.completed_at = datetime.now(timezone.utc)
 
         # Complete pipeline
         pipeline_job.status = JobStatus.COMPLETED
         pipeline_job.progress = 100.0
-        pipeline_job.completed_at = datetime.utcnow()
+        pipeline_job.completed_at = datetime.now(timezone.utc)
         pipeline_job.duration_seconds = (pipeline_job.completed_at - pipeline_job.started_at).total_seconds()
         db.commit()
 

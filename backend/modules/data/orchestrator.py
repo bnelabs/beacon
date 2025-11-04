@@ -3,7 +3,7 @@
 import logging
 import os
 from typing import Dict, List, Optional, Any, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from enum import Enum
 
@@ -282,7 +282,7 @@ class DataOrchestrator:
             errors=validation_report.errors,
             fit_for_engine=fit_for_engine,
             recommendation=recommendation,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
 
     def _save_data_package(self,
@@ -335,6 +335,6 @@ class DataOrchestrator:
             date_range=(start_date, end_date),
             num_assets=len(data['asset'].unique()) if 'asset' in data.columns else 0,
             num_observations=len(data),
-            certified_at=datetime.utcnow(),
+            certified_at=datetime.now(timezone.utc),
             certified_by=user_id
         )

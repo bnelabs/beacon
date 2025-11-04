@@ -3,7 +3,7 @@
 import logging
 import os
 from typing import Dict, List, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -201,7 +201,7 @@ class ResultsGenerator:
                 systemic_risk_report=systemic,
                 recommendations=recommendations,
                 visualizations=visualizations,
-                generated_at=datetime.utcnow(),
+                generated_at=datetime.now(timezone.utc),
                 version="1.0.0"
             )
             
@@ -300,7 +300,7 @@ class ResultsGenerator:
             num_institutions=num_institutions,
             data_points_analyzed=data_points,
             period=analysis_period,
-            generated_at=datetime.utcnow()
+            generated_at=datetime.now(timezone.utc)
         )
     
     def _generate_geographic_analysis(self, engine_result: EngineResult) -> GeographicAnalysis:
@@ -799,7 +799,7 @@ class ReportExporter:
         """Export report as Excel with multiple sheets."""
         import pandas as pd
         import os
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         output_path = f"{self.output_dir}/{report.job_id}/report.xlsx"
         os.makedirs(os.path.dirname(output_path), exist_ok=True)

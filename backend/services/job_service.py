@@ -136,10 +136,11 @@ class JobService:
                 logger.warning(f"Failed to revoke Celery task {db_job.celery_task_id}: {e}")
 
         # Update job status
+        from datetime import timezone
         db_job.status = "failed"
         db_job.error_message = "Job cancelled by user"
         db_job.user_friendly_error = "This job was cancelled by the user."
-        db_job.completed_at = datetime.utcnow()
+        db_job.completed_at = datetime.now(timezone.utc)
 
         self.db.commit()
         logger.info(f"Cancelled job {job_id}")

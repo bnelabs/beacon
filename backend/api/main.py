@@ -80,6 +80,8 @@ default_allowed_origins = [
     "http://127.0.0.1:5173",
     "http://localhost:6789",
     "http://127.0.0.1:6789",
+    "http://localhost:9876",    # Production frontend (Docker)
+    "http://127.0.0.1:9876",    # Production frontend (Docker)
 ]
 
 if os.getenv("ALLOWED_ORIGINS"):

@@ -12,6 +12,8 @@ services:
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256 --locale=C"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # ⚠️ SECURITY: Remove port exposure for production deployments
+    # Only expose if you need external database access (e.g., for DB management tools)
     ports:
       - "5432:5432"
     healthcheck:
@@ -32,6 +34,8 @@ services:
       - net.core.somaxconn=511
     volumes:
       - redis_data:/data
+    # ⚠️ SECURITY: Remove port exposure for production deployments
+    # Only expose if you need external Redis access (e.g., for monitoring tools)
     ports:
       - "6379:6379"
     healthcheck:
@@ -62,7 +66,7 @@ services:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       PYTHONIOENCODING: utf-8
-      FRED_API_KEY: f0a1e5e0a4dc3272e4e95d3ec2ff3644
+      FRED_API_KEY: ${FRED_API_KEY:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       SEC_API_KEY: ${SEC_API_KEY:-}
     volumes:
@@ -97,7 +101,7 @@ services:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       PYTHONIOENCODING: utf-8
-      FRED_API_KEY: f0a1e5e0a4dc3272e4e95d3ec2ff3644
+      FRED_API_KEY: ${FRED_API_KEY:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       SEC_API_KEY: ${SEC_API_KEY:-}
     volumes:

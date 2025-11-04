@@ -113,8 +113,8 @@ export function useCancelJob() {
 
   return useMutation({
     mutationFn: (jobId) =>
-      fetchApi(`/v1/jobs/${jobId}/cancel`, {
-        method: 'POST'
+      fetchApi(`/v1/jobs/${jobId}`, {
+        method: 'DELETE'
       }),
     onSuccess: (_, jobId) => {
       queryClient.invalidateQueries({ queryKey: ['jobs', jobId] })

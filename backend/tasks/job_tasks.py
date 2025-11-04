@@ -3,7 +3,7 @@
 from celery import Task
 import traceback
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import psutil
 import os
 import torch
@@ -144,7 +144,7 @@ def run_data_collection(self, job_id: int, parameters: dict):
         selected_countries = [str(country) for country in parameters.get('countries', []) if country]
 
         # Default to ~5 years of history for better coverage of annual/quarterly data
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         default_start = (today - timedelta(days=5 * 365)).isoformat()
         default_end = today.isoformat()
         start_date = parameters.get('start_date') or default_start
@@ -180,7 +180,7 @@ def run_data_collection(self, job_id: int, parameters: dict):
             "fit_for_engine": data_package.quality_report.fit_for_engine,
             "anomalies_detected": data_package.quality_report.anomalies_detected,
             "output_path": data_package.timeseries_path,
-            "completed_at": datetime.utcnow().isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
             "regions": selected_regions,
             "countries": selected_countries,
         })
@@ -583,7 +583,7 @@ def run_prediction(self, job_id: int, parameters: dict):
             "predictions_path": output_path,
             "num_predictions": len(prediction_result.predictions_df),
             "mean_risk": float(prediction_result.predictions_df['risk_score'].mean()) if 'risk_score' in prediction_result.predictions_df.columns else None,
-            "completed_at": datetime.utcnow().isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
             "feature_importances": clean_nan(prediction_result.feature_importances),
             "metrics": clean_nan(prediction_result.metrics),
             "regions": parameters.get("regions") or data_scope.get("regions"),
