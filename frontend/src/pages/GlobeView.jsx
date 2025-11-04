@@ -1,14 +1,80 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useStore } from '../store/useStore'
 import PageContainer from '../components/ui/PageContainer'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import GlobeCanvas from '../components/globe/GlobeCanvas'
+import { useBanksByRegion } from '../hooks/useApi'
+import LoadingSpinner from '../components/ui/LoadingSpinner'
+import ErrorMessage from '../components/ui/ErrorMessage'
 
 export default function GlobeView() {
   const { selectedRegion, setSelectedRegion, globeRotation, setGlobeRotation } = useStore()
   const [selectedDataSource, setSelectedDataSource] = useState('fdic')
+  const regionFilters = useMemo(() => {
+    if (!selectedRegion) return null
+
+    const { country, name, id } = selectedRegion
+
+    const countryIsoMap = {
+      USA: 'USA',
+      US: 'USA',
+      UK: 'GBR',
+      UnitedKingdom: 'GBR',
+      Germany: 'DEU',
+      France: 'FRA',
+      Italy: 'ITA',
+      Spain: 'ESP',
+      Japan: 'JPN',
+      China: 'CHN',
+      Singapore: 'SGP',
+      Australia: 'AUS'
+    }
+
+    const filters = { enabled_only: true }
+
+    const normalizedCountry = country?.replace(/\s+/g, '')
+    const iso = countryIsoMap[country] || countryIsoMap[normalizedCountry]
+
+    if (iso) {
+      filters.countries = [iso]
+    }
+
+    const regionMap = {
+      'us-northeast': 'north_america',
+      'us-southeast': 'north_america',
+      'us-midwest': 'north_america',
+      'us-southwest': 'north_america',
+      'us-west': 'north_america',
+      uk: 'europe',
+      germany: 'europe',
+      france: 'europe',
+      italy: 'europe',
+      spain: 'europe',
+      japan: 'asia',
+      china: 'asia',
+      singapore: 'asia',
+      australia: 'asia'
+    }
+
+    const regionKey = regionMap[id] || regionMap[name?.toLowerCase?.()] || null
+    if (regionKey) {
+      filters.region = regionKey
+    }
+
+    return filters
+  }, [selectedRegion])
+
+  const {
+    data: banks = [],
+    isFetching: banksLoading,
+    error: banksError,
+    refetch: refetchBanks
+  } = useBanksByRegion(regionFilters)
+
+  const totalAssets = banks.length
+  const criticalAssets = useMemo(() => banks.filter((bank) => bank.risk_score && bank.risk_score >= 0.7), [banks])
 
   return (
     <PageContainer
@@ -87,10 +153,54 @@ export default function GlobeView() {
                   </p>
                 </div>
               </div>
-              <div className="mt-4 pt-4 border-t border-bne-frost">
-                <Button variant="primary" size="sm" className="w-full">
-                  View Bank Data
-                </Button>
+              <div className="mt-4 pt-4 border-t border-bne-frost space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-bne-steel">Datasets</span>
+                  <Badge variant="info" size="sm">{totalAssets}</Badge>
+                </div>
+                {banksLoading ? (
+                  <div className="py-6">
+                    <LoadingSpinner message="Loading datasets..." />
+                  </div>
+                ) : banksError ? (
+                  <ErrorMessage
+                    title="Failed to load datasets"
+                    error={banksError}
+                    onRetry={refetchBanks}
+                  />
+                ) : totalAssets > 0 ? (
+                  <div className="space-y-2">
+                    <div className="max-h-60 overflow-y-auto rounded-lg border border-bne-frost">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-bne-ice/60 text-xs uppercase text-bne-steel">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Code</th>
+                            <th className="px-3 py-2 text-left">Name</th>
+                            <th className="px-3 py-2 text-left">Category</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {banks.map((bank) => (
+                            <tr key={bank.id} className="border-t border-bne-frost">
+                              <td className="px-3 py-2 font-mono text-xs text-bne-ink">{bank.code}</td>
+                              <td className="px-3 py-2 text-bne-ink">{bank.name}</td>
+                              <td className="px-3 py-2 text-xs uppercase text-bne-steel">{bank.category?.replace(/_/g, ' ') || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {criticalAssets.length > 0 && (
+                      <p className="text-xs text-bne-crimson">
+                        {criticalAssets.length} dataset{criticalAssets.length === 1 ? '' : 's'} flagged with elevated risk (score ≥ 0.7)
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-bne-steel">
+                    No datasets found for this region. Try syncing the data source.
+                  </p>
+                )}
               </div>
             </Card>
           )}

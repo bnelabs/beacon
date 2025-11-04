@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import PageContainer from '../components/ui/PageContainer'
 import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
@@ -5,6 +6,7 @@ import Button from '../components/ui/Button'
 import { useJobs, useModels, useDataSources } from '../hooks/useApi'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
+import JobCreationModal from '../components/jobs/JobCreationModal'
 
 function StatsCard({ title, value, change, trend }) {
   return (
@@ -69,35 +71,38 @@ function RecentJobs({ jobs, isLoading, error }) {
           <p className="text-sm text-bne-steel text-center py-4">No jobs yet</p>
         ) : (
           <div className="space-y-3">
-            {recentJobs.map((job) => (
-              <div
-                key={job.job_id}
-                className="flex items-center justify-between p-3 rounded-lg bg-bne-ice hover:bg-bne-frost transition-colors"
-              >
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-bne-ink">
-                    {job.model_id || 'Unknown Model'}
-                  </p>
-                  <p className="text-xs text-bne-steel mt-0.5">
-                    ID: {job.job_id}
-                  </p>
-                </div>
-                <Badge
-                  variant={
-                    job.status === 'completed'
-                      ? 'success'
-                      : job.status === 'running'
-                      ? 'primary'
-                      : job.status === 'failed'
-                      ? 'danger'
-                      : 'default'
-                  }
-                  size="sm"
+            {recentJobs.map((job) => {
+              const jobKey = job.job_id ?? job.id
+              return (
+                <div
+                  key={jobKey}
+                  className="flex items-center justify-between p-3 rounded-lg bg-bne-ice hover:bg-bne-frost transition-colors"
                 >
-                  {job.status}
-                </Badge>
-              </div>
-            ))}
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-bne-ink">
+                      {job.model_id || 'Unknown Model'}
+                    </p>
+                    <p className="text-xs text-bne-steel mt-0.5">
+                      ID: {jobKey ?? '-'}
+                    </p>
+                  </div>
+                  <Badge
+                    variant={
+                      job.status === 'completed'
+                        ? 'success'
+                        : job.status === 'running'
+                        ? 'primary'
+                        : job.status === 'failed'
+                        ? 'danger'
+                        : 'default'
+                    }
+                    size="sm"
+                  >
+                    {job.status}
+                  </Badge>
+                </div>
+              )
+            })}
           </div>
         )}
       </CardContent>
@@ -106,6 +111,7 @@ function RecentJobs({ jobs, isLoading, error }) {
 }
 
 export default function Dashboard() {
+  const [isJobModalOpen, setIsJobModalOpen] = useState(false)
   const { data: jobs, isLoading: jobsLoading, error: jobsError } = useJobs()
   const { data: models, isLoading: modelsLoading } = useModels()
   const { data: dataSources, isLoading: sourcesLoading } = useDataSources()
@@ -120,19 +126,20 @@ export default function Dashboard() {
   }
 
   return (
-    <PageContainer
-      title="Dashboard"
-      actions={
-        <Button variant="primary">
-          <span className="flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            New Job
-          </span>
-        </Button>
-      }
-    >
+    <>
+      <PageContainer
+        title="Dashboard"
+        actions={
+          <Button variant="primary" onClick={() => setIsJobModalOpen(true)}>
+            <span className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              New Job
+            </span>
+          </Button>
+        }
+      >
       <div className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatsCard
@@ -219,6 +226,11 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
-    </PageContainer>
+      </PageContainer>
+      <JobCreationModal
+        isOpen={isJobModalOpen}
+        onClose={() => setIsJobModalOpen(false)}
+      />
+    </>
   )
 }

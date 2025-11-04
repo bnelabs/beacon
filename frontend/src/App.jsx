@@ -5,10 +5,12 @@ import Models from './pages/Models'
 import Jobs from './pages/Jobs'
 import Results from './pages/Results'
 import DataSources from './pages/DataSources'
+import Settings from './pages/Settings'
+import Help from './pages/Help'
 import { useRouter } from './store/useRouter'
 
 export default function App() {
-  const { currentPage } = useRouter()
+  const { currentPage, params } = useRouter()
 
   const renderPage = () => {
     switch (currentPage) {
@@ -21,9 +23,13 @@ export default function App() {
       case 'jobs':
         return <Jobs />
       case 'results':
-        return <Results />
+        return <Results params={params} />
       case 'datasources':
         return <DataSources />
+      case 'settings':
+        return <Settings />
+      case 'help':
+        return <Help />
       default:
         return <Dashboard />
     }

@@ -1,8 +1,10 @@
 import { cn } from '../../lib/utils/cn'
 
-export default function Card({ children, className, hover = false, ...props }) {
+export default function Card({ children, className, hover = false, as = 'div', ...props }) {
+  const Component = as
+
   return (
-    <div
+    <Component
       className={cn(
         'bg-white rounded-2xl shadow-bne-panel p-6',
         'border border-bne-frost',
@@ -12,7 +14,7 @@ export default function Card({ children, className, hover = false, ...props }) {
       {...props}
     >
       {children}
-    </div>
+    </Component>
   )
 }
 

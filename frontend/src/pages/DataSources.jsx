@@ -4,15 +4,42 @@ import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
-import { useDataSources } from '../hooks/useApi'
+import {
+  useCreateDataSource,
+  useDataSources,
+  useSyncDataSource,
+  useUpdateDataSource
+} from '../hooks/useApi'
+import { useMemo, useState } from 'react'
+import DataSourceFormModal from '../components/data-sources/DataSourceFormModal'
+import DataSourceDetailsModal from '../components/data-sources/DataSourceDetailsModal'
+import JobCreationModal from '../components/jobs/JobCreationModal'
 
-function DataSourceCard({ source }) {
+const AVAILABLE_PLUGINS = [
+  { value: 'fdic', label: 'FDIC', description: 'Federal Deposit Insurance Corporation', icon: '🏦', enabled: true },
+  { value: 'ecb_banking', label: 'ECB Banking', description: 'European Central Bank Data', icon: '🇪🇺', enabled: true },
+  { value: 'fmp', label: 'FMP', description: 'Financial Modeling Prep', icon: '📊', enabled: true },
+  { value: 'yfinance', label: 'Yahoo Finance', description: 'Market data and financials', icon: '📈', enabled: false },
+  { value: 'world_bank', label: 'World Bank', description: 'Global economic indicators', icon: '🌍', enabled: false },
+  { value: 'imf', label: 'IMF', description: 'International Monetary Fund', icon: '💰', enabled: false },
+  { value: 'fred', label: 'FRED', description: 'Federal Reserve Economic Data', icon: '🏛️', enabled: true },
+  { value: 'bis', label: 'BIS', description: 'Bank for International Settlements', icon: '🌐', enabled: true },
+  { value: 'sec_edgar', label: 'SEC EDGAR', description: 'SEC Company Filings', icon: '📄', enabled: true }
+]
+
+function DataSourceCard({ source, onSync, onConfigure, onView, isSyncing = false }) {
   const statusVariants = {
     active: 'success',
     inactive: 'default',
     error: 'danger',
     syncing: 'primary'
   }
+
+  const lastUpdated =
+    source.last_successful_fetch ||
+    source.updated_at ||
+    source.last_updated ||
+    null
 
   return (
     <Card>
@@ -34,12 +61,14 @@ function DataSourceCard({ source }) {
         <div className="space-y-3">
           <div className="flex items-center justify-between text-sm">
             <span className="text-bne-steel">Source Type</span>
-            <span className="font-medium text-bne-ink uppercase">{source.plugin_name || source.type}</span>
+            <span className="font-medium text-bne-ink uppercase">
+              {source.plugin_name || source.plugin_type || source.type}
+            </span>
           </div>
           <div className="flex items-center justify-between text-sm">
             <span className="text-bne-steel">Last Updated</span>
             <span className="font-medium text-bne-ink">
-              {source.last_updated ? new Date(source.last_updated).toLocaleDateString() : 'Never'}
+              {lastUpdated ? new Date(lastUpdated).toLocaleDateString() : 'Never'}
             </span>
           </div>
           <div className="flex items-center justify-between text-sm">
@@ -54,23 +83,28 @@ function DataSourceCard({ source }) {
               </span>
             </div>
           )}
-          {source.coverage && (
+          {(source.coverage_description || source.coverage) && (
             <div className="flex items-center justify-between text-sm">
               <span className="text-bne-steel">Coverage</span>
-              <span className="font-medium text-bne-ink">{source.coverage}</span>
+              <span className="font-medium text-bne-ink">{source.coverage_description || source.coverage}</span>
             </div>
           )}
         </div>
       </CardContent>
 
       <CardFooter>
-        <Button variant="primary" size="sm">
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => onSync?.(source)}
+          loading={Boolean(isSyncing || source.status === 'syncing')}
+        >
           Sync Now
         </Button>
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="sm" onClick={() => onConfigure?.(source)}>
           Configure
         </Button>
-        <Button variant="ghost" size="sm">
+        <Button variant="ghost" size="sm" onClick={() => onView?.(source)}>
           View Data
         </Button>
       </CardFooter>
@@ -80,6 +114,100 @@ function DataSourceCard({ source }) {
 
 export default function DataSources() {
   const { data: sources, isLoading, error, refetch } = useDataSources()
+  const syncMutation = useSyncDataSource()
+  const createMutation = useCreateDataSource()
+  const updateMutation = useUpdateDataSource()
+  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [formMode, setFormMode] = useState('create')
+  const [formSource, setFormSource] = useState(null)
+  const [detailsSource, setDetailsSource] = useState(null)
+
+  const pluginOptions = useMemo(() => {
+    const seen = new Set()
+    const base = []
+    AVAILABLE_PLUGINS.forEach((plugin) => {
+      if (!seen.has(plugin.value)) {
+        base.push({ value: plugin.value, label: plugin.label })
+        seen.add(plugin.value)
+      }
+    })
+    ;(sources || []).forEach((source) => {
+      const value = source.plugin_type
+      if (value && !seen.has(value)) {
+        base.push({ value, label: value })
+        seen.add(value)
+      }
+    })
+    return base
+  }, [sources])
+
+  const [selectedDatasets, setSelectedDatasets] = useState([])
+  const selectedDatasetIds = useMemo(() => selectedDatasets.map((dataset) => dataset.id), [selectedDatasets])
+  const [isJobModalOpen, setIsJobModalOpen] = useState(false)
+
+  const handleDatasetSelection = (datasets = []) => {
+    if (!datasets || datasets.length === 0) {
+      return
+    }
+    setSelectedDatasets((prev) => {
+      const map = new Map(prev.map((dataset) => [dataset.id, dataset]))
+      datasets.forEach((dataset) => {
+        if (dataset && typeof dataset.id !== 'undefined' && dataset.id !== null) {
+          map.set(dataset.id, dataset)
+        }
+      })
+      return Array.from(map.values())
+    })
+  }
+
+  const handleRemoveSelectedDataset = (datasetId) => {
+    setSelectedDatasets((prev) => prev.filter((dataset) => dataset.id !== datasetId))
+  }
+
+  const handleClearSelectedDatasets = () => {
+    setSelectedDatasets([])
+  }
+
+  const openJobModalWithSelection = () => {
+    if (selectedDatasets.length === 0) {
+      return
+    }
+    setIsJobModalOpen(true)
+  }
+
+  const currentSyncingId = syncMutation.isPending ? syncMutation.variables?.sourceId : null
+
+  const handleSync = (source) => {
+    if (!source) return
+    const sourceId = source.id || source.source_id
+    if (!sourceId) return
+    syncMutation.mutate({ sourceId })
+  }
+
+  const handleAddSource = () => {
+    setFormMode('create')
+    setFormSource(null)
+    setIsFormOpen(true)
+  }
+
+  const handleConfigure = (source) => {
+    setFormMode('edit')
+    setFormSource(source)
+    setIsFormOpen(true)
+  }
+
+  const handleView = (source) => {
+    setDetailsSource(source)
+  }
+
+  const handleFormSubmit = async (payload) => {
+    if (formMode === 'create') {
+      await createMutation.mutateAsync(payload)
+    } else if (formMode === 'edit' && formSource) {
+      const sourceId = formSource.id || formSource.source_id
+      await updateMutation.mutateAsync({ sourceId, data: payload })
+    }
+  }
 
   if (isLoading) {
     return (
@@ -106,21 +234,66 @@ export default function DataSources() {
   const activeSources = sources?.filter(s => s.status === 'active') || []
   const inactiveSources = sources?.filter(s => s.status !== 'active') || []
 
+  const workflowSteps = [
+    {
+      number: 1,
+      title: 'Locate data by region',
+      description: 'Filter catalogues by region or country, then pin the datasets that match your scenario.'
+    },
+    {
+      number: 2,
+      title: 'Review data health',
+      description: 'Open any source to review freshness, coverage, and quick metrics before adding it to a job.'
+    },
+    {
+      number: 3,
+      title: 'Launch collection job',
+      description: 'Use “Create Data Job” to download the selected datasets and run automated quality checks.'
+    },
+    {
+      number: 4,
+      title: 'Train and simulate',
+      description: 'Once data jobs finish, train a model and jump into what-if scenarios from the Results tab.'
+    }
+  ]
+
   return (
-    <PageContainer
-      title="Data Sources"
-      actions={
-        <Button variant="primary">
-          <span className="flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <>
+      <PageContainer
+        title="Data Sources"
+        actions={
+          <Button variant="primary" onClick={handleAddSource}>
+            <span className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
             Add Source
           </span>
         </Button>
       }
-    >
+      >
       <div className="space-y-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>How to prepare data for Beacon</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {workflowSteps.map((step) => (
+                <div key={step.number} className="rounded-xl border border-bne-frost bg-bne-ice/40 p-4">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-bne-azure text-white text-sm font-semibold">
+                      {step.number}
+                    </span>
+                    <h4 className="text-sm font-semibold text-bne-ink">{step.title}</h4>
+                  </div>
+                  <p className="text-xs text-bne-steel mt-3 leading-relaxed">{step.description}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="bg-gradient-to-br from-bne-azure to-bne-indigo text-white">
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -140,12 +313,61 @@ export default function DataSources() {
           </CardContent>
         </Card>
 
+        {selectedDatasets.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Selected Datasets</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                {selectedDatasets.map((dataset) => (
+                  <span
+                    key={dataset.id}
+                    className="inline-flex items-center gap-2 rounded-full border border-bne-azure bg-bne-azure/10 px-3 py-1 text-sm text-bne-ink"
+                  >
+                    <div>
+                      <span className="font-mono text-xs text-bne-ink">{dataset.code}</span>
+                      <span className="block text-[11px] text-bne-steel/80">{dataset.name}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveSelectedDataset(dataset.id)}
+                      className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-bne-azure text-white text-xs hover:bg-bne-azure-600"
+                      aria-label={`Remove ${dataset.code}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <p className="text-xs text-bne-steel mt-3">
+                These datasets will be pre-filled when you create a new data collection job.
+              </p>
+            </CardContent>
+            <CardFooter className="flex flex-wrap items-center gap-2">
+              <Button variant="primary" onClick={openJobModalWithSelection}>
+                Create Data Job
+              </Button>
+              <Button variant="ghost" onClick={handleClearSelectedDatasets}>
+                Clear All
+              </Button>
+            </CardFooter>
+          </Card>
+        )}
+
         {activeSources.length > 0 && (
           <div>
             <h3 className="text-lg font-semibold text-bne-ink mb-4">Active Sources</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {activeSources.map((source) => (
-                <DataSourceCard key={source.source_id || source.name} source={source} />
+                <DataSourceCard
+                  key={source.id || source.source_id || source.name}
+                  source={source}
+                  onSync={handleSync}
+                  onConfigure={handleConfigure}
+                  onView={handleView}
+                  isSyncing={currentSyncingId === (source.id || source.source_id)}
+                />
               ))}
             </div>
           </div>
@@ -156,7 +378,14 @@ export default function DataSources() {
             <h3 className="text-lg font-semibold text-bne-ink mb-4">Inactive Sources</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {inactiveSources.map((source) => (
-                <DataSourceCard key={source.source_id || source.name} source={source} />
+                <DataSourceCard
+                  key={source.id || source.source_id || source.name}
+                  source={source}
+                  onSync={handleSync}
+                  onConfigure={handleConfigure}
+                  onView={handleView}
+                  isSyncing={currentSyncingId === (source.id || source.source_id)}
+                />
               ))}
             </div>
           </div>
@@ -182,7 +411,7 @@ export default function DataSources() {
               <p className="text-sm text-bne-steel mb-4">
                 Add your first data source to start collecting banking data
               </p>
-              <Button variant="primary">
+              <Button variant="primary" onClick={handleAddSource}>
                 Add Data Source
               </Button>
             </div>
@@ -195,46 +424,9 @@ export default function DataSources() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {[
-                {
-                  name: 'FDIC',
-                  description: 'Federal Deposit Insurance Corporation',
-                  icon: '🏦',
-                  enabled: true
-                },
-                {
-                  name: 'ECB Banking',
-                  description: 'European Central Bank Data',
-                  icon: '🇪🇺',
-                  enabled: true
-                },
-                {
-                  name: 'FMP',
-                  description: 'Financial Modeling Prep',
-                  icon: '📊',
-                  enabled: true
-                },
-                {
-                  name: 'Yahoo Finance',
-                  description: 'Market data and financials',
-                  icon: '📈',
-                  enabled: false
-                },
-                {
-                  name: 'World Bank',
-                  description: 'Global economic indicators',
-                  icon: '🌍',
-                  enabled: false
-                },
-                {
-                  name: 'IMF',
-                  description: 'International Monetary Fund',
-                  icon: '💰',
-                  enabled: false
-                }
-              ].map((plugin) => (
+              {AVAILABLE_PLUGINS.map((plugin) => (
                 <div
-                  key={plugin.name}
+                  key={plugin.value}
                   className={`p-4 rounded-lg border-2 ${
                     plugin.enabled
                       ? 'border-bne-azure/20 bg-bne-azure/5'
@@ -245,7 +437,7 @@ export default function DataSources() {
                     <span className="text-2xl">{plugin.icon}</span>
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <h4 className="font-medium text-bne-ink">{plugin.name}</h4>
+                        <h4 className="font-medium text-bne-ink">{plugin.label}</h4>
                         {plugin.enabled && (
                           <Badge variant="success" size="sm">Enabled</Badge>
                         )}
@@ -259,6 +451,27 @@ export default function DataSources() {
           </CardContent>
         </Card>
       </div>
-    </PageContainer>
+      </PageContainer>
+      <DataSourceFormModal
+        isOpen={isFormOpen}
+        mode={formMode}
+        initialSource={formSource}
+        pluginOptions={pluginOptions}
+        onClose={() => setIsFormOpen(false)}
+        onSubmit={handleFormSubmit}
+      />
+      <DataSourceDetailsModal
+        isOpen={!!detailsSource}
+        source={detailsSource}
+        onClose={() => setDetailsSource(null)}
+        preselectedDatasetIds={selectedDatasetIds}
+        onApplySelection={handleDatasetSelection}
+      />
+      <JobCreationModal
+        isOpen={isJobModalOpen}
+        onClose={() => setIsJobModalOpen(false)}
+        initialDatasets={selectedDatasets}
+      />
+    </>
   )
 }

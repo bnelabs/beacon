@@ -1,8 +1,9 @@
-import { useRef, useMemo } from 'react'
-import { useFrame } from '@react-three/fiber'
-import { Sphere } from '@react-three/drei'
+import { useRef, useMemo, useEffect } from 'react'
+import { extend, useFrame } from '@react-three/fiber'
+import { Sphere, shaderMaterial } from '@react-three/drei'
 import * as THREE from 'three'
 import { regions } from '../../data/regions'
+import coastlineData from '../../data/world-coastlines.json'
 
 function latLonToVector3(lat, lon, radius) {
   const phi = (90 - lat) * (Math.PI / 180)
@@ -13,6 +14,116 @@ function latLonToVector3(lat, lon, radius) {
   const y = radius * Math.cos(phi)
 
   return new THREE.Vector3(x, y, z)
+}
+
+const GlobeGradientMaterial = shaderMaterial(
+  {
+    colorA: new THREE.Color('#0f172a'),
+    colorB: new THREE.Color('#2563eb')
+  },
+  /* glsl */`
+    varying vec3 vPosition;
+    void main() {
+      vPosition = position;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  /* glsl */`
+    uniform vec3 colorA;
+    uniform vec3 colorB;
+    varying vec3 vPosition;
+    void main() {
+      vec3 n = normalize(vPosition);
+      float gradient = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+      vec3 color = mix(colorB, colorA, gradient);
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `
+)
+
+extend({ GlobeGradientMaterial })
+
+function Graticule({ radius = 2.02, latStep = 15, lonStep = 15, color = '#60a5fa', opacity = 0.12 }) {
+  const geometry = useMemo(() => {
+    const positions = []
+    const pushSegment = (a, b) => {
+      positions.push(a.x, a.y, a.z, b.x, b.y, b.z)
+    }
+
+    for (let lat = -75; lat <= 75; lat += latStep) {
+      for (let lon = 0; lon < 360; lon += 5) {
+        const start = latLonToVector3(lat, lon, radius)
+        const end = latLonToVector3(lat, lon + 5, radius)
+        pushSegment(start, end)
+      }
+    }
+
+    for (let lon = 0; lon < 360; lon += lonStep) {
+      for (let lat = -80; lat < 80; lat += 5) {
+        const start = latLonToVector3(lat, lon, radius)
+        const end = latLonToVector3(lat + 5, lon, radius)
+        pushSegment(start, end)
+      }
+    }
+
+    const buffer = new THREE.BufferGeometry()
+    buffer.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    return buffer
+  }, [latStep, lonStep, radius])
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+
+  return (
+    <lineSegments geometry={geometry}>
+      <lineBasicMaterial color={color} transparent opacity={opacity} />
+    </lineSegments>
+  )
+}
+
+function Atmosphere({ radius = 2.25 }) {
+  return (
+    <Sphere args={[radius, 64, 64]}>
+      <meshBasicMaterial
+        color="#3b82f6"
+        transparent
+        opacity={0.08}
+        side={THREE.BackSide}
+        blending={THREE.AdditiveBlending}
+      />
+    </Sphere>
+  )
+}
+
+function Coastlines({ radius = 2.01 }) {
+  const geometries = useMemo(() => {
+    const features = coastlineData.features || []
+    return features.map((feature) => {
+      const geometry = new THREE.BufferGeometry()
+      const vertices = []
+      feature.rings.forEach((ring) => {
+        const points = ring.map(([lat, lon]) => latLonToVector3(lat, lon, radius))
+        for (let i = 0; i < points.length - 1; i++) {
+          const a = points[i]
+          const b = points[i + 1]
+          vertices.push(a.x, a.y, a.z, b.x, b.y, b.z)
+        }
+      })
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
+      return geometry
+    })
+  }, [radius])
+
+  useEffect(() => () => geometries.forEach((geometry) => geometry.dispose()), [geometries])
+
+  return (
+    <group>
+      {geometries.map((geometry, index) => (
+        <lineSegments key={index} geometry={geometry}>
+          <lineBasicMaterial color="#60a5fa" transparent opacity={0.35} linewidth={0.5} />
+        </lineSegments>
+      ))}
+    </group>
+  )
 }
 
 function RegionMarker({ region, onClick, isSelected }) {
@@ -62,24 +173,13 @@ export default function Globe({ onRegionClick, selectedRegion, autoRotate = true
 
   return (
     <group ref={globeRef}>
-      <Sphere args={[2, 64, 64]}>
-        <meshStandardMaterial
-          color="#1e3a5f"
-          emissive="#0a1929"
-          emissiveIntensity={0.2}
-          roughness={0.8}
-          metalness={0.2}
-        />
+      <Sphere args={[2, 128, 128]}>
+        <globeGradientMaterial colorA="#0f172a" colorB="#2563eb" attach="material" />
       </Sphere>
 
-      <Sphere args={[2.005, 64, 64]}>
-        <meshBasicMaterial
-          color="#4a90e2"
-          transparent
-          opacity={0.1}
-          side={THREE.DoubleSide}
-        />
-      </Sphere>
+      <Graticule radius={2.025} opacity={0.1} />
+      <Coastlines radius={2.012} />
+      <Atmosphere radius={2.2} />
 
       {regions.map((region) => (
         <RegionMarker

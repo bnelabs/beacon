@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ModelMetrics(BaseModel):
@@ -50,3 +51,35 @@ class ModelDetail(BaseModel):
     data_job_id: Optional[int]
     predictions_path: Optional[str]
     visualizations: Dict[str, Any]
+
+
+class ScenarioAdjustment(BaseModel):
+    """Adjustment for a scenario simulation."""
+
+    source: str
+    type: Literal['pct', 'bps', 'absolute'] = 'pct'
+    value: float
+
+
+class ScenarioRequest(BaseModel):
+    """Scenario simulation input."""
+
+    name: Optional[str] = None
+    horizon_days: int = 30
+    adjustments: List[ScenarioAdjustment] = Field(default_factory=list)
+
+
+class ScenarioResponse(BaseModel):
+    """Scenario simulation result."""
+
+    scenario_id: str
+    model_id: int
+    name: str
+    horizon_days: int
+    created_at: datetime
+    summary: Dict[str, Any]
+    predictions: List[Dict[str, Any]]
+    adjustments: List[ScenarioAdjustment] = Field(default_factory=list)
+    executive_summary: Optional[str] = None
+    feature_importances: Dict[str, float] = Field(default_factory=dict)
+    storage_path: Optional[str] = None

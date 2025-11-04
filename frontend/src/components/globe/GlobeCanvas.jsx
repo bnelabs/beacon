@@ -6,13 +6,13 @@ import LoadingSpinner from '../ui/LoadingSpinner'
 
 export default function GlobeCanvas({ onRegionClick, selectedRegion, autoRotate }) {
   return (
-    <div className="relative w-full h-full bg-gradient-to-b from-bne-ink to-bne-indigo rounded-2xl overflow-hidden">
+    <div className="relative w-full h-full rounded-2xl overflow-hidden bg-gradient-to-b from-[#0b1120] via-[#0f172a] to-[#111827]">
       <Canvas>
         <PerspectiveCamera makeDefault position={[0, 0, 6]} />
 
-        <ambientLight intensity={0.5} />
-        <directionalLight position={[10, 10, 5]} intensity={1} />
-        <pointLight position={[-10, -10, -5]} intensity={0.5} color="#4a90e2" />
+        <ambientLight intensity={0.6} />
+        <directionalLight position={[8, 12, 10]} intensity={1.3} color="#bfdbfe" />
+        <directionalLight position={[-6, -4, -8]} intensity={0.6} color="#1e293b" />
 
         <Suspense fallback={null}>
           <Globe
@@ -24,13 +24,15 @@ export default function GlobeCanvas({ onRegionClick, selectedRegion, autoRotate 
 
         <OrbitControls
           enablePan={false}
-          enableZoom={true}
+          enableZoom
           minDistance={4}
           maxDistance={10}
-          rotateSpeed={0.5}
+          rotateSpeed={0.6}
           zoomSpeed={0.8}
         />
       </Canvas>
+
+      <div className="pointer-events-none absolute inset-0 bg-gradient-radial from-transparent via-transparent to-black/40" />
 
       <div className="absolute top-4 right-4 flex flex-col gap-2">
         <div className="bg-white/90 backdrop-blur-sm rounded-lg px-3 py-2 text-xs">

@@ -116,6 +116,7 @@ app.include_router(data_explorer_v2.router, prefix="/api/v2", tags=["Data Explor
 app.include_router(reports_v2.router, prefix="/api/v2", tags=["Reports v2"])
 app.include_router(predictions_v2.router, prefix="/api/v2", tags=["Predictions v2"])
 app.include_router(models_v1.router, prefix="/api/v1/models", tags=["Model Catalogue"])
+app.include_router(models_v1.router, prefix="/api/models", tags=["Model Catalogue"])
 
 
 @app.get("/")

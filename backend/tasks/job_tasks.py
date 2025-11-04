@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import psutil
 import os
 import torch
+from pathlib import Path
 
 from .celery_app import celery_app
 from database import SessionLocal
@@ -389,6 +390,8 @@ def run_training(self, job_id: int, parameters: dict):
         end_memory = process.memory_info().rss / (1024 ** 2)
         peak_memory = end_memory - start_memory
 
+        history_path = Path(output_dir) / "training_history.json"
+
         # Prepare results with REAL training metrics
         data_job = service.get_job(data_job_id)
 
@@ -418,6 +421,9 @@ def run_training(self, job_id: int, parameters: dict):
             "test_r2": float(training_metrics.test_r2),
             "model_path": training_metrics.model_path,
             "predictions_path": training_metrics.predictions_path,
+            "training_history_path": str(history_path),
+            "train_loss_history": [float(value) for value in training_metrics.train_loss],
+            "val_loss_history": [float(value) for value in training_metrics.val_loss],
             "visualizations": viz_paths,
             "completed_at": datetime.utcnow().isoformat()
         }
