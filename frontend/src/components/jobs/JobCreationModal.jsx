@@ -281,42 +281,45 @@ export default function JobCreationModal({
     [selectedDatasets]
   )
 
-  const handleToggleDataset = useCallback((dataset) => {
-    if (!dataset || typeof dataset.id === 'undefined' || dataset.id === null) {
-      return
-    }
-    const [normalized] = normalizeDatasets([dataset])
-    if (!normalized) {
-      return
-    }
-    setSelectedDatasets((prev) => {
-      const exists = prev.some((item) => item.id === normalized.id)
-      if (exists) {
-        return prev.filter((item) => item.id !== normalized.id)
+  const addDatasets = useCallback(
+    (datasets = []) => {
+      if (!datasets.length) {
+        return
       }
-      return [...prev, normalized]
-    })
-  }, [normalizeDatasets])
+      setSelectedDatasets((prev) => normalizeDatasets([...prev, ...datasets]))
+    },
+    [normalizeDatasets]
+  )
+
+  const removeDataset = useCallback((datasetId) => {
+    if (datasetId === undefined || datasetId === null) {
+      return
+    }
+    setSelectedDatasets((prev) => prev.filter((dataset) => dataset.id !== datasetId))
+  }, [])
+
+  const handleDatasetSelectionChange = useCallback(
+    (dataset, nextChecked) => {
+      if (!dataset || typeof dataset.id === 'undefined' || dataset.id === null) {
+        return
+      }
+      const [normalized] = normalizeDatasets([dataset])
+      if (!normalized) {
+        return
+      }
+      if (nextChecked) {
+        addDatasets([normalized])
+      } else {
+        removeDataset(normalized.id)
+      }
+    },
+    [addDatasets, removeDataset, normalizeDatasets]
+  )
 
   const handleSelectAllFiltered = useCallback(() => {
     const items = filteredCatalogueOptions.flatMap(([, groupItems]) => groupItems)
-    if (items.length === 0) {
-      return
-    }
-    setSelectedDatasets((prev) => {
-      const map = new Map(prev.map((dataset) => [dataset.id, dataset]))
-      items.forEach((dataset) => {
-        if (!dataset || typeof dataset.id === 'undefined' || dataset.id === null) {
-          return
-        }
-        const [normalized] = normalizeDatasets([dataset])
-        if (normalized) {
-          map.set(normalized.id, normalized)
-        }
-      })
-      return Array.from(map.values())
-    })
-  }, [filteredCatalogueOptions, normalizeDatasets])
+    addDatasets(items)
+  }, [filteredCatalogueOptions, addDatasets])
 
   const handleClearFiltered = useCallback(() => {
     const ids = new Set(
@@ -637,7 +640,10 @@ export default function JobCreationModal({
                                       type="checkbox"
                                       className="mt-1 h-4 w-4 rounded border-bne-frost text-bne-azure focus:ring-bne-azure"
                                       checked={checked}
-                                      onChange={() => handleToggleDataset(dataset)}
+                                      onChange={(event) => {
+                                        event.stopPropagation()
+                                        handleDatasetSelectionChange(dataset, event.target.checked)
+                                      }}
                                     />
                                     <div className="flex-1">
                                       <p className="text-sm font-medium text-bne-ink">{dataset.code}</p>
