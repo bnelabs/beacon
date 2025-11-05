@@ -27,6 +27,8 @@ from .routes import (
     reports_v2,
     models_v1,
     predictions_v2,
+    auth,
+    websocket,
 )
 from database import init_db, close_db
 
@@ -102,6 +104,11 @@ app.add_middleware(
 )
 
 # Include routers
+# Authentication (must be first for proper documentation)
+app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+# WebSocket routes
+app.include_router(websocket.router, prefix="/api", tags=["Real-time Updates"])
+# Main API routes
 app.include_router(pipeline.router, prefix="/api/v1/pipeline", tags=["Pipeline (DATA-ENGINE-RESULTS)"])
 app.include_router(results.router, prefix="/api/v1/results", tags=["Results & Reports"])
 app.include_router(explainability.router, prefix="/api/v1/explainability", tags=["AI Explainability (EU Compliant)"])
