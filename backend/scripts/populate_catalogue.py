@@ -42,6 +42,7 @@ def populate_catalogue():
             {"name": "World Bank", "plugin_type": "world_bank", "description": "World Bank Open Data"},
             {"name": "BIS", "plugin_type": "bis", "description": "Bank for International Settlements"},
             {"name": "IMF", "plugin_type": "imf", "description": "International Monetary Fund Data"},
+            {"name": "AI4Risk Interbank", "plugin_type": "ai4risk_interbank", "description": "AI4Risk Interbank Network Dataset (4,548 banks, 2016-2023)"},
         ]:
             source = db.query(DataSource).filter(DataSource.name == source_data["name"]).first()
             if not source:
@@ -1342,6 +1343,58 @@ def populate_catalogue():
                 "default_selected": True,
                 "priority": 90,
                 "tags": ["volatility", "bonds", "risk"]
+            },
+
+            # ============================================
+            # AI4RISK INTERBANK NETWORK - CRITICAL FOR TEMPORAL GNN
+            # ============================================
+            {
+                "code": "AI4RISK_NETWORK_TOPOLOGY",
+                "name": "Interbank Network Topology",
+                "description": "Real interbank lending network with bank-to-bank exposures (quarterly, 4,548 banks)",
+                "category": DataCategory.BANKING,
+                "region": DataRegion.GLOBAL,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.CREDIT_RISK.value, RiskType.FUNDING_LIQUIDITY.value],
+                "data_source_id": sources["AI4Risk Interbank"].id,
+                "endpoint": "network_topology",
+                "frequency": "quarterly",
+                "granularity": "micro",
+                "unit": "exposure_amount",
+                "default_selected": True,
+                "priority": 100,
+                "tags": ["interbank", "network", "contagion", "gnn", "temporal", "critical"]
+            },
+            {
+                "code": "AI4RISK_CREDIT_RATINGS",
+                "name": "Bank Credit Ratings & SRISK",
+                "description": "Credit ratings and systemic risk (SRISK) indicators for global banks",
+                "category": DataCategory.BANKING,
+                "region": DataRegion.GLOBAL,
+                "risk_types": [RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["AI4Risk Interbank"].id,
+                "endpoint": "credit_ratings",
+                "frequency": "quarterly",
+                "granularity": "micro",
+                "unit": "rating_score",
+                "default_selected": True,
+                "priority": 95,
+                "tags": ["credit_rating", "srisk", "systemic_risk", "bank_health"]
+            },
+            {
+                "code": "AI4RISK_SYSTEMIC_RISK",
+                "name": "System-Wide Systemic Risk Measures",
+                "description": "Aggregated systemic risk measures across the global banking network",
+                "category": DataCategory.BANKING,
+                "region": DataRegion.GLOBAL,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.FUNDING_LIQUIDITY.value],
+                "data_source_id": sources["AI4Risk Interbank"].id,
+                "endpoint": "systemic_risk",
+                "frequency": "quarterly",
+                "granularity": "macro",
+                "unit": "risk_score",
+                "default_selected": True,
+                "priority": 98,
+                "tags": ["systemic_risk", "network_metrics", "contagion", "early_warning"]
             },
         ]
 
