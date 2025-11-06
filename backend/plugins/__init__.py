@@ -24,6 +24,7 @@ from .imf_plugin import IMFPlugin
 from .world_bank_plugin import WorldBankPlugin
 from .ecb_banking_plugin import ECBBankingPlugin
 from .fmp_plugin import FMPPlugin
+from .kaggle_plugin import KagglePlugin
 
 __all__ = [
     "DataSourcePlugin",
@@ -41,5 +42,6 @@ __all__ = [
     "IMFPlugin",
     "WorldBankPlugin",
     "ECBBankingPlugin",
-    "FMPPlugin"
+    "FMPPlugin",
+    "KagglePlugin",
 ]
