@@ -79,6 +79,180 @@ class RealPredictionEngine:
 
         logger.info(f"Loaded model from {model_path}")
 
+    def apply_scenario(
+        self,
+        input_data: pd.DataFrame,
+        scenario: Dict[str, Any]
+    ) -> pd.DataFrame:
+        """
+        Apply 'what-if' scenario transformations to input data.
+
+        Supported scenarios:
+        - liquidity_freeze: Reduce interbank lending
+        - policy_intervention: Rate cuts, QE
+        - bank_failure: Specific bank default
+        - market_crash: Equity/volatility shocks
+        - regional_shock: Geographic stress
+        - sovereign_crisis: Sovereign debt stress
+        - commodity_shock: Oil/commodity price changes
+        - operational_risk: Cyber attacks, system failures
+        - combined: Multiple simultaneous stresses
+
+        Args:
+            input_data: DataFrame with Date, Value, source_code (and optionally bank_id)
+            scenario: Dictionary with scenario parameters
+
+        Returns:
+            Modified DataFrame with scenario applied
+        """
+        scenario_type = scenario.get('type', 'custom')
+        modified_data = input_data.copy()
+
+        logger.info(f"Applying scenario: {scenario_type}")
+
+        if scenario_type == 'liquidity_freeze':
+            # Reduce interbank exposures
+            reduction = scenario.get('interbank_lending_reduction', 0.5)
+
+            # Handle both network data (source_bank/target_bank) and time-series data (source_code)
+            if 'source_bank' in modified_data.columns and 'target_bank' in modified_data.columns:
+                # Network data from AI4Risk plugin - reduce all interbank exposures
+                modified_data['Value'] *= (1 - reduction)
+            elif 'source_code' in modified_data.columns:
+                # Time-series data - reduce interbank-related sources
+                modified_data.loc[
+                    modified_data['source_code'].str.contains('INTERBANK|AI4RISK', na=False),
+                    'Value'
+                ] *= (1 - reduction)
+
+        elif scenario_type == 'policy_intervention':
+            # Apply rate cut (or hike if negative)
+            rate_cut_bps = scenario.get('rate_cut_bps', 0)
+            if rate_cut_bps != 0:
+                modified_data.loc[
+                    modified_data['source_code'].str.contains('RATE|SOFR|ESTR|EURIBOR|FED_FUNDS', na=False),
+                    'Value'
+                ] += rate_cut_bps / 10000  # Convert bps to decimal
+
+            # Apply QE (increase liquidity)
+            qe_amount = scenario.get('qe_amount', 0)
+            if qe_amount > 0:
+                liquidity_boost = qe_amount / 1e12  # Normalize
+                modified_data.loc[
+                    modified_data['source_code'].str.contains('RESERVES|M2|LIQUIDITY', na=False),
+                    'Value'
+                ] *= (1 + liquidity_boost)
+
+        elif scenario_type == 'bank_failure':
+            # Simulate bank failure by setting its metrics to critical
+            failed_bank = scenario.get('failed_bank_id')
+            haircut = scenario.get('exposure_haircut', 0.3)
+
+            if failed_bank and 'bank_id' in modified_data.columns:
+                # Failed bank's equity goes to zero
+                modified_data.loc[
+                    (modified_data['bank_id'] == failed_bank) &
+                    (modified_data['source_code'].str.contains('EQUITY|CAPITAL', na=False)),
+                    'Value'
+                ] = 0
+
+                # Counterparties take haircut on exposures
+                if 'target_bank' in modified_data.columns:
+                    modified_data.loc[
+                        modified_data['target_bank'] == failed_bank,
+                        'Value'
+                    ] *= (1 - haircut)
+
+        elif scenario_type == 'market_crash':
+            # Apply stock market crash
+            stock_drop = scenario.get('stock_drop_pct', 0.20)
+            vol_spike = scenario.get('volatility_spike', 2.0)
+
+            modified_data.loc[
+                modified_data['source_code'].str.contains('STOCK|SPX|EURO|NIKKEI|HSI|EQUITY', na=False),
+                'Value'
+            ] *= (1 - stock_drop)
+
+            modified_data.loc[
+                modified_data['source_code'].str.contains('VIX|VOLATILITY|MOVE', na=False),
+                'Value'
+            ] *= vol_spike
+
+            # Widen credit spreads
+            spread_widening = scenario.get('credit_spread_widening', 0)
+            if spread_widening > 0:
+                modified_data.loc[
+                    modified_data['source_code'].str.contains('SPREAD|TED|CREDIT', na=False),
+                    'Value'
+                ] += spread_widening
+
+        elif scenario_type == 'regional_shock':
+            # Apply regional shocks
+            region_shocks = scenario.get('regional_shocks', [])
+            for shock in region_shocks:
+                region = shock['region']
+                magnitude = shock['magnitude']
+
+                # Apply shock to all data sources in region
+                if 'region' in modified_data.columns:
+                    modified_data.loc[
+                        modified_data['region'] == region,
+                        'Value'
+                    ] *= (1 + magnitude)
+
+        elif scenario_type == 'sovereign_crisis':
+            # Sovereign debt crisis
+            spread_widening = scenario.get('sovereign_spread_widening', 0.04)
+            modified_data.loc[
+                modified_data['source_code'].str.contains('BOND|YIELD|10Y|2Y', na=False),
+                'Value'
+            ] += spread_widening
+
+            # Banking stress from sovereign exposure
+            banking_stress = scenario.get('banking_stress', {})
+            deposit_flight = banking_stress.get('deposit_flight', 0)
+            if deposit_flight > 0 and 'bank_id' in modified_data.columns:
+                modified_data.loc[
+                    modified_data['source_code'].str.contains('DEPOSIT', na=False),
+                    'Value'
+                ] *= (1 - deposit_flight)
+
+        elif scenario_type == 'commodity_shock':
+            # Oil/commodity price shock
+            oil_increase = scenario.get('oil_price_increase', 0)
+            if oil_increase > 0:
+                modified_data.loc[
+                    modified_data['source_code'].str.contains('OIL|WTI|BRENT', na=False),
+                    'Value'
+                ] *= (1 + oil_increase)
+
+            # Inflation impact
+            inflation_spike = scenario.get('inflation_spike', 0)
+            if inflation_spike > 0:
+                modified_data.loc[
+                    modified_data['source_code'].str.contains('CPI|HICP|INFLATION', na=False),
+                    'Value'
+                ] += inflation_spike
+
+        elif scenario_type == 'operational_risk':
+            # Cyber attack or operational disruption
+            confidence_shock = scenario.get('market_disruption', {}).get('confidence_shock', 0.15)
+            modified_data.loc[
+                modified_data['source_code'].str.contains('VIX|VOLATILITY', na=False),
+                'Value'
+            ] *= (1 + confidence_shock)
+
+        elif scenario_type == 'combined':
+            # Apply multiple stresses recursively
+            for sub_scenario_type in ['policy_intervention', 'market_crash', 'liquidity_freeze']:
+                if any(k in scenario for k in ['rate_cut_bps', 'stock_drop_pct', 'interbank_lending_reduction']):
+                    # Create sub-scenario: unpack original first, then override type to avoid infinite recursion
+                    sub_scenario = {**scenario, 'type': sub_scenario_type}
+                    modified_data = self.apply_scenario(modified_data, sub_scenario)
+
+        logger.info(f"Scenario applied: {scenario_type}")
+        return modified_data
+
     def _load_model(self, model_path: str) -> torch.nn.Module:
         """Load trained PyTorch model."""
         checkpoint = torch.load(model_path, map_location=self.device)

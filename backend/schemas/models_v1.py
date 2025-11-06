@@ -61,12 +61,63 @@ class ScenarioAdjustment(BaseModel):
     value: float
 
 
-class ScenarioRequest(BaseModel):
-    """Scenario simulation input."""
+class RegionalShock(BaseModel):
+    """Regional shock specification."""
 
-    name: Optional[str] = None
-    horizon_days: int = 30
-    adjustments: List[ScenarioAdjustment] = Field(default_factory=list)
+    region: str = Field(description="Region code: NA, EU_WEST, EU_SOUTH, ASIA, LATAM, AFRICA, MIDDLE_EAST, GLOBAL")
+    magnitude: float = Field(description="Shock magnitude as decimal (e.g., 0.10 for 10% shock)")
+
+
+class ScenarioParameters(BaseModel):
+    """Enhanced scenario parameters for comprehensive what-if analysis."""
+
+    # Scenario type and metadata
+    type: Optional[str] = Field(None, description="Scenario type: liquidity_freeze, policy_intervention, bank_failure, market_crash, regional_shock, etc.")
+    scenario_id: Optional[str] = Field(None, description="Pre-configured scenario ID from scenario library")
+
+    # Policy intervention parameters
+    rate_cut_bps: Optional[float] = Field(None, description="Interest rate change in basis points (negative for hikes)")
+    qe_amount: Optional[float] = Field(None, description="Quantitative easing amount in currency units")
+
+    # Market stress parameters
+    stock_drop_pct: Optional[float] = Field(None, description="Stock market drop as percentage (0.20 = 20% drop)")
+    volatility_spike: Optional[float] = Field(None, description="Volatility multiplier (2.0 = double VIX)")
+    credit_spread_widening: Optional[float] = Field(None, description="Credit spread widening in percentage points")
+
+    # Liquidity freeze parameters
+    interbank_lending_reduction: Optional[float] = Field(None, description="Reduction in interbank lending (0.70 = 70% reduction)")
+
+    # Bank failure parameters
+    failed_bank_id: Optional[str] = Field(None, description="ID of bank that fails")
+    exposure_haircut: Optional[float] = Field(None, description="Haircut on exposures to failed bank (0.50 = 50% loss)")
+
+    # Regional shocks
+    regional_shocks: List[RegionalShock] = Field(default_factory=list, description="List of regional shocks to apply")
+
+    # Sovereign crisis parameters
+    sovereign_spread_widening: Optional[float] = Field(None, description="Sovereign bond spread widening")
+    banking_stress: Optional[Dict[str, Any]] = Field(None, description="Banking stress parameters (deposit_flight, funding_cost_increase, etc.)")
+
+    # Commodity shocks
+    oil_price_increase: Optional[float] = Field(None, description="Oil price increase as percentage (1.00 = 100% increase)")
+    inflation_spike: Optional[float] = Field(None, description="Inflation increase in percentage points")
+
+    # Operational risk
+    market_disruption: Optional[Dict[str, Any]] = Field(None, description="Market disruption parameters (trading_halt_duration, confidence_shock)")
+
+    # Additional adjustments (legacy support)
+    adjustments: List[ScenarioAdjustment] = Field(default_factory=list, description="Custom adjustments to specific data sources")
+
+
+class ScenarioRequest(BaseModel):
+    """Enhanced scenario simulation input with comprehensive what-if capabilities."""
+
+    name: Optional[str] = Field(None, description="Scenario name")
+    horizon_days: int = Field(30, description="Prediction horizon in days (7, 14, 21, or 30)")
+    scenario: ScenarioParameters = Field(default_factory=ScenarioParameters, description="Scenario parameters")
+
+    # Backwards compatibility
+    adjustments: List[ScenarioAdjustment] = Field(default_factory=list, description="Legacy adjustments field")
 
 
 class ScenarioResponse(BaseModel):

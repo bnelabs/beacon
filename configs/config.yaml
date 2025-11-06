@@ -242,3 +242,19 @@ training:
   num_epochs: 50
   early_stopping_patience: 15
   validation_split: 0.2
+
+prediction:
+  # Supported prediction horizons (in days)
+  supported_horizons: [7, 14, 21, 30]
+  default_horizon: 30  # 30-day advance warning for liquidity risk
+
+  # Validation settings for different horizons
+  validation_horizons: [7, 14, 21, 30]  # Validate model at all horizons
+
+  # Scenario testing
+  scenario_library_path: "configs/scenario_library.json"
+  enable_what_if_scenarios: true
+
+  # Temporal GNN specific settings
+  min_sequence_length: 30  # Minimum 30 days history required
+  optimal_sequence_length: 60  # Optimal 60 days history for best performance

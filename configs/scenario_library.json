@@ -1,0 +1,360 @@
+{
+  "version": "1.0.0",
+  "description": "Pre-configured scenario library for financial stress testing and what-if analysis",
+  "scenarios": [
+    {
+      "id": "lehman_2008",
+      "name": "Lehman Brothers Collapse (2008)",
+      "description": "Simulates the 2008 Lehman Brothers bankruptcy and resulting credit freeze",
+      "category": "historical_crisis",
+      "type": "bank_failure",
+      "severity": "critical",
+      "parameters": {
+        "failed_bank_id": "LEHMAN",
+        "exposure_haircut": 0.65,
+        "liquidity_freeze": {
+          "interbank_lending_reduction": 0.70
+        },
+        "market_crash": {
+          "stock_drop_pct": 0.30,
+          "volatility_spike": 3.5
+        }
+      },
+      "historical_date": "2008-09-15",
+      "tags": ["banking", "crisis", "contagion", "historical"]
+    },
+    {
+      "id": "covid_2020",
+      "name": "COVID-19 Pandemic Shock (2020)",
+      "description": "Simulates the March 2020 COVID-19 market crash and lockdown impacts",
+      "category": "historical_crisis",
+      "type": "market_crash",
+      "severity": "critical",
+      "parameters": {
+        "stock_drop_pct": 0.35,
+        "volatility_spike": 4.0,
+        "regional_shocks": [
+          {"region": "EU_WEST", "magnitude": 0.15},
+          {"region": "NA", "magnitude": 0.12},
+          {"region": "ASIA", "magnitude": 0.18}
+        ]
+      },
+      "historical_date": "2020-03-16",
+      "tags": ["pandemic", "crisis", "global", "historical"]
+    },
+    {
+      "id": "svb_2023",
+      "name": "Silicon Valley Bank Failure (2023)",
+      "description": "Simulates the SVB collapse and regional banking stress",
+      "category": "historical_crisis",
+      "type": "bank_failure",
+      "severity": "high",
+      "parameters": {
+        "failed_bank_id": "SVB",
+        "exposure_haircut": 0.20,
+        "regional_shocks": [
+          {"region": "NA", "magnitude": 0.08}
+        ],
+        "policy_intervention": {
+          "rate_cut_bps": 0,
+          "qe_amount": 25000000000
+        }
+      },
+      "historical_date": "2023-03-10",
+      "tags": ["banking", "regional", "us", "historical"]
+    },
+    {
+      "id": "euro_crisis_2012",
+      "name": "European Sovereign Debt Crisis (2012)",
+      "description": "Simulates the 2012 Eurozone sovereign debt crisis",
+      "category": "historical_crisis",
+      "type": "sovereign_crisis",
+      "severity": "critical",
+      "parameters": {
+        "regional_shocks": [
+          {"region": "EU_SOUTH", "magnitude": 0.25},
+          {"region": "EU_WEST", "magnitude": 0.10}
+        ],
+        "sovereign_spread_widening": 0.04,
+        "banking_stress": {
+          "deposit_flight": 0.15,
+          "interbank_freeze": 0.50
+        }
+      },
+      "historical_date": "2012-06-01",
+      "tags": ["sovereign", "europe", "crisis", "historical"]
+    },
+    {
+      "id": "ecb_rate_hike_50bps",
+      "name": "ECB 50bps Rate Hike",
+      "description": "Simulates ECB hiking policy rates by 50 basis points",
+      "category": "policy_intervention",
+      "type": "policy_intervention",
+      "severity": "low",
+      "parameters": {
+        "rate_cut_bps": -50,
+        "regional_shocks": [
+          {"region": "EU_WEST", "magnitude": 0.05}
+        ]
+      },
+      "tags": ["policy", "rates", "europe", "tightening"]
+    },
+    {
+      "id": "ecb_rate_hike_100bps",
+      "name": "ECB 100bps Rate Hike",
+      "description": "Simulates ECB aggressive rate hike of 100 basis points",
+      "category": "policy_intervention",
+      "type": "policy_intervention",
+      "severity": "medium",
+      "parameters": {
+        "rate_cut_bps": -100,
+        "regional_shocks": [
+          {"region": "EU_WEST", "magnitude": 0.10},
+          {"region": "EU_SOUTH", "magnitude": 0.15}
+        ],
+        "banking_stress": {
+          "funding_cost_increase": 0.08
+        }
+      },
+      "tags": ["policy", "rates", "europe", "aggressive_tightening"]
+    },
+    {
+      "id": "fed_emergency_cut",
+      "name": "Fed Emergency 100bps Rate Cut",
+      "description": "Simulates Fed emergency rate cut and quantitative easing",
+      "category": "policy_intervention",
+      "type": "policy_intervention",
+      "severity": "low",
+      "parameters": {
+        "rate_cut_bps": 100,
+        "qe_amount": 500000000000,
+        "regional_shocks": [
+          {"region": "NA", "magnitude": -0.05}
+        ]
+      },
+      "tags": ["policy", "rates", "us", "easing", "qe"]
+    },
+    {
+      "id": "fed_rate_hike_75bps",
+      "name": "Fed 75bps Rate Hike",
+      "description": "Simulates Fed aggressive 75 basis point rate increase",
+      "category": "policy_intervention",
+      "type": "policy_intervention",
+      "severity": "medium",
+      "parameters": {
+        "rate_cut_bps": -75,
+        "regional_shocks": [
+          {"region": "NA", "magnitude": 0.08},
+          {"region": "LATAM", "magnitude": 0.12}
+        ]
+      },
+      "tags": ["policy", "rates", "us", "tightening"]
+    },
+    {
+      "id": "liquidity_freeze_mild",
+      "name": "Mild Interbank Liquidity Freeze",
+      "description": "30% reduction in interbank lending activity",
+      "category": "stress_scenario",
+      "type": "liquidity_freeze",
+      "severity": "medium",
+      "parameters": {
+        "interbank_lending_reduction": 0.30
+      },
+      "tags": ["liquidity", "interbank", "stress"]
+    },
+    {
+      "id": "liquidity_freeze_severe",
+      "name": "Severe Interbank Liquidity Freeze",
+      "description": "70% reduction in interbank lending activity (2008-like)",
+      "category": "stress_scenario",
+      "type": "liquidity_freeze",
+      "severity": "critical",
+      "parameters": {
+        "interbank_lending_reduction": 0.70,
+        "credit_spread_widening": 0.03
+      },
+      "tags": ["liquidity", "interbank", "severe", "crisis"]
+    },
+    {
+      "id": "market_correction",
+      "name": "Market Correction (10-15% drop)",
+      "description": "Standard market correction with moderate volatility spike",
+      "category": "stress_scenario",
+      "type": "market_crash",
+      "severity": "low",
+      "parameters": {
+        "stock_drop_pct": 0.12,
+        "volatility_spike": 1.8
+      },
+      "tags": ["market", "correction", "volatility"]
+    },
+    {
+      "id": "market_crash",
+      "name": "Market Crash (30-40% drop)",
+      "description": "Severe market crash with extreme volatility",
+      "category": "stress_scenario",
+      "type": "market_crash",
+      "severity": "critical",
+      "parameters": {
+        "stock_drop_pct": 0.35,
+        "volatility_spike": 4.5,
+        "credit_spread_widening": 0.025
+      },
+      "tags": ["market", "crash", "severe", "volatility"]
+    },
+    {
+      "id": "regional_shock_asia",
+      "name": "Asian Financial Stress",
+      "description": "Significant financial stress originating in Asia",
+      "category": "stress_scenario",
+      "type": "regional_shock",
+      "severity": "medium",
+      "parameters": {
+        "regional_shocks": [
+          {"region": "ASIA", "magnitude": 0.20},
+          {"region": "GLOBAL", "magnitude": 0.05}
+        ]
+      },
+      "tags": ["regional", "asia", "contagion"]
+    },
+    {
+      "id": "regional_shock_europe",
+      "name": "European Financial Stress",
+      "description": "Significant financial stress in European markets",
+      "category": "stress_scenario",
+      "type": "regional_shock",
+      "severity": "medium",
+      "parameters": {
+        "regional_shocks": [
+          {"region": "EU_WEST", "magnitude": 0.15},
+          {"region": "EU_SOUTH", "magnitude": 0.22},
+          {"region": "GLOBAL", "magnitude": 0.06}
+        ]
+      },
+      "tags": ["regional", "europe", "contagion"]
+    },
+    {
+      "id": "emerging_markets_crisis",
+      "name": "Emerging Markets Crisis",
+      "description": "Widespread stress across emerging market economies",
+      "category": "stress_scenario",
+      "type": "regional_shock",
+      "severity": "high",
+      "parameters": {
+        "regional_shocks": [
+          {"region": "LATAM", "magnitude": 0.25},
+          {"region": "ASIA", "magnitude": 0.18},
+          {"region": "AFRICA", "magnitude": 0.20},
+          {"region": "GLOBAL", "magnitude": 0.08}
+        ],
+        "currency_crisis": {
+          "em_fx_depreciation": 0.30
+        }
+      },
+      "tags": ["emerging_markets", "global", "crisis", "contagion"]
+    },
+    {
+      "id": "systemic_bank_failure",
+      "name": "Systemically Important Bank Failure",
+      "description": "Failure of a major globally systemically important bank (G-SIB)",
+      "category": "stress_scenario",
+      "type": "bank_failure",
+      "severity": "critical",
+      "parameters": {
+        "failed_bank_id": "GSIB_001",
+        "exposure_haircut": 0.50,
+        "liquidity_freeze": {
+          "interbank_lending_reduction": 0.60
+        },
+        "market_crash": {
+          "stock_drop_pct": 0.25,
+          "volatility_spike": 3.0
+        },
+        "credit_spread_widening": 0.04
+      },
+      "tags": ["banking", "gsib", "systemic", "critical", "contagion"]
+    },
+    {
+      "id": "cyber_attack",
+      "name": "Major Cyber Attack on Financial Infrastructure",
+      "description": "Disruption of financial markets due to cyber attack",
+      "category": "stress_scenario",
+      "type": "operational_risk",
+      "severity": "high",
+      "parameters": {
+        "market_disruption": {
+          "trading_halt_duration_hours": 24,
+          "confidence_shock": 0.15
+        },
+        "liquidity_freeze": {
+          "interbank_lending_reduction": 0.40
+        },
+        "regional_shocks": [
+          {"region": "GLOBAL", "magnitude": 0.12}
+        ]
+      },
+      "tags": ["cyber", "operational", "systemic", "modern_risk"]
+    },
+    {
+      "id": "oil_shock",
+      "name": "Oil Price Shock (100% increase)",
+      "description": "Sudden doubling of oil prices due to geopolitical event",
+      "category": "stress_scenario",
+      "type": "commodity_shock",
+      "severity": "high",
+      "parameters": {
+        "oil_price_increase": 1.00,
+        "regional_shocks": [
+          {"region": "NA", "magnitude": 0.10},
+          {"region": "EU_WEST", "magnitude": 0.12},
+          {"region": "ASIA", "magnitude": 0.15}
+        ],
+        "inflation_spike": 0.03
+      },
+      "tags": ["commodities", "oil", "geopolitical", "inflation"]
+    },
+    {
+      "id": "combined_stress",
+      "name": "Combined Stress Scenario (Multi-Factor)",
+      "description": "Combination of rate hikes, market stress, and liquidity freeze",
+      "category": "stress_scenario",
+      "type": "combined",
+      "severity": "critical",
+      "parameters": {
+        "rate_cut_bps": -75,
+        "stock_drop_pct": 0.20,
+        "volatility_spike": 2.5,
+        "interbank_lending_reduction": 0.40,
+        "credit_spread_widening": 0.02,
+        "regional_shocks": [
+          {"region": "GLOBAL", "magnitude": 0.10}
+        ]
+      },
+      "tags": ["combined", "multi_factor", "severe", "comprehensive"]
+    },
+    {
+      "id": "baseline",
+      "name": "Baseline (No Stress)",
+      "description": "Normal market conditions with no stress applied",
+      "category": "baseline",
+      "type": "baseline",
+      "severity": "none",
+      "parameters": {},
+      "tags": ["baseline", "normal", "reference"]
+    }
+  ],
+  "severity_levels": {
+    "none": {"score": 0, "color": "#28a745", "description": "Normal conditions"},
+    "low": {"score": 1, "color": "#ffc107", "description": "Minor stress"},
+    "medium": {"score": 2, "color": "#fd7e14", "description": "Moderate stress"},
+    "high": {"score": 3, "color": "#dc3545", "description": "Severe stress"},
+    "critical": {"score": 4, "color": "#6f42c1", "description": "Critical/crisis conditions"}
+  },
+  "categories": {
+    "baseline": "Normal market conditions",
+    "historical_crisis": "Historical financial crisis events",
+    "policy_intervention": "Central bank policy changes",
+    "stress_scenario": "Hypothetical stress scenarios",
+    "custom": "User-defined custom scenarios"
+  }
+}
