@@ -19,6 +19,7 @@ const AVAILABLE_PLUGINS = [
   { value: 'fdic', label: 'FDIC', description: 'Federal Deposit Insurance Corporation', icon: '🏦', enabled: true },
   { value: 'ecb_banking', label: 'ECB Banking', description: 'European Central Bank Data', icon: '🇪🇺', enabled: true },
   { value: 'fmp', label: 'FMP', description: 'Financial Modeling Prep', icon: '📊', enabled: true },
+  { value: 'kaggle', label: 'Kaggle Bulk', description: 'Bulk historical datasets', icon: '🗃️', enabled: true },
   { value: 'yfinance', label: 'Yahoo Finance', description: 'Market data and financials', icon: '📈', enabled: false },
   { value: 'world_bank', label: 'World Bank', description: 'Global economic indicators', icon: '🌍', enabled: false },
   { value: 'imf', label: 'IMF', description: 'International Monetary Fund', icon: '💰', enabled: false },

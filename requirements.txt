@@ -11,6 +11,7 @@ plotly==5.24.1
 
 # Data Sources
 yfinance==0.2.46
+kaggle==1.6.17
 fredapi==0.5.2
 sec-api==1.0.32
 alpha-vantage==2.3.1

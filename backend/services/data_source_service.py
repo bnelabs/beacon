@@ -44,7 +44,7 @@ class DataSourceService:
         valid_plugins = [
             "yfinance", "fred", "alpha_vantage", "csv", "custom_api",
             "ecb", "sec_edgar", "bis", "imf", "world_bank",
-            "ecb_banking", "fmp"
+            "ecb_banking", "fmp", "kaggle"
         ]
         if data_source.plugin_type not in valid_plugins:
             raise ValueError(f"Invalid plugin type. Must be one of: {', '.join(valid_plugins)}")

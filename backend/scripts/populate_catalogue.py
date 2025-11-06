@@ -36,6 +36,7 @@ def populate_catalogue():
         for source_data in [
             {"name": "ECB", "plugin_type": "ecb", "description": "European Central Bank"},
             {"name": "FRED", "plugin_type": "fred", "description": "Federal Reserve Economic Data"},
+            {"name": "Kaggle Bulk", "plugin_type": "kaggle", "description": "Kaggle bulk historical datasets"},
             {"name": "Yahoo Finance", "plugin_type": "yfinance", "description": "Yahoo Finance"},
             {"name": "Alpha Vantage", "plugin_type": "alpha_vantage", "description": "Alpha Vantage"},
             {"name": "SEC EDGAR", "plugin_type": "sec_edgar", "description": "SEC Company Filings"},
