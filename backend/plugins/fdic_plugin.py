@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 import logging
 
-from plugins.base_plugin import BasePlugin
+from backend.plugins.base_plugin import BasePlugin
 
 logger = logging.getLogger(__name__)
 

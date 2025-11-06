@@ -1,6 +1,6 @@
 """Pydantic schemas for job API."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -31,8 +31,7 @@ class JobResponse(JobBase):
     peak_memory_mb: Optional[float] = None
     execution_time_seconds: Optional[float] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class JobStatusUpdate(BaseModel):

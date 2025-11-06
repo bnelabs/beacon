@@ -3,15 +3,15 @@
 import logging
 import os
 from typing import Dict, List, Optional, Any, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from enum import Enum
 
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from models.data_catalogue import DataCatalogueItem
-from models.data_source import DataSource
+from backend.models.data_catalogue import DataCatalogueItem
+from backend.models.data_source import DataSource
 from .collector import DataCollector
 from .validator import DataValidator
 from .cleaner import DataCleaner
@@ -282,7 +282,7 @@ class DataOrchestrator:
             errors=validation_report.errors,
             fit_for_engine=fit_for_engine,
             recommendation=recommendation,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
 
     def _save_data_package(self,
@@ -330,11 +330,12 @@ class DataOrchestrator:
                 "frequency": "daily",
                 "regions": regions or [],
                 "countries": countries or [],
+                "quality_score": quality_report.quality_score,
             },
             quality_report=quality_report,
             date_range=(start_date, end_date),
             num_assets=len(data['asset'].unique()) if 'asset' in data.columns else 0,
             num_observations=len(data),
-            certified_at=datetime.utcnow(),
+            certified_at=datetime.now(timezone.utc),
             certified_by=user_id
         )

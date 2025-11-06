@@ -7,9 +7,9 @@ import pandas as pd
 from sqlalchemy.orm import Session
 import os
 
-from models.data_catalogue import DataCatalogueItem
-from models.data_source import DataSource
-from plugins.base import get_plugin
+from backend.models.data_catalogue import DataCatalogueItem
+from backend.models.data_source import DataSource
+from backend.plugins.base import get_plugin
 from .country_utils import CountryMatcher
 
 logger = logging.getLogger(__name__)

@@ -4,17 +4,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 
-from database import get_db
-from models.data_source import DataSource
-from schemas.data_source import (
+from backend.database import get_db
+from backend.models.data_source import DataSource
+from backend.schemas.data_source import (
     DataSourceCreate,
     DataSourceUpdate,
     DataSourceResponse,
     DataSourceTestRequest,
     DataSourceTestResponse
 )
-from services.data_source_service import DataSourceService
-from services.error_logger import ErrorLogger
+from backend.services.data_source_service import DataSourceService
+from backend.services.error_logger import ErrorLogger
 
 router = APIRouter()
 

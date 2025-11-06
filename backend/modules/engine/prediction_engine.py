@@ -9,8 +9,8 @@ import logging
 from pathlib import Path
 import json
 
-from modules.explainability.shap_explainer import ModelExplainer
-from modules.risk.bank_analyzer import BankRiskAnalyzer, MultiBankAnalysis, generate_executive_summary
+from backend.modules.explainability.shap_explainer import ModelExplainer
+from backend.modules.risk.bank_analyzer import BankRiskAnalyzer, MultiBankAnalysis, generate_executive_summary
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +258,7 @@ class RealPredictionEngine:
         checkpoint = torch.load(model_path, map_location=self.device)
 
         # Recreate model architecture
-        from modules.engine.multi_scale_trainer import MultiScaleTemporalAttentionModel
+        from backend.modules.engine.multi_scale_trainer import MultiScaleTemporalAttentionModel
 
         # Get config from checkpoint
         config = checkpoint.get('config', {})

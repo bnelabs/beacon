@@ -1,19 +1,34 @@
 """Pipeline API - Orchestrates DATA → ENGINE → RESULTS flow."""
 
+import logging
+import os
+import uuid
+from datetime import datetime, timezone
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional
-from pydantic import BaseModel
-from datetime import datetime
-import uuid
-import os
+from pydantic import BaseModel, ConfigDict
 
-from database import get_db
-from models.pipeline_job import PipelineJob, DataJob, EngineJob, ResultJob, PipelineStage, JobStatus
-from services.error_logger import ErrorLogger
+from backend.database import get_db
+from backend.models.pipeline_job import PipelineJob, DataJob, EngineJob, ResultJob, PipelineStage, JobStatus
+from backend.services.error_logger import ErrorLogger
+from backend.utils.multiprocessing_patch import ensure_safe_pool_cleanup
+
+ensure_safe_pool_cleanup()
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Normalize naive datetimes to UTC-aware instances."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 class PipelineStartRequest(BaseModel):
@@ -45,8 +60,7 @@ class PipelineStatusResponse(BaseModel):
 
     error_message: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.post("", response_model=PipelineStatusResponse, status_code=status.HTTP_201_CREATED)
@@ -78,7 +92,7 @@ async def start_pipeline(
             status=JobStatus.PENDING,
             config=request.config,
             started_by="user",  # TODO: Get from auth
-            started_at=datetime.utcnow()
+            started_at=datetime.now(timezone.utc)
         )
 
         db.add(pipeline_job)
@@ -331,10 +345,10 @@ def _execute_pipeline(
 
     This is the main orchestration logic.
     """
-    from database import SessionLocal
-    from modules.data.orchestrator import DataOrchestrator
-    from modules.engine.orchestrator import EngineOrchestrator
-    from modules.results.generator import ResultsGenerator, ReportExporter
+    from backend.database import SessionLocal
+    from backend.modules.data.orchestrator import DataOrchestrator
+    from backend.modules.engine.orchestrator import EngineOrchestrator
+    from backend.modules.results.generator import ResultsGenerator, ReportExporter
 
     db = SessionLocal()
 
@@ -342,8 +356,10 @@ def _execute_pipeline(
         pipeline_job = db.query(PipelineJob).filter(PipelineJob.id == pipeline_job_id).first()
         data_job = db.query(DataJob).filter(DataJob.pipeline_job_id == pipeline_job_id).first()
 
-        output_dir = f"/app/data/pipelines/{pipeline_job.job_id}"
         import os
+
+        base_dir = os.getenv("PIPELINE_DATA_DIR", "/app/data/pipelines")
+        output_dir = os.path.join(base_dir, pipeline_job.job_id)
         os.makedirs(output_dir, exist_ok=True)
 
         # ========== STAGE 1: DATA ==========
@@ -369,7 +385,7 @@ def _execute_pipeline(
         data_job.anomalies_detected = data_package.quality_report.anomalies_detected
         data_job.anomalies_fixed = data_package.quality_report.anomalies_fixed
         data_job.output_path = data_package.timeseries_path
-        data_job.completed_at = datetime.utcnow()
+        data_job.completed_at = datetime.now(timezone.utc)
 
         pipeline_job.progress = 33.0
         db.commit()
@@ -381,7 +397,7 @@ def _execute_pipeline(
         engine_job = EngineJob(
             pipeline_job_id=pipeline_job_id,
             status=JobStatus.RUNNING,
-            started_at=datetime.utcnow()
+            started_at=datetime.now(timezone.utc)
         )
         db.add(engine_job)
         db.commit()
@@ -401,7 +417,7 @@ def _execute_pipeline(
         engine_job.device = engine_result.compute_stats.get("device")
         engine_job.peak_memory_mb = engine_result.compute_stats.get("memory_peak_mb")
         engine_job.predictions_path = engine_result.predictions_path
-        engine_job.completed_at = datetime.utcnow()
+        engine_job.completed_at = datetime.now(timezone.utc)
 
         pipeline_job.progress = 66.0
         db.commit()
@@ -413,7 +429,7 @@ def _execute_pipeline(
         result_job = ResultJob(
             pipeline_job_id=pipeline_job_id,
             status=JobStatus.RUNNING,
-            started_at=datetime.utcnow()
+            started_at=datetime.now(timezone.utc)
         )
         db.add(result_job)
         db.commit()
@@ -435,13 +451,16 @@ def _execute_pipeline(
         result_job.report_json_path = json_path
         result_job.report_pdf_path = pdf_path
         result_job.report_excel_path = excel_path
-        result_job.completed_at = datetime.utcnow()
+        result_job.completed_at = datetime.now(timezone.utc)
 
         # Complete pipeline
         pipeline_job.status = JobStatus.COMPLETED
         pipeline_job.progress = 100.0
-        pipeline_job.completed_at = datetime.utcnow()
-        pipeline_job.duration_seconds = (pipeline_job.completed_at - pipeline_job.started_at).total_seconds()
+        pipeline_job.completed_at = datetime.now(timezone.utc)
+        started_at = _ensure_utc(pipeline_job.started_at)
+        completed_at = _ensure_utc(pipeline_job.completed_at)
+        if started_at and completed_at:
+            pipeline_job.duration_seconds = (completed_at - started_at).total_seconds()
         db.commit()
 
     except Exception as e:

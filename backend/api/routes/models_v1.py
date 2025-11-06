@@ -6,7 +6,7 @@ import os
 from typing import List, Optional
 
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import json
@@ -17,9 +17,9 @@ import torch
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from database import get_db
-from models.job import Job
-from schemas.models_v1 import (
+from backend.database import get_db
+from backend.models.job import Job
+from backend.schemas.models_v1 import (
     ModelSummary,
     ModelDetail,
     ModelMetrics,
@@ -27,8 +27,8 @@ from schemas.models_v1 import (
     ScenarioRequest,
     ScenarioResponse,
 )
-from services.error_logger import ErrorLogger
-from modules.engine.prediction_engine import RealPredictionEngine
+from backend.services.error_logger import ErrorLogger
+from backend.modules.engine.prediction_engine import RealPredictionEngine
 
 router = APIRouter()
 
@@ -303,7 +303,7 @@ async def simulate_model(
         predictions_df.to_json(predictions_path, orient="records")
 
         meta_path = scenario_dir / "meta.json"
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
         meta_payload = {
             "scenario_id": scenario_id,
             "model_id": model_id,
@@ -428,7 +428,7 @@ async def get_scenario(
         adjustments = [ScenarioAdjustment(**adj) for adj in adjustments_payload if isinstance(adj, dict)]
 
         created_at_str = meta.get("created_at")
-        created_at = datetime.fromisoformat(created_at_str) if created_at_str else datetime.utcnow()
+        created_at = datetime.fromisoformat(created_at_str) if created_at_str else datetime.now(timezone.utc)
 
         response = ScenarioResponse(
             scenario_id=scenario_id,

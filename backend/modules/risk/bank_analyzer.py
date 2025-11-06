@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 import logging
 
-from modules.explainability.shap_explainer import ModelExplainer, NetworkExplainer, ExplanationResult
+from backend.modules.explainability.shap_explainer import ModelExplainer, NetworkExplainer, ExplanationResult
 from .constants import (
     RISK_THRESHOLD_LOW,
     RISK_THRESHOLD_MODERATE,

@@ -14,10 +14,15 @@ from .base import DataSourcePlugin, register_plugin
 
 logger = logging.getLogger(__name__)
 
-try:
+_kaggle_import_error: Optional[Exception]
+
+try:  # pragma: no cover - import side effects depend on environment
     from kaggle.api.kaggle_api_extended import KaggleApi
-except ImportError:  # pragma: no cover - handled at runtime
-    KaggleApi = None  # type: ignore
+except Exception as exc:  # noqa: BLE001 - propagate original error in validation
+    KaggleApi = None  # type: ignore[assignment]
+    _kaggle_import_error = exc
+else:
+    _kaggle_import_error = None
 
 
 class KagglePlugin(DataSourcePlugin):
@@ -32,9 +37,12 @@ class KagglePlugin(DataSourcePlugin):
     # ------------------------------------------------------------------
     def validate_config(self) -> None:
         if KaggleApi is None:
-            raise ImportError(
+            message = (
                 "kaggle package is required. Install it via pip and provide credentials."
             )
+            if _kaggle_import_error is not None:
+                message = f"{message} (original error: {_kaggle_import_error})"
+            raise ImportError(message) from _kaggle_import_error
 
         if not self.config.get("dataset"):
             raise ValueError("'dataset' (e.g., finnhub/reported-financials) is required")
@@ -46,6 +54,13 @@ class KagglePlugin(DataSourcePlugin):
 
     def _get_api(self) -> KaggleApi:
         if self._api is None:
+            if KaggleApi is None:
+                message = (
+                    "kaggle package is required. Install it via pip and provide credentials."
+                )
+                if _kaggle_import_error is not None:
+                    message = f"{message} (original error: {_kaggle_import_error})"
+                raise ImportError(message) from _kaggle_import_error
             api = KaggleApi()
             api.authenticate()
             self._api = api

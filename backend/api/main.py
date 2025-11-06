@@ -28,7 +28,7 @@ from .routes import (
     models_v1,
     predictions_v2,
 )
-from database import init_db, close_db
+from backend.database import init_db, close_db
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +40,14 @@ async def lifespan(app: FastAPI):
     init_db()
 
     # Populate catalogue if empty
-    from database import SessionLocal
-    from models.data_catalogue import DataCatalogueItem
+    from backend.database import SessionLocal
+    from backend.models.data_catalogue import DataCatalogueItem
     db = SessionLocal()
     try:
         count = db.query(DataCatalogueItem).count()
         if count == 0:
             logger.info("Catalogue is empty, populating with default items...")
-            from scripts.populate_catalogue import populate_catalogue
+            from backend.scripts.populate_catalogue import populate_catalogue
             populate_catalogue()
             logger.info("Catalogue populated successfully")
         else:

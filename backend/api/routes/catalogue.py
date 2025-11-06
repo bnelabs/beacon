@@ -5,15 +5,15 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import cast, String
 from typing import List, Optional
 
-from database import get_db
-from models.data_catalogue import DataCatalogueItem, DataCategory, DataRegion, RiskType
-from schemas.catalogue import (
+from backend.database import get_db
+from backend.models.data_catalogue import DataCatalogueItem, DataCategory, DataRegion, RiskType
+from backend.schemas.catalogue import (
     DataCatalogueItemResponse,
     CatalogueFilterRequest,
     CatalogueSummaryResponse,
     BulkCatalogueSelectRequest
 )
-from services.error_logger import ErrorLogger
+from backend.services.error_logger import ErrorLogger
 
 router = APIRouter()
 
@@ -362,7 +362,7 @@ async def test_catalogue_item(
             )
 
         # Get the plugin for this data source
-        from plugins import get_plugin
+        from backend.plugins import get_plugin
         plugin_config = item.data_source.config or {}
 
         # Inject API keys from environment if needed

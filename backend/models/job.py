@@ -3,7 +3,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text, Float
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.sql import func
-from database import Base
+from backend.database import Base
 
 
 class Job(Base):

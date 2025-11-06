@@ -7,7 +7,7 @@ import logging
 import psutil
 import torch
 
-from schemas.config import (
+from backend.schemas.config import (
     SystemConfigResponse,
     ModelParamsUpdate,
     DataParamsUpdate,

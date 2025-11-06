@@ -6,8 +6,7 @@ Copyright © 2025 BNE. All rights reserved.
 """
 
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from typing import Generator
 import os
 
@@ -32,7 +31,7 @@ Base = declarative_base()
 
 def init_db():
     """Initialize database tables."""
-    from models import data_source, asset, job, error_log, data_catalogue, pipeline_job  # Import all models
+    from backend.models import data_source, asset, job, error_log, data_catalogue, pipeline_job  # Import all models
     Base.metadata.create_all(bind=engine)
 
 

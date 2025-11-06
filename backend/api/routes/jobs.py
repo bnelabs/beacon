@@ -4,15 +4,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 
-from database import get_db
-from models.job import Job
-from schemas.job import (
+from backend.database import get_db
+from backend.models.job import Job
+from backend.schemas.job import (
     JobCreate,
     JobResponse,
     JobListFilter
 )
-from services.job_service import JobService
-from services.error_logger import ErrorLogger
+from backend.services.job_service import JobService
+from backend.services.error_logger import ErrorLogger
 
 router = APIRouter()
 

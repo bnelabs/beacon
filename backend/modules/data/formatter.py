@@ -60,6 +60,19 @@ class DataFormatter:
                 if 'Volume' in df.columns and 'volume' not in df.columns:
                     df['volume'] = pd.to_numeric(df['Volume'], errors='coerce')
 
+                # Provide canonical aliases expected by downstream modules
+                if 'Asset' in df.columns and 'asset' not in df.columns:
+                    df['asset'] = df['Asset']
+                if 'source_code' in df.columns and 'source' not in df.columns:
+                    df['source'] = df['source_code']
+                if 'value' not in df.columns:
+                    if 'Value' in df.columns:
+                        df['value'] = pd.to_numeric(df['Value'], errors='coerce')
+                    elif 'close' in df.columns:
+                        df['value'] = pd.to_numeric(df['close'], errors='coerce')
+                    elif 'Close' in df.columns:
+                        df['value'] = pd.to_numeric(df['Close'], errors='coerce')
+
                 df['source_code'] = code
                 all_data.append(df)
 

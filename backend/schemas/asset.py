@@ -1,6 +1,6 @@
 """Pydantic schemas for asset API."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from datetime import datetime
 
@@ -41,8 +41,7 @@ class AssetResponse(AssetBase):
     updated_at: Optional[datetime] = None
     last_data_update: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AssetBulkCreate(BaseModel):

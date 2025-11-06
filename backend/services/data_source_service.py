@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 
-from models.data_source import DataSource
-from schemas.data_source import (
+from backend.models.data_source import DataSource
+from backend.schemas.data_source import (
     DataSourceCreate,
     DataSourceUpdate,
     DataSourceTestRequest,
@@ -137,7 +137,7 @@ class DataSourceService:
         """Test a data source configuration."""
         try:
             # Import plugin system
-            from plugins.base import get_plugin
+            from backend.plugins.base import get_plugin
 
             # Get the appropriate plugin
             plugin_class = get_plugin(test_request.plugin_type)
