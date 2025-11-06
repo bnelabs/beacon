@@ -113,7 +113,13 @@ class RealPredictionEngine:
         if scenario_type == 'liquidity_freeze':
             # Reduce interbank exposures
             reduction = scenario.get('interbank_lending_reduction', 0.5)
-            if 'source_bank' in modified_data.columns:
+
+            # Handle both network data (source_bank/target_bank) and time-series data (source_code)
+            if 'source_bank' in modified_data.columns and 'target_bank' in modified_data.columns:
+                # Network data from AI4Risk plugin - reduce all interbank exposures
+                modified_data['Value'] *= (1 - reduction)
+            elif 'source_code' in modified_data.columns:
+                # Time-series data - reduce interbank-related sources
                 modified_data.loc[
                     modified_data['source_code'].str.contains('INTERBANK|AI4RISK', na=False),
                     'Value'
@@ -240,7 +246,8 @@ class RealPredictionEngine:
             # Apply multiple stresses recursively
             for sub_scenario_type in ['policy_intervention', 'market_crash', 'liquidity_freeze']:
                 if any(k in scenario for k in ['rate_cut_bps', 'stock_drop_pct', 'interbank_lending_reduction']):
-                    sub_scenario = {'type': sub_scenario_type, **scenario}
+                    # Create sub-scenario: unpack original first, then override type to avoid infinite recursion
+                    sub_scenario = {**scenario, 'type': sub_scenario_type}
                     modified_data = self.apply_scenario(modified_data, sub_scenario)
 
         logger.info(f"Scenario applied: {scenario_type}")
