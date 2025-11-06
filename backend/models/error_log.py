@@ -2,7 +2,7 @@
 
 from sqlalchemy import Column, Integer, String, DateTime, JSON, Text, Boolean
 from sqlalchemy.sql import func
-from database import Base
+from backend.database import Base
 
 
 class ErrorLog(Base):

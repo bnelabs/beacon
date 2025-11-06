@@ -10,7 +10,7 @@ from typing import Iterable, Optional, Set
 
 import pycountry
 
-from models.data_catalogue import DataRegion, DataCatalogueItem
+from backend.models.data_catalogue import DataRegion, DataCatalogueItem
 
 logger = logging.getLogger(__name__)
 

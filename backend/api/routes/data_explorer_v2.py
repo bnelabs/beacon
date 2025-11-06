@@ -9,10 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from database import get_db
-from models.data_catalogue import DataCatalogueItem, DataRegion
-from models.data_source import DataSource
-from schemas.data_explorer_v2 import (
+from backend.database import get_db
+from backend.models.data_catalogue import DataCatalogueItem, DataRegion
+from backend.models.data_source import DataSource
+from backend.schemas.data_explorer_v2 import (
     CatalogueAssetResponse,
     CatalogueCoverage,
     CatalogueListResponse,
@@ -20,7 +20,7 @@ from schemas.data_explorer_v2 import (
     DataSourceListResponse,
     DataSourceV2Response,
 )
-from services.error_logger import ErrorLogger
+from backend.services.error_logger import ErrorLogger
 
 router = APIRouter()
 

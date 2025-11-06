@@ -8,9 +8,9 @@ import os
 import json
 from pathlib import Path
 
-from database import get_db
-from models.job import Job
-from modules.results.generator import ResultsGenerator
+from backend.database import get_db
+from backend.models.job import Job
+from backend.modules.results.generator import ResultsGenerator
 
 logger = logging.getLogger(__name__)
 

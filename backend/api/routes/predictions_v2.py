@@ -11,10 +11,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from database import get_db
-from models.job import Job
-from schemas.predictions_v2 import PredictionReport, PredictionNode, PredictionTimeline, BacktestReport
-from services.error_logger import ErrorLogger
+from backend.database import get_db
+from backend.models.job import Job
+from backend.schemas.predictions_v2 import PredictionReport, PredictionNode, PredictionTimeline, BacktestReport
+from backend.services.error_logger import ErrorLogger
 
 router = APIRouter()
 

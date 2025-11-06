@@ -3,16 +3,16 @@
 from celery import Task
 import traceback
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import psutil
 import os
 import torch
 from pathlib import Path
 
 from .celery_app import celery_app
-from database import SessionLocal
-from services.job_service import JobService
-from services.enhanced_error_translator import translate_error_enhanced as translate_error
+from backend.database import SessionLocal
+from backend.services.job_service import JobService
+from backend.services.enhanced_error_translator import translate_error_enhanced as translate_error
 import json
 from dataclasses import asdict
 import numpy as np
@@ -105,7 +105,7 @@ def run_data_collection(self, job_id: int, parameters: dict):
         service.update_job_status(job_id, status="running", progress=0.0)
 
         # Import the new modular data collection system
-        from modules.data.orchestrator import DataOrchestrator
+        from backend.modules.data.orchestrator import DataOrchestrator
 
         logger.info(f"Starting data collection for job {job_id}")
 
@@ -132,7 +132,7 @@ def run_data_collection(self, job_id: int, parameters: dict):
         catalogue_items = parameters.get('catalogue_items')
         if not catalogue_items:
             # No items specified - fetch items marked as default_selected from database
-            from models.data_catalogue import DataCatalogueItem
+            from backend.models.data_catalogue import DataCatalogueItem
             default_items = db.query(DataCatalogueItem).filter(
                 DataCatalogueItem.default_selected == True,
                 DataCatalogueItem.enabled == True
@@ -144,7 +144,7 @@ def run_data_collection(self, job_id: int, parameters: dict):
         selected_countries = [str(country) for country in parameters.get('countries', []) if country]
 
         # Default to ~5 years of history for better coverage of annual/quarterly data
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         default_start = (today - timedelta(days=5 * 365)).isoformat()
         default_end = today.isoformat()
         start_date = parameters.get('start_date') or default_start
@@ -180,7 +180,7 @@ def run_data_collection(self, job_id: int, parameters: dict):
             "fit_for_engine": data_package.quality_report.fit_for_engine,
             "anomalies_detected": data_package.quality_report.anomalies_detected,
             "output_path": data_package.timeseries_path,
-            "completed_at": datetime.utcnow().isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
             "regions": selected_regions,
             "countries": selected_countries,
         })
@@ -232,8 +232,8 @@ def run_training(self, job_id: int, parameters: dict):
         service.update_job_status(job_id, status="running", progress=0.0)
 
         # Import BNE engine system
-        from modules.engine.orchestrator import EngineOrchestrator
-        from modules.data.orchestrator import DataPackage
+        from backend.modules.engine.orchestrator import EngineOrchestrator
+        from backend.modules.data.orchestrator import DataPackage
 
         logger.info(f"Starting BNE ENGINE training for job {job_id}")
 
@@ -253,7 +253,7 @@ def run_training(self, job_id: int, parameters: dict):
         # Check if user provided a data_job_id to use existing collected data
         data_job_id = parameters.get("data_job_id")
 
-        from models.job import Job
+        from backend.models.job import Job
 
         if not data_job_id:
             # Try to find the most recent completed data collection job
@@ -339,10 +339,10 @@ def run_training(self, job_id: int, parameters: dict):
 
         if has_multi_source:
             logger.info("Using MULTI-SCALE trainer for heterogeneous data sources")
-            from modules.engine.multi_scale_trainer import MultiScaleTrainer as TrainerClass
+            from backend.modules.engine.multi_scale_trainer import MultiScaleTrainer as TrainerClass
         else:
             logger.info("Using single-scale trainer")
-            from modules.engine.trainer import ModelTrainer as TrainerClass
+            from backend.modules.engine.trainer import ModelTrainer as TrainerClass
 
         # Get model configuration
         model_type = config.get('model', 'temporal_attention').lower()
@@ -377,7 +377,7 @@ def run_training(self, job_id: int, parameters: dict):
 
         # Generate visualizations
         logger.info("Generating visualizations...")
-        from modules.engine.visualizer import create_training_report
+        from backend.modules.engine.visualizer import create_training_report
 
         try:
             viz_paths = create_training_report(output_dir, job_id)
@@ -425,7 +425,7 @@ def run_training(self, job_id: int, parameters: dict):
             "train_loss_history": [float(value) for value in training_metrics.train_loss],
             "val_loss_history": [float(value) for value in training_metrics.val_loss],
             "visualizations": viz_paths,
-            "completed_at": datetime.utcnow().isoformat()
+            "completed_at": datetime.now(timezone.utc).isoformat()
         }
 
         data_scope = data_job.result if (data_job and isinstance(data_job.result, dict)) else {}
@@ -483,7 +483,7 @@ def run_prediction(self, job_id: int, parameters: dict):
         logger.info(f"Starting prediction for job {job_id}")
 
         # Load trained model and data
-        from modules.engine.prediction_engine import RealPredictionEngine
+        from backend.modules.engine.prediction_engine import RealPredictionEngine
         import torch
         import os
 
@@ -583,7 +583,7 @@ def run_prediction(self, job_id: int, parameters: dict):
             "predictions_path": output_path,
             "num_predictions": len(prediction_result.predictions_df),
             "mean_risk": float(prediction_result.predictions_df['risk_score'].mean()) if 'risk_score' in prediction_result.predictions_df.columns else None,
-            "completed_at": datetime.utcnow().isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
             "feature_importances": clean_nan(prediction_result.feature_importances),
             "metrics": clean_nan(prediction_result.metrics),
             "regions": parameters.get("regions") or data_scope.get("regions"),
@@ -633,8 +633,8 @@ def run_backtest(self, job_id: int, parameters: dict):
 
         logger.info(f"Starting backtest for job {job_id}")
 
-        from modules.engine.trainer import ModelTrainer
-        from modules.engine.prediction_engine import RealPredictionEngine
+        from backend.modules.engine.trainer import ModelTrainer
+        from backend.modules.engine.prediction_engine import RealPredictionEngine
         import torch
         import numpy as np
 
@@ -785,7 +785,7 @@ def run_backtest(self, job_id: int, parameters: dict):
             "train_samples": len(train_data),
             "test_samples": len(test_data),
             "backtest_metrics": clean_nan(backtest_metrics),
-            "completed_at": datetime.utcnow().isoformat()
+            "completed_at": datetime.now(timezone.utc).isoformat()
         }
 
         service.update_job_status(

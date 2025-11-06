@@ -3,7 +3,7 @@
 import logging
 import os
 from typing import Dict, List, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-from modules.engine.orchestrator import EngineResult, RiskScores
+from backend.modules.engine.orchestrator import EngineResult, RiskScores
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +201,7 @@ class ResultsGenerator:
                 systemic_risk_report=systemic,
                 recommendations=recommendations,
                 visualizations=visualizations,
-                generated_at=datetime.utcnow(),
+                generated_at=datetime.now(timezone.utc),
                 version="1.0.0"
             )
             
@@ -300,7 +300,7 @@ class ResultsGenerator:
             num_institutions=num_institutions,
             data_points_analyzed=data_points,
             period=analysis_period,
-            generated_at=datetime.utcnow()
+            generated_at=datetime.now(timezone.utc)
         )
     
     def _generate_geographic_analysis(self, engine_result: EngineResult) -> GeographicAnalysis:
@@ -700,79 +700,105 @@ class ReportExporter:
     
     def export_pdf(self, report: ComprehensiveReport) -> str:
         """Export report as PDF using ReportLab."""
-        from reportlab.lib.pagesizes import letter, A4
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import inch
-        from reportlab.lib import colors
-        from reportlab.lib.enums import TA_CENTER, TA_LEFT
         import os
 
         output_path = f"{self.output_dir}/{report.job_id}/report.pdf"
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        doc = SimpleDocTemplate(output_path, pagesize=letter)
-        styles = getSampleStyleSheet()
-        story = []
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.platypus import (
+                SimpleDocTemplate,
+                Paragraph,
+                Spacer,
+                Table,
+                TableStyle,
+                PageBreak,
+            )
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import inch
+            from reportlab.lib import colors
+            from reportlab.lib.enums import TA_CENTER
 
-        # Title
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=24,
-            textColor=colors.HexColor('#1a237e'),
-            spaceAfter=30,
-            alignment=TA_CENTER
-        )
-        story.append(Paragraph("BEACON Liquidity Risk Report", title_style))
-        story.append(Spacer(1, 0.3*inch))
+            doc = SimpleDocTemplate(output_path, pagesize=letter)
+            styles = getSampleStyleSheet()
+            story = []
 
-        # Executive Summary
-        story.append(Paragraph("Executive Summary", styles['Heading2']))
-        summary = report.executive_summary
-        summary_data = [
-            ['Metric', 'Value'],
-            ['Overall Risk Score', f"{summary.overall_risk_score:.1f}/100"],
-            ['Risk Level', summary.risk_level.upper()],
-            ['Active Alerts', str(summary.num_alerts)],
-            ['Institutions Analyzed', str(summary.num_institutions)],
-            ['Data Points Processed', str(summary.data_points_analyzed)],
-            ['Analysis Period', summary.period],
-            ['Generated', report.generated_at.strftime('%Y-%m-%d %H:%M UTC')]
-        ]
+            # Title
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontSize=24,
+                textColor=colors.HexColor('#1a237e'),
+                spaceAfter=30,
+                alignment=TA_CENTER
+            )
+            story.append(Paragraph("BEACON Liquidity Risk Report", title_style))
+            story.append(Spacer(1, 0.3*inch))
 
-        table = Table(summary_data, colWidths=[3*inch, 2.5*inch])
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a237e')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        story.append(table)
-        story.append(Spacer(1, 0.3*inch))
+            # Executive Summary
+            story.append(Paragraph("Executive Summary", styles['Heading2']))
+            summary = report.executive_summary
+            summary_data = [
+                ['Metric', 'Value'],
+                ['Overall Risk Score', f"{summary.overall_risk_score:.1f}/100"],
+                ['Risk Level', summary.risk_level.upper()],
+                ['Active Alerts', str(summary.num_alerts)],
+                ['Institutions Analyzed', str(summary.num_institutions)],
+                ['Data Points Processed', str(summary.data_points_analyzed)],
+                ['Analysis Period', summary.period],
+                ['Generated', report.generated_at.strftime('%Y-%m-%d %H:%M UTC')]
+            ]
 
-        # Key Findings
-        if summary.key_findings:
-            story.append(Paragraph("Key Findings", styles['Heading2']))
-            for finding in summary.key_findings[:5]:
-                story.append(Paragraph(f"• {finding}", styles['Normal']))
-                story.append(Spacer(1, 0.1*inch))
+            table = Table(summary_data, colWidths=[3*inch, 2.5*inch])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a237e')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(table)
+            story.append(Spacer(1, 0.3*inch))
 
-        story.append(PageBreak())
+            # Key Findings
+            if summary.key_findings:
+                story.append(Paragraph("Key Findings", styles['Heading2']))
+                for finding in summary.key_findings[:5]:
+                    story.append(Paragraph(f"• {finding}", styles['Normal']))
+                    story.append(Spacer(1, 0.1*inch))
 
-        # Recommendations
-        story.append(Paragraph("Recommendations", styles['Heading2']))
-        for i, rec in enumerate(report.recommendations[:10], 1):
-            story.append(Paragraph(f"{i}. <b>{rec.priority.upper()}</b>: {rec.title}", styles['Normal']))
-            story.append(Spacer(1, 0.15*inch))
+            story.append(PageBreak())
 
-        # Build PDF
-        doc.build(story)
-        return output_path
+            # Recommendations
+            story.append(Paragraph("Recommendations", styles['Heading2']))
+            for i, rec in enumerate(report.recommendations[:10], 1):
+                story.append(Paragraph(f"{i}. <b>{rec.priority.upper()}</b>: {rec.title}", styles['Normal']))
+                story.append(Spacer(1, 0.15*inch))
+
+            # Build PDF
+            doc.build(story)
+            return output_path
+
+        except Exception as exc:  # pragma: no cover - optional dependency
+            logger.warning(
+                "[%s] ReportLab unavailable for PDF export: %s. Writing textual fallback.",
+                report.job_id,
+                exc,
+            )
+            summary = report.executive_summary
+            fallback_content = (
+                "BEACON Liquidity Risk Report\n"
+                f"Overall Risk Score: {summary.overall_risk_score:.1f}/100\n"
+                f"Risk Level: {summary.risk_level}\n"
+                f"Generated: {report.generated_at.isoformat()}\n"
+            )
+            with open(output_path, "w", encoding="utf-8") as handle:
+                handle.write(fallback_content)
+            return output_path
     
     def export_json(self, report: ComprehensiveReport) -> str:
         """Export report as JSON."""
@@ -797,63 +823,81 @@ class ReportExporter:
     
     def export_excel(self, report: ComprehensiveReport) -> str:
         """Export report as Excel with multiple sheets."""
-        import pandas as pd
         import os
-        from datetime import datetime
 
         output_path = f"{self.output_dir}/{report.job_id}/report.xlsx"
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-            # Executive Summary Sheet
-            summary = report.executive_summary
-            summary_df = pd.DataFrame({
-                'Metric': [
-                    'Overall Risk Score',
-                    'Risk Level',
-                    'Active Alerts',
-                    'Institutions Analyzed',
-                    'Data Points Processed',
-                    'Analysis Period',
-                    'Generated At'
-                ],
-                'Value': [
-                    f"{summary.overall_risk_score:.2f}",
-                    summary.risk_level,
-                    summary.num_alerts,
-                    summary.num_institutions,
-                    summary.data_points_analyzed,
-                    summary.period,
-                    report.generated_at.strftime('%Y-%m-%d %H:%M UTC')
-                ]
-            })
-            summary_df.to_excel(writer, sheet_name='Executive Summary', index=False)
+        try:
+            import pandas as pd
 
-            # Key Findings Sheet
-            if summary.key_findings:
-                findings_df = pd.DataFrame({
-                    'Finding': summary.key_findings
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                # Executive Summary Sheet
+                summary = report.executive_summary
+                summary_df = pd.DataFrame({
+                    'Metric': [
+                        'Overall Risk Score',
+                        'Risk Level',
+                        'Active Alerts',
+                        'Institutions Analyzed',
+                        'Data Points Processed',
+                        'Analysis Period',
+                        'Generated At'
+                    ],
+                    'Value': [
+                        f"{summary.overall_risk_score:.2f}",
+                        summary.risk_level,
+                        summary.num_alerts,
+                        summary.num_institutions,
+                        summary.data_points_analyzed,
+                        summary.period,
+                        report.generated_at.strftime('%Y-%m-%d %H:%M UTC')
+                    ]
                 })
-                findings_df.to_excel(writer, sheet_name='Key Findings', index=False)
+                summary_df.to_excel(writer, sheet_name='Executive Summary', index=False)
 
-            # Recommendations Sheet
-            recs_df = pd.DataFrame([
-                {
-                    'Priority': rec.priority,
-                    'Category': rec.category,
-                    'Title': rec.title,
-                    'Rationale': rec.rationale,
-                    'Impact': rec.expected_impact
-                }
-                for rec in report.recommendations
-            ])
-            recs_df.to_excel(writer, sheet_name='Recommendations', index=False)
+                # Key Findings Sheet
+                if summary.key_findings:
+                    findings_df = pd.DataFrame({
+                        'Finding': summary.key_findings
+                    })
+                    findings_df.to_excel(writer, sheet_name='Key Findings', index=False)
 
-            # Metadata Sheet
-            metadata_df = pd.DataFrame({
-                'Property': ['Job ID', 'Version', 'Generated At'],
-                'Value': [report.job_id, report.version, report.generated_at.isoformat()]
-            })
-            metadata_df.to_excel(writer, sheet_name='Metadata', index=False)
+                # Recommendations Sheet
+                recs_df = pd.DataFrame([
+                    {
+                        'Priority': rec.priority,
+                        'Category': rec.category,
+                        'Title': rec.title,
+                        'Rationale': rec.rationale,
+                        'Impact': rec.expected_impact
+                    }
+                    for rec in report.recommendations
+                ])
+                recs_df.to_excel(writer, sheet_name='Recommendations', index=False)
 
-        return output_path
+                # Metadata Sheet
+                metadata_df = pd.DataFrame({
+                    'Property': ['Job ID', 'Version', 'Generated At'],
+                    'Value': [report.job_id, report.version, report.generated_at.isoformat()]
+                })
+                metadata_df.to_excel(writer, sheet_name='Metadata', index=False)
+
+            return output_path
+
+        except Exception as exc:  # pragma: no cover - optional dependency
+            logger.warning(
+                "[%s] Excel export unavailable: %s. Writing CSV fallback with .xlsx extension.",
+                report.job_id,
+                exc,
+            )
+            summary = report.executive_summary
+            fallback_lines = [
+                "Metric,Value",
+                f"Overall Risk Score,{summary.overall_risk_score:.2f}",
+                f"Risk Level,{summary.risk_level}",
+                f"Generated,{report.generated_at.isoformat()}",
+            ]
+            with open(output_path, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(fallback_lines))
+            return output_path

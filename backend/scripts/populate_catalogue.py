@@ -6,9 +6,9 @@ import os
 # Add backend to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database import SessionLocal, init_db
-from models.data_catalogue import DataCatalogueItem, DataCategory, DataRegion, RiskType
-from models.data_source import DataSource
+from backend.database import SessionLocal, init_db
+from backend.models.data_catalogue import DataCatalogueItem, DataCategory, DataRegion, RiskType
+from backend.models.data_source import DataSource
 
 
 REGION_COUNTRY_CODES = {

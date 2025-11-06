@@ -12,16 +12,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from database import get_db
-from models.job import Job
-from schemas.reports_v2 import (
+from backend.database import get_db
+from backend.models.job import Job
+from backend.schemas.reports_v2 import (
     BriefQualityMetrics,
     BriefReportResponse,
     DetailedAssetReport,
     DetailedReportResponse,
     JobProgressResponse,
 )
-from services.error_logger import ErrorLogger
+from backend.services.error_logger import ErrorLogger
 
 router = APIRouter()
 

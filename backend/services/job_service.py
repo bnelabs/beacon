@@ -3,11 +3,11 @@
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
-from models.job import Job
-from schemas.job import JobCreate
+from backend.models.job import Job
+from backend.schemas.job import JobCreate
 from .enhanced_error_translator import translate_error_enhanced
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ class JobService:
 
         # Submit to Celery
         try:
-            from tasks.celery_app import dispatch_job
+            from backend.tasks.celery_app import dispatch_job
             task = dispatch_job.delay(db_job.id, job.job_type, job.parameters)
 
             # Update with Celery task ID
@@ -108,7 +108,6 @@ class JobService:
             db_job.result = result
 
         # Update timestamps (use timezone-aware datetime)
-        from datetime import timezone
         if status == "running" and not db_job.started_at:
             db_job.started_at = datetime.now(timezone.utc)
         elif status in ["completed", "failed"]:
@@ -130,7 +129,7 @@ class JobService:
         # Revoke Celery task if it exists
         if db_job.celery_task_id:
             try:
-                from tasks.celery_app import celery_app
+                from backend.tasks.celery_app import celery_app
                 celery_app.control.revoke(db_job.celery_task_id, terminate=True)
             except Exception as e:
                 logger.warning(f"Failed to revoke Celery task {db_job.celery_task_id}: {e}")
@@ -139,7 +138,7 @@ class JobService:
         db_job.status = "failed"
         db_job.error_message = "Job cancelled by user"
         db_job.user_friendly_error = "This job was cancelled by the user."
-        db_job.completed_at = datetime.utcnow()
+        db_job.completed_at = datetime.now(timezone.utc)
 
         self.db.commit()
         logger.info(f"Cancelled job {job_id}")

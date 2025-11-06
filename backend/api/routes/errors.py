@@ -3,11 +3,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-from database import get_db
-from models.error_log import ErrorLog
-from services.error_logger import ErrorLogger
+from backend.database import get_db
+from backend.models.error_log import ErrorLog
+from backend.services.error_logger import ErrorLogger
 
 router = APIRouter()
 
@@ -36,8 +36,7 @@ class ErrorLogResponse(BaseModel):
     created_at: str
     last_occurred_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ErrorStatsResponse(BaseModel):

@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelMetrics(BaseModel):
@@ -22,7 +22,7 @@ class ModelMetrics(BaseModel):
 class ModelSummary(BaseModel):
     """Summary information for trained models."""
 
-    model_config = {"protected_namespaces": ()}
+    model_config = ConfigDict(protected_namespaces=())
 
     model_id: int
     name: str
@@ -39,7 +39,7 @@ class ModelSummary(BaseModel):
 class ModelDetail(BaseModel):
     """Detailed information for a trained model."""
 
-    model_config = {"protected_namespaces": ()}
+    model_config = ConfigDict(protected_namespaces=())
 
     model_id: int
     created_at: Optional[datetime]
@@ -122,6 +122,8 @@ class ScenarioRequest(BaseModel):
 
 class ScenarioResponse(BaseModel):
     """Scenario simulation result."""
+
+    model_config = ConfigDict(protected_namespaces=())
 
     scenario_id: str
     model_id: int

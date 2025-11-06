@@ -1,6 +1,6 @@
 """Pydantic schemas for data source API."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -41,8 +41,7 @@ class DataSourceResponse(DataSourceConfigBase):
     updated_at: Optional[datetime] = None
     last_successful_fetch: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DataSourceTestRequest(BaseModel):

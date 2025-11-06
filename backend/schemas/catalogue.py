@@ -1,9 +1,9 @@
 """Schemas for data catalogue."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 from datetime import datetime
-from models.data_catalogue import DataCategory, DataRegion, RiskType
+from backend.models.data_catalogue import DataCategory, DataRegion, RiskType
 
 
 class DataSourceInfo(BaseModel):
@@ -13,8 +13,7 @@ class DataSourceInfo(BaseModel):
     plugin_type: str
     description: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DataCatalogueItemResponse(BaseModel):
@@ -46,8 +45,7 @@ class DataCatalogueItemResponse(BaseModel):
     updated_at: Optional[datetime]
     last_data_update: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CatalogueFilterRequest(BaseModel):
