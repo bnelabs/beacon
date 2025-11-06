@@ -4,9 +4,9 @@ services:
     image: postgres:15-alpine
     container_name: beacon-postgres
     environment:
-      POSTGRES_DB: beacon_db
-      POSTGRES_USER: beacon_user
-      POSTGRES_PASSWORD: beacon_password
+      POSTGRES_DB: ${POSTGRES_DB:-beacon_db}
+      POSTGRES_USER: ${POSTGRES_USER:-beacon_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-beacon_password}
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256 --locale=C"
@@ -53,7 +53,7 @@ services:
     ports:
       - "3456:3456"
     environment:
-      DATABASE_URL: postgresql://beacon_user:beacon_password@postgres:5432/beacon_db?client_encoding=utf8
+      DATABASE_URL: postgresql://${POSTGRES_USER:-beacon_user}:${POSTGRES_PASSWORD:-beacon_password}@postgres:5432/${POSTGRES_DB:-beacon_db}?client_encoding=utf8
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -62,7 +62,7 @@ services:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       PYTHONIOENCODING: utf-8
-      FRED_API_KEY: f0a1e5e0a4dc3272e4e95d3ec2ff3644
+      FRED_API_KEY: ${FRED_API_KEY:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       SEC_API_KEY: ${SEC_API_KEY:-}
     volumes:
@@ -79,7 +79,7 @@ services:
     networks:
       - beacon-network
     restart: unless-stopped
-    command: uvicorn api.main:app --host 0.0.0.0 --port 3456
+    command: uvicorn backend.api.main:app --host 0.0.0.0 --port 3456
 
   # Celery Worker for background tasks
   # Note: GPU support is configured via docker-compose.gpu.yml overlay
@@ -89,7 +89,7 @@ services:
       dockerfile: Dockerfile.cpu  # Default to CPU for compatibility
     container_name: beacon-celery-worker
     environment:
-      DATABASE_URL: postgresql://beacon_user:beacon_password@postgres:5432/beacon_db?client_encoding=utf8
+      DATABASE_URL: postgresql://${POSTGRES_USER:-beacon_user}:${POSTGRES_PASSWORD:-beacon_password}@postgres:5432/${POSTGRES_DB:-beacon_db}?client_encoding=utf8
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -97,7 +97,7 @@ services:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       PYTHONIOENCODING: utf-8
-      FRED_API_KEY: f0a1e5e0a4dc3272e4e95d3ec2ff3644
+      FRED_API_KEY: ${FRED_API_KEY:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       SEC_API_KEY: ${SEC_API_KEY:-}
     volumes:
@@ -116,7 +116,7 @@ services:
     networks:
       - beacon-network
     restart: unless-stopped
-    command: celery -A tasks.celery_app worker --loglevel=info --concurrency=2
+    command: celery -A backend.tasks.celery_app worker --loglevel=info --concurrency=2
 
   # Frontend (Production-Ready - React 19 + Vite + Three.js)
   frontend:

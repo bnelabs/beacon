@@ -15,6 +15,7 @@ from . import (
     reports_v2,
     models_v1,
     predictions_v2,
+    countries,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "reports_v2",
     "models_v1",
     "predictions_v2",
+    "countries",
 ]

@@ -31,7 +31,7 @@ Base = declarative_base()
 
 def init_db():
     """Initialize database tables."""
-    from backend.models import data_source, asset, job, error_log, data_catalogue, pipeline_job  # Import all models
+    from backend.models import data_source, asset, job, error_log, data_catalogue, pipeline_job, country  # Import all models
     Base.metadata.create_all(bind=engine)
 
 

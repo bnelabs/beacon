@@ -161,8 +161,9 @@ class HeterogeneousGraphTransformer(nn.Module):
             try:
                 x_dict = conv(x_dict, edge_index_dict)
                 x = torch.cat([x_dict[f'source_{t}'] for t in range(self.num_node_types)], dim=0)
-            except:
-                # Fallback if HGT fails - use simple attention
+            except (KeyError, RuntimeError, ValueError) as e:
+                # Fallback if HGT fails (missing keys, tensor errors, shape mismatches)
+                logger.warning(f"HGT convolution failed: {e}. Using simple attention fallback.")
                 x = self._simple_attention_aggregate(x, edge_index)
 
             # Residual connection + normalization

@@ -9,8 +9,11 @@ from backend.models.job import Job
 from backend.schemas.job import (
     JobCreate,
     JobResponse,
-    JobListFilter
+    JobListFilter,
+    BatchCancelRequest,
+    BatchCancelResponse
 )
+from pydantic import BaseModel
 from backend.services.job_service import JobService
 from backend.services.error_logger import ErrorLogger
 
@@ -152,3 +155,51 @@ async def cancel_job(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
+
+
+@router.post("/batch/cancel", response_model=BatchCancelResponse)
+async def batch_cancel_jobs(
+    request: BatchCancelRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Cancel multiple jobs at once.
+
+    **For non-technical users:** Stop multiple tasks at the same time.
+    This is useful for cleaning up when you have several jobs you want to stop.
+
+    **Request Body:**
+    - `job_ids`: List of job IDs to cancel (max 50)
+
+    **Response:**
+    - `cancelled`: List of successfully cancelled job IDs
+    - `failed`: List of jobs that couldn't be cancelled with reasons
+    - `total_requested`: Number of jobs requested to cancel
+    - `total_cancelled`: Number of jobs successfully cancelled
+    """
+    service = JobService(db)
+    cancelled = []
+    failed = []
+
+    for job_id in request.job_ids:
+        try:
+            success = service.cancel_job(job_id)
+            if success:
+                cancelled.append(job_id)
+            else:
+                failed.append({
+                    "job_id": job_id,
+                    "reason": "Job not found or already completed"
+                })
+        except Exception as e:
+            failed.append({
+                "job_id": job_id,
+                "reason": str(e)
+            })
+
+    return BatchCancelResponse(
+        cancelled=cancelled,
+        failed=failed,
+        total_requested=len(request.job_ids),
+        total_cancelled=len(cancelled)
+    )

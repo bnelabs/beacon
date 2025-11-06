@@ -258,7 +258,8 @@ class ECBPlugin(DataSourcePlugin):
                 return datetime(int(period), 1, 1)
             else:
                 return datetime.now()
-        except:
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.warning(f"Failed to parse ECB date '{period}': {e}. Using current date.")
             return datetime.now()
 
     @classmethod

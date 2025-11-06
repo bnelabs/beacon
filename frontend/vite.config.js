@@ -15,10 +15,12 @@ export default defineConfig({
         manualChunks: {
           'react-vendor': ['react', 'react-dom'],
           'three-vendor': ['three', '@react-three/fiber', '@react-three/drei'],
-          'query-vendor': ['@tanstack/react-query', 'zustand']
+          'query-vendor': ['@tanstack/react-query', 'zustand'],
+          'onboarding': ['driver.js']
         }
       }
     },
-    chunkSizeWarningLimit: 600
+    chunkSizeWarningLimit: 1000,
+    sourcemap: false
   }
 })

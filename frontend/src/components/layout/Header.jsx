@@ -54,6 +54,26 @@ export default function Header() {
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              const event = new KeyboardEvent('keydown', {
+                key: 'k',
+                metaKey: true,
+                bubbles: true
+              })
+              document.dispatchEvent(event)
+            }}
+            data-tour="search-button"
+            className="hidden sm:flex items-center gap-2 px-3 py-1.5 text-sm text-bne-steel hover:text-bne-ink bg-bne-ice hover:bg-bne-frost rounded-lg transition-colors border border-bne-frost"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <span>Search</span>
+            <kbd className="px-1.5 py-0.5 text-xs font-mono bg-white rounded border border-bne-frost">⌘K</kbd>
+          </button>
+
           <div className="relative" ref={notificationsRef}>
             <button
               type="button"

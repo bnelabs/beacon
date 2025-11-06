@@ -7,6 +7,7 @@ import { useJobs, useModels, useDataSources } from '../hooks/useApi'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import JobCreationModal from '../components/jobs/JobCreationModal'
+import WelcomeBanner from '../components/WelcomeBanner'
 
 function StatsCard({ title, value, change, trend }) {
   return (
@@ -141,6 +142,8 @@ export default function Dashboard() {
         }
       >
       <div className="space-y-6">
+        <WelcomeBanner />
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatsCard
             title="Total Jobs"

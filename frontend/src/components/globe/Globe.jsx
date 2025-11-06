@@ -4,6 +4,7 @@ import { Sphere, shaderMaterial } from '@react-three/drei'
 import * as THREE from 'three'
 import { regions } from '../../data/regions'
 import coastlineData from '../../data/world-coastlines.json'
+import NetworkArcs from './NetworkArcs'
 
 function latLonToVector3(lat, lon, radius) {
   const phi = (90 - lat) * (Math.PI / 180)
@@ -162,7 +163,13 @@ function RegionMarker({ region, onClick, isSelected }) {
   )
 }
 
-export default function Globe({ onRegionClick, selectedRegion, autoRotate = true }) {
+export default function Globe({
+  onRegionClick,
+  selectedRegion,
+  autoRotate = true,
+  showNetwork = false,
+  onConnectionClick
+}) {
   const globeRef = useRef()
 
   useFrame(() => {
@@ -180,6 +187,9 @@ export default function Globe({ onRegionClick, selectedRegion, autoRotate = true
       <Graticule radius={2.025} opacity={0.1} />
       <Coastlines radius={2.012} />
       <Atmosphere radius={2.2} />
+
+      {/* Network connections visualization */}
+      <NetworkArcs visible={showNetwork} onConnectionClick={onConnectionClick} />
 
       {regions.map((region) => (
         <RegionMarker

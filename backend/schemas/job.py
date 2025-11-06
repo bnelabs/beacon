@@ -48,3 +48,16 @@ class JobListFilter(BaseModel):
     status: Optional[str] = None
     limit: int = Field(default=50, ge=1, le=500)
     offset: int = Field(default=0, ge=0)
+
+
+class BatchCancelRequest(BaseModel):
+    """Schema for batch canceling jobs."""
+    job_ids: list[int] = Field(..., description="List of job IDs to cancel", min_length=1, max_length=50)
+
+
+class BatchCancelResponse(BaseModel):
+    """Schema for batch cancel response."""
+    cancelled: list[int] = Field(..., description="List of successfully cancelled job IDs")
+    failed: list[dict[str, Any]] = Field(..., description="List of jobs that failed to cancel with reasons")
+    total_requested: int = Field(..., description="Total number of jobs requested to cancel")
+    total_cancelled: int = Field(..., description="Total number of jobs successfully cancelled")

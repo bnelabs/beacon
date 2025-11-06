@@ -20,8 +20,8 @@ COPY requirements.txt .
 # Install Python packages (CPU versions)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend application code
-COPY . .
+# Copy backend application code to backend/ subdirectory
+COPY . backend/
 
 # Create necessary directories
 RUN mkdir -p /app/data /app/results /app/logs /app/saved_models
@@ -34,7 +34,7 @@ RUN mkdir -p /home/beacon/.cache/py-yfinance && \
     chown -R beacon:beacon /home/beacon
 
 # Set ownership
-RUN chown -R beacon:beacon /app
+RUN chown -R beacon:beacon /app /home/beacon
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -50,4 +50,4 @@ USER beacon
 EXPOSE 3456
 
 # Default command (can be overridden in docker-compose)
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "3456"]
+CMD ["uvicorn", "backend.api.main:app", "--host", "0.0.0.0", "--port", "3456"]

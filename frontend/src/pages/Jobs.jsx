@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import PageContainer from '../components/ui/PageContainer'
 import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
-import { useJobs, useJob, useCancelJob, useJobDataQuality } from '../hooks/useApi'
+import { useJobs, useJob, useCancelJob, useBatchCancelJobs, useJobDataQuality } from '../hooks/useApi'
+import { useJobsWebSocket } from '../hooks/useJobsWebSocket'
 import JobCreationModal from '../components/jobs/JobCreationModal'
 import { useRouter } from '../store/useRouter'
 
@@ -36,7 +37,7 @@ function ProgressBar({ progress }) {
   )
 }
 
-function JobRow({ job, onSelect, isSelected }) {
+function JobRow({ job, onSelect, isSelected, onCheckboxChange, isChecked, showCheckbox }) {
   const cancelMutation = useCancelJob()
 
   const handleCancel = (e) => {
@@ -44,6 +45,11 @@ function JobRow({ job, onSelect, isSelected }) {
     if (confirm('Are you sure you want to cancel this job?')) {
       cancelMutation.mutate(job.job_id || job.id)
     }
+  }
+
+  const handleCheckboxClick = (e) => {
+    e.stopPropagation()
+    onCheckboxChange(job.job_id ?? job.id)
   }
 
   return (
@@ -56,12 +62,23 @@ function JobRow({ job, onSelect, isSelected }) {
       }`}
     >
       <div className="flex items-start justify-between mb-3">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
-            <h4 className="font-medium text-bne-ink">{job.model_id || 'Unknown Model'}</h4>
-            <JobStatusBadge status={job.status} />
+        <div className="flex items-center gap-3 flex-1">
+          {showCheckbox && (
+            <input
+              type="checkbox"
+              checked={isChecked}
+              onChange={handleCheckboxClick}
+              onClick={(e) => e.stopPropagation()}
+              className="w-4 h-4 rounded border-bne-frost text-bne-azure focus:ring-2 focus:ring-bne-azure"
+            />
+          )}
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              <h4 className="font-medium text-bne-ink">{job.model_id || 'Unknown Model'}</h4>
+              <JobStatusBadge status={job.status} />
+            </div>
+            <p className="text-sm text-bne-steel font-mono">ID: {job.job_id ?? job.id ?? '-'}</p>
           </div>
-          <p className="text-sm text-bne-steel font-mono">ID: {job.job_id ?? job.id ?? '-'}</p>
         </div>
         {(job.status === 'running' || job.status === 'pending') && (
           <Button
@@ -461,8 +478,19 @@ export default function Jobs() {
   const [filter, setFilter] = useState('all')
   const [isJobModalOpen, setIsJobModalOpen] = useState(false)
   const [jobModalDefaults, setJobModalDefaults] = useState(null)
+  const [selectedJobIds, setSelectedJobIds] = useState([])
+  const [batchMode, setBatchMode] = useState(false)
   const { data: jobs, isLoading, error, refetch } = useJobs()
+  const batchCancelMutation = useBatchCancelJobs()
   const navigate = useRouter((state) => state.navigate)
+
+  // Enable real-time WebSocket updates
+  const { isConnected } = useJobsWebSocket({
+    enabled: true,
+    onUpdate: (jobUpdate) => {
+      console.log('Job update received:', jobUpdate)
+    }
+  })
 
   const filteredJobs = jobs?.filter(job => {
     if (filter === 'all') return true
@@ -476,6 +504,60 @@ export default function Jobs() {
     prediction: 'Generate forward-looking risk scores from a trained model.',
     backtest: 'Replay historical periods to validate performance.'
   }), [])
+
+  // Batch operations handlers
+  const handleToggleBatchMode = () => {
+    setBatchMode(!batchMode)
+    setSelectedJobIds([])
+  }
+
+  const handleCheckboxChange = (jobId) => {
+    setSelectedJobIds(prev =>
+      prev.includes(jobId)
+        ? prev.filter(id => id !== jobId)
+        : [...prev, jobId]
+    )
+  }
+
+  const handleSelectAll = () => {
+    const cancellableJobs = filteredJobs
+      .filter(job => ['pending', 'running'].includes(job.status))
+      .map(job => job.job_id ?? job.id)
+    setSelectedJobIds(cancellableJobs)
+  }
+
+  const handleDeselectAll = () => {
+    setSelectedJobIds([])
+  }
+
+  const handleBatchCancel = async () => {
+    if (selectedJobIds.length === 0) return
+
+    if (confirm(`Are you sure you want to cancel ${selectedJobIds.length} job(s)?`)) {
+      try {
+        const result = await batchCancelMutation.mutateAsync(selectedJobIds)
+
+        if (result.failed.length > 0) {
+          alert(
+            `Cancelled ${result.total_cancelled} job(s).\n` +
+            `Failed to cancel ${result.failed.length} job(s).`
+          )
+        } else {
+          alert(`Successfully cancelled ${result.total_cancelled} job(s)!`)
+        }
+
+        setSelectedJobIds([])
+        setBatchMode(false)
+      } catch (error) {
+        alert(`Batch cancel failed: ${error.message}`)
+      }
+    }
+  }
+
+  // Reset batch selection when filter changes
+  useEffect(() => {
+    setSelectedJobIds([])
+  }, [filter])
 
   if (isLoading) {
     return (
@@ -503,15 +585,34 @@ export default function Jobs() {
     <>
       <PageContainer
         title="Jobs"
-        actions={
-          <Button variant="primary" onClick={() => setIsJobModalOpen(true)}>
-            <span className="flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
-              New Job
+        subtitle={
+          isConnected && (
+            <span className="flex items-center gap-2 text-sm text-bne-emerald">
+              <span className="w-2 h-2 bg-bne-emerald rounded-full animate-pulse"></span>
+              Live updates active
             </span>
-          </Button>
+          )
+        }
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              variant={batchMode ? 'primary' : 'outline'}
+              onClick={handleToggleBatchMode}
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+              {batchMode ? 'Exit Batch Mode' : 'Batch Operations'}
+            </Button>
+            <Button variant="primary" onClick={() => setIsJobModalOpen(true)}>
+              <span className="flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                New Job
+              </span>
+            </Button>
+          </div>
         }
       >
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -537,6 +638,48 @@ export default function Jobs() {
                 </div>
               </CardContent>
             </Card>
+
+            {batchMode && selectedJobIds.length > 0 && (
+              <Card className="bg-bne-azure/10 border-bne-azure">
+                <CardContent className="py-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <span className="text-sm font-medium text-bne-ink">
+                        {selectedJobIds.length} job{selectedJobIds.length !== 1 ? 's' : ''} selected
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleSelectAll}
+                        >
+                          Select All
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleDeselectAll}
+                        >
+                          Deselect All
+                        </Button>
+                      </div>
+                    </div>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={handleBatchCancel}
+                      disabled={batchCancelMutation.isPending}
+                      loading={batchCancelMutation.isPending}
+                    >
+                      <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      Cancel Selected
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <div className="flex items-center gap-2">
               <Button
@@ -603,6 +746,9 @@ export default function Jobs() {
                       job={job}
                       onSelect={(j) => setSelectedJobId(j.job_id ?? j.id)}
                       isSelected={selectedJobId === jobKey}
+                      showCheckbox={batchMode}
+                      isChecked={selectedJobIds.includes(jobKey)}
+                      onCheckboxChange={handleCheckboxChange}
                     />
                   )
                 })}

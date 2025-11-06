@@ -16,6 +16,7 @@ from .routes import (
     data_sources,
     assets,
     jobs,
+    jobs_ws,
     config,
     system,
     errors,
@@ -27,6 +28,7 @@ from .routes import (
     reports_v2,
     models_v1,
     predictions_v2,
+    countries,
 )
 from backend.database import init_db, close_db
 
@@ -109,6 +111,7 @@ app.include_router(catalogue.router, prefix="/api/v1/catalogue", tags=["Data Cat
 app.include_router(data_sources.router, prefix="/api/v1/data-sources", tags=["Data Sources"])
 app.include_router(assets.router, prefix="/api/v1/assets", tags=["Assets"])
 app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["Jobs"])
+app.include_router(jobs_ws.router, prefix="/api/v1/jobs", tags=["Jobs WebSocket"])
 app.include_router(config.router, prefix="/api/v1/config", tags=["Configuration"])
 app.include_router(system.router, prefix="/api/v1/system", tags=["System"])
 app.include_router(errors.router, prefix="/api/v1/errors", tags=["Error Logging"])
@@ -117,6 +120,7 @@ app.include_router(reports_v2.router, prefix="/api/v2", tags=["Reports v2"])
 app.include_router(predictions_v2.router, prefix="/api/v2", tags=["Predictions v2"])
 app.include_router(models_v1.router, prefix="/api/v1/models", tags=["Model Catalogue"])
 app.include_router(models_v1.router, prefix="/api/models", tags=["Model Catalogue"])
+app.include_router(countries.router, prefix="/api/v1/countries", tags=["Country Profiles"])
 
 
 @app.get("/")

@@ -11,7 +11,7 @@ celery_app = Celery(
     "beacon",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["tasks.job_tasks"]
+    include=["backend.tasks.job_tasks"]
 )
 
 # Celery configuration

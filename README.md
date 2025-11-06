@@ -105,9 +105,7 @@ curl http://localhost:3456/api/v2/reports/detailed/{jobId}
 ## Documentation
 
 - **API Docs**: http://localhost:3456/docs (Swagger UI)
-- **EU_AI_ACT_COMPLIANCE.md** – EU AI Act compliance documentation
-- **PLATFORM_SUPPORT.md** – Multi-platform deployment guide
-- **ROADMAP.md** – Detailed architecture (DATA-ENGINE-RESULTS)
+- **Configuration**: Edit `.env` file for API keys and database credentials
 
 ---
 

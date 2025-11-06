@@ -123,6 +123,25 @@ export function useCancelJob() {
   })
 }
 
+export function useBatchCancelJobs() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (jobIds) =>
+      fetchApi('/v1/jobs/batch/cancel', {
+        method: 'POST',
+        body: JSON.stringify({ job_ids: jobIds })
+      }),
+    onSuccess: (result) => {
+      // Invalidate all affected job queries
+      result.cancelled.forEach(jobId => {
+        queryClient.invalidateQueries({ queryKey: ['jobs', jobId] })
+      })
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+    }
+  })
+}
+
 export function useSyncDataSource() {
   const queryClient = useQueryClient()
 

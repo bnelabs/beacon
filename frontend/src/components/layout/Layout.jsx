@@ -1,5 +1,6 @@
 import Header from './Header'
 import Sidebar from './Sidebar'
+import GlobalSearch from '../GlobalSearch'
 
 export default function Layout({ children }) {
   return (
@@ -11,6 +12,7 @@ export default function Layout({ children }) {
           {children}
         </main>
       </div>
+      <GlobalSearch />
     </div>
   )
 }
