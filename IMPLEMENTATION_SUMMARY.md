@@ -540,6 +540,13 @@ beacon/
 - ✅ Optimized bundle size (96% reduction)
 - ✅ Added CSV/JSON export for countries
 
+### 2025-01-XX - Priority 2 Features
+- ✅ Added Real-Time WebSocket job updates
+- ✅ Added Batch cancel operations for jobs
+- ✅ Automatic fallback to polling on WebSocket failure
+- ✅ Live connection status indicator
+- ✅ Multi-select UI for batch operations
+
 ---
 
 ## Contributors

@@ -4,6 +4,7 @@ from . import (
     data_sources,
     assets,
     jobs,
+    jobs_ws,
     config,
     system,
     errors,
@@ -16,12 +17,18 @@ from . import (
     models_v1,
     predictions_v2,
     countries,
+    notifications,
+    data_quality,
+    analytics,
+    alert_rules,
+    reports,
 )
 
 __all__ = [
     "data_sources",
     "assets",
     "jobs",
+    "jobs_ws",
     "config",
     "system",
     "errors",
@@ -34,4 +41,9 @@ __all__ = [
     "models_v1",
     "predictions_v2",
     "countries",
+    "notifications",
+    "data_quality",
+    "analytics",
+    "alert_rules",
+    "reports",
 ]

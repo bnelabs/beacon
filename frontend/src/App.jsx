@@ -11,6 +11,9 @@ const Jobs = lazy(() => import('./pages/Jobs'))
 const Results = lazy(() => import('./pages/Results'))
 const DataSources = lazy(() => import('./pages/DataSources'))
 const CountryProfiles = lazy(() => import('./pages/CountryProfiles'))
+const ModelPerformance = lazy(() => import('./pages/ModelPerformance'))
+const DataQuality = lazy(() => import('./pages/DataQuality'))
+const Analytics = lazy(() => import('./pages/Analytics'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Help = lazy(() => import('./pages/Help'))
 
@@ -34,6 +37,12 @@ export default function App() {
           return DataSources
         case 'countries':
           return CountryProfiles
+        case 'performance':
+          return ModelPerformance
+        case 'data-quality':
+          return DataQuality
+        case 'analytics':
+          return Analytics
         case 'settings':
           return Settings
         case 'help':

@@ -29,6 +29,11 @@ from .routes import (
     models_v1,
     predictions_v2,
     countries,
+    notifications,
+    data_quality,
+    analytics,
+    alert_rules,
+    reports,
 )
 from backend.database import init_db, close_db
 
@@ -121,6 +126,11 @@ app.include_router(predictions_v2.router, prefix="/api/v2", tags=["Predictions v
 app.include_router(models_v1.router, prefix="/api/v1/models", tags=["Model Catalogue"])
 app.include_router(models_v1.router, prefix="/api/models", tags=["Model Catalogue"])
 app.include_router(countries.router, prefix="/api/v1/countries", tags=["Country Profiles"])
+app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["Notifications"])
+app.include_router(data_quality.router, prefix="/api/v1/data-quality", tags=["Data Quality"])
+app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["Advanced Analytics"])
+app.include_router(alert_rules.router, prefix="/api/v1/alert-rules", tags=["Alert Rules"])
+app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
 
 
 @app.get("/")

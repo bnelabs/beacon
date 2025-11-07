@@ -1,18 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from '../../store/useRouter'
+import NotificationBell from '../NotificationBell'
 
 export default function Header() {
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
-  const notificationsRef = useRef(null)
   const profileRef = useRef(null)
   const { navigate } = useRouter()
 
   useEffect(() => {
     function handleClickOutside(event) {
-      if (notificationsRef.current && !notificationsRef.current.contains(event.target)) {
-        setIsNotificationsOpen(false)
-      }
       if (profileRef.current && !profileRef.current.contains(event.target)) {
         setIsProfileMenuOpen(false)
       }
@@ -20,7 +16,6 @@ export default function Header() {
 
     function handleEscape(event) {
       if (event.key === 'Escape') {
-        setIsNotificationsOpen(false)
         setIsProfileMenuOpen(false)
       }
     }
@@ -37,7 +32,6 @@ export default function Header() {
   const handleNavigate = (page) => {
     navigate(page)
     setIsProfileMenuOpen(false)
-    setIsNotificationsOpen(false)
   }
 
   return (
@@ -74,49 +68,7 @@ export default function Header() {
             <kbd className="px-1.5 py-0.5 text-xs font-mono bg-white rounded border border-bne-frost">⌘K</kbd>
           </button>
 
-          <div className="relative" ref={notificationsRef}>
-            <button
-              type="button"
-              onClick={() => {
-                setIsNotificationsOpen((previous) => !previous)
-                setIsProfileMenuOpen(false)
-              }}
-              className="p-2 hover:bg-bne-frost rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-bne-azure"
-              aria-haspopup="dialog"
-              aria-expanded={isNotificationsOpen}
-              aria-label="View notifications"
-            >
-              <svg className="w-5 h-5 text-bne-steel" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-              </svg>
-            </button>
-
-            {isNotificationsOpen && (
-              <div
-                className="absolute right-0 mt-2 w-72 rounded-xl bg-white shadow-bne-card border border-bne-frost overflow-hidden z-20"
-                role="dialog"
-                aria-label="Notifications"
-              >
-                <div className="flex items-center justify-between px-4 py-3 border-b border-bne-frost bg-bne-ice/30">
-                  <span className="text-sm font-semibold text-bne-ink">Notifications</span>
-                  <button
-                    type="button"
-                    onClick={() => setIsNotificationsOpen(false)}
-                    className="text-xs font-medium text-bne-steel hover:text-bne-ink transition-colors"
-                  >
-                    Close
-                  </button>
-                </div>
-                <div className="px-4 py-5 text-sm text-bne-steel space-y-3">
-                  <p className="font-medium text-bne-ink">You&rsquo;re all caught up</p>
-                  <p>
-                    Beacon will surface alerts here when data pipelines run, models complete training,
-                    or risk thresholds are crossed. Keep the app running to stay informed in real-time.
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
+          <NotificationBell />
 
           <div className="relative" ref={profileRef}>
             <button
