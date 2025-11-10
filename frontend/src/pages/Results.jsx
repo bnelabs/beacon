@@ -166,6 +166,10 @@ export default function Results({ params = {} }) {
   const [builderLoading, setBuilderLoading] = useState(false)
   const builderRef = useRef(null)
 
+  const baselineMetrics = modelDetail?.result || {}
+  const perSourceMetrics = baselineMetrics?.per_source_metrics || {}
+  const availableSources = useMemo(() => Object.keys(perSourceMetrics), [perSourceMetrics])
+
   useEffect(() => {
     if (!modelId || !scenarioId) {
       setScenario(null)
@@ -212,6 +216,14 @@ export default function Results({ params = {} }) {
     }
   }, [modelId, scenarioId, scenarioReloadKey])
 
+  useEffect(() => {
+    const template = {}
+    availableSources.forEach((source) => {
+      template[source] = 0
+    })
+    setBuilderAdjustments(template)
+  }, [availableSources])
+
   if (!modelId) {
     return (
       <PageContainer
@@ -254,18 +266,6 @@ export default function Results({ params = {} }) {
       </PageContainer>
     )
   }
-
-  const baselineMetrics = modelDetail?.result || {}
-  const perSourceMetrics = baselineMetrics?.per_source_metrics || {}
-  const availableSources = useMemo(() => Object.keys(perSourceMetrics), [perSourceMetrics])
-
-  useEffect(() => {
-    const template = {}
-    availableSources.forEach((source) => {
-      template[source] = 0
-    })
-    setBuilderAdjustments(template)
-  }, [availableSources])
 
   const summaryCards = (() => {
     if (scenario?.summary) {

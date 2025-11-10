@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from typing import Generator
 import os
+from sqlalchemy.pool import NullPool, StaticPool
 
 # Database configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://beacon_user:beacon_password@localhost:5432/beacon_db")
@@ -17,12 +18,21 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://beacon_user:beacon_passwo
 if os.getenv("USE_SQLITE", "false").lower() == "true":
     DATABASE_URL = "sqlite:///./beacon.db"
 
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,  # Verify connections before using
-    pool_size=10,
-    max_overflow=20
-)
+if DATABASE_URL.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
+    pool = StaticPool if ":memory:" in DATABASE_URL else NullPool
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args=connect_args,
+        poolclass=pool,
+    )
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,  # Verify connections before using
+        pool_size=10,
+        max_overflow=20
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

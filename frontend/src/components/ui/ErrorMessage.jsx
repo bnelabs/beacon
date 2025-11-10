@@ -1,4 +1,4 @@
-import { cn } from '../../lib/utils/cn'
+import { cn } from '../../utils/cn'
 import Button from './Button'
 
 export default function ErrorMessage({

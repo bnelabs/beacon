@@ -1,10 +1,12 @@
-import { cn } from '../../lib/utils/cn'
+import { forwardRef } from 'react'
+import { cn } from '../../utils/cn'
 
-export default function Card({ children, className, hover = false, as = 'div', ...props }) {
+const Card = forwardRef(function Card({ children, className, hover = false, as = 'div', ...props }, ref) {
   const Component = as
 
   return (
     <Component
+      ref={ref}
       className={cn(
         'bg-white rounded-2xl shadow-bne-panel p-6',
         'border border-bne-frost',
@@ -16,7 +18,9 @@ export default function Card({ children, className, hover = false, as = 'div', .
       {children}
     </Component>
   )
-}
+})
+
+export default Card
 
 export function CardHeader({ children, className, ...props }) {
   return (

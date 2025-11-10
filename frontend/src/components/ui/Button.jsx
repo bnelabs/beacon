@@ -1,4 +1,4 @@
-import { cn } from '../../lib/utils/cn'
+import { cn } from '../../utils/cn'
 
 const variants = {
   primary: 'bg-bne-azure text-white hover:bg-bne-azure-600 active:bg-bne-azure-600',

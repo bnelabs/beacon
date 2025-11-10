@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { cn } from '../../lib/utils/cn'
+import { cn } from '../../utils/cn'
 
 /**
  * Lightweight modal overlay used across dashboard pages.
