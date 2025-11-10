@@ -6,7 +6,7 @@ import Badge from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import { useCountries, useCountrySync } from '../hooks/useCountries'
-import { downloadCSV, downloadJSON, formatCountriesForExport } from '../lib/utils/export'
+import { downloadCSV, downloadJSON, formatCountriesForExport } from '../utils/export'
 
 function CountryCard({ country }) {
   const getRiskBadgeVariant = (level) => {

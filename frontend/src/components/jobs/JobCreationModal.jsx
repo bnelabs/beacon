@@ -79,7 +79,7 @@ function parseNumber(value, fallback) {
 export default function JobCreationModal({
   isOpen,
   onClose,
-  initialDatasets = [],
+  initialDatasets,
   initialJobType = 'data_collection',
   initialDataJobId = ''
 }) {
@@ -120,6 +120,8 @@ export default function JobCreationModal({
   const [formError, setFormError] = useState(null)
   const [selectedDatasets, setSelectedDatasets] = useState([])
   const [catalogueFilterTerm, setCatalogueFilterTerm] = useState('')
+
+  const stableInitialDatasets = useMemo(() => initialDatasets ?? [], [initialDatasets])
 
   const normalizeDatasets = useCallback((items) => {
     const map = new Map()
@@ -176,10 +178,10 @@ export default function JobCreationModal({
     }
     setFormError(null)
     setCatalogueFilterTerm('')
-    setSelectedDatasets(normalizeDatasets(initialDatasets))
+    setSelectedDatasets(normalizeDatasets(stableInitialDatasets))
     setJobType(initialJobType || 'data_collection')
     setDataJobId(initialDataJobId ? String(initialDataJobId) : '')
-  }, [isOpen, initialDatasets, normalizeDatasets, initialJobType, initialDataJobId])
+  }, [isOpen, stableInitialDatasets, normalizeDatasets, initialJobType, initialDataJobId])
 
   useEffect(() => {
     setFormError(null)

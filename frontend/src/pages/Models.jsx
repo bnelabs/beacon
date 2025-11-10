@@ -86,6 +86,21 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
   const [scenarioError, setScenarioError] = useState(null)
   const [scenarioResult, setScenarioResult] = useState(null)
 
+  const availableSources = useMemo(() => {
+    if (!model) {
+      return []
+    }
+    const perSource = model.result?.per_source_metrics
+    if (perSource && typeof perSource === 'object') {
+      return Object.keys(perSource)
+    }
+    const metrics = model.metrics || {}
+    if (metrics.per_source_metrics && typeof metrics.per_source_metrics === 'object') {
+      return Object.keys(metrics.per_source_metrics)
+    }
+    return []
+  }, [model])
+
   useEffect(() => {
     if (!model) return
     setScenarioName('')
@@ -97,18 +112,6 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
   }, [model?.model_id])
 
   if (!model) return null
-
-  const availableSources = useMemo(() => {
-    const perSource = model.result?.per_source_metrics
-    if (perSource && typeof perSource === 'object') {
-      return Object.keys(perSource)
-    }
-    const metrics = model.metrics || {}
-    if (metrics.per_source_metrics && typeof metrics.per_source_metrics === 'object') {
-      return Object.keys(metrics.per_source_metrics)
-    }
-    return []
-  }, [model])
 
   const handleAdjustmentChange = (source, value) => {
     setAdjustments((prev) => ({ ...prev, [source]: value }))

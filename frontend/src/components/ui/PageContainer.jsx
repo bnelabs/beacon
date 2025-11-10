@@ -1,4 +1,4 @@
-import { cn } from '../../lib/utils/cn'
+import { cn } from '../../utils/cn'
 import Breadcrumbs from '../Breadcrumbs'
 
 export default function PageContainer({ children, title, subtitle, actions, className }) {

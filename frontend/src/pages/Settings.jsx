@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import PageContainer from '../components/ui/PageContainer'
 import Card, { CardHeader, CardTitle, CardContent, CardFooter } from '../components/ui/Card'
 import Button from '../components/ui/Button'
-import { cn } from '../lib/utils/cn'
+import { cn } from '../utils/cn'
 import { useOnboarding } from '../hooks/useOnboarding'
 
 function PreferenceToggle({ label, description, value, onChange }) {

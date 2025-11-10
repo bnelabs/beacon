@@ -1,10 +1,13 @@
 """Country profile models."""
 
-from sqlalchemy import Column, Integer, String, BigInteger, Numeric, DateTime, ForeignKey, ARRAY
+from sqlalchemy import Column, Integer, String, BigInteger, Numeric, DateTime, ForeignKey, JSON, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from backend.database import Base
+
+
+JSONType = JSON().with_variant(JSONB(astext_type=Text()), "postgresql")
 
 
 class CountryProfile(Base):
@@ -46,7 +49,7 @@ class CountryProfile(Base):
     risk_score = Column(Numeric(5, 2))  # 0-100
 
     # Flexible metadata storage
-    meta_data = Column(JSONB)
+    meta_data = Column(JSONType, default=dict)
 
     # Timestamps
     last_updated = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -82,8 +85,8 @@ class CountryComparison(Base):
     __tablename__ = "country_comparisons"
 
     id = Column(Integer, primary_key=True, index=True)
-    country_codes = Column(ARRAY(String(3)), nullable=False)
+    country_codes = Column(JSONType, nullable=False, default=list)
     comparison_type = Column(String(50), nullable=False)  # economic, financial, risk
-    results = Column(JSONB, nullable=False)
+    results = Column(JSONType, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at = Column(DateTime(timezone=True))
