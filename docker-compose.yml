@@ -77,12 +77,21 @@ services:
       FRED_API_KEY: ${FRED_API_KEY:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       SEC_API_KEY: ${SEC_API_KEY:-}
+      # Path to the model tree *inside the container*. The weights are
+      # bind-mounted read-only from the host below, never baked into the image and
+      # never re-downloaded. See backend/modules/engine/foundation_encoders.py.
+      BEACON_MODEL_DIR: /models
     volumes:
       - ./configs:/app/configs
       - ./data:/app/data
       - ./models:/app/saved_models
       - ./logs:/app/logs
       - ./results:/app/results
+      # The Toto 2.0 checkpoints live on the host (~14 GB) and are mounted
+      # READ-ONLY rather than copied into the image or fetched again: copying
+      # would duplicate gigabytes per image, and read-only means no container can
+      # corrupt a checkpoint. Override the host side with BEACON_MODEL_HOST_DIR.
+      - ${BEACON_MODEL_HOST_DIR:-/home/komedi/models/beacon/toto}:/models:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -112,12 +121,21 @@ services:
       FRED_API_KEY: ${FRED_API_KEY:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       SEC_API_KEY: ${SEC_API_KEY:-}
+      # Path to the model tree *inside the container*. The weights are
+      # bind-mounted read-only from the host below, never baked into the image and
+      # never re-downloaded. See backend/modules/engine/foundation_encoders.py.
+      BEACON_MODEL_DIR: /models
     volumes:
       - ./configs:/app/configs
       - ./data:/app/data
       - ./models:/app/saved_models
       - ./logs:/app/logs
       - ./results:/app/results
+      # The Toto 2.0 checkpoints live on the host (~14 GB) and are mounted
+      # READ-ONLY rather than copied into the image or fetched again: copying
+      # would duplicate gigabytes per image, and read-only means no container can
+      # corrupt a checkpoint. Override the host side with BEACON_MODEL_HOST_DIR.
+      - ${BEACON_MODEL_HOST_DIR:-/home/komedi/models/beacon/toto}:/models:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -136,7 +154,11 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: http://localhost:3456
+        # Deliberately empty, so the bundle calls its OWN origin and the bundled
+        # nginx proxies /api/ to the backend. Baking http://localhost:3456 here
+        # made a remote browser call *itself*: the value was fixed at build time
+        # but resolved against whatever machine opened the page.
+        VITE_API_BASE_URL: ""
     container_name: beacon-frontend
     ports:
       - "9876:80"
@@ -146,81 +168,9 @@ services:
       - beacon-network
     restart: unless-stopped
 
-  # Celery worker/task/queue metrics.
-  # A dedicated exporter reads the broker event stream, so worker metrics are
-  # available without changing the worker command line. This is the single
-  # supported path for Celery metrics (see configs/observability/prometheus).
-  celery-exporter:
-    image: danihodovic/celery-exporter:0.10.6
-    container_name: beacon-celery-exporter
-    environment:
-      CE_BROKER_URL: redis://redis:6379/0
-    ports:
-      - "9808:9808"
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - beacon-network
-    restart: unless-stopped
-
-  # Prometheus scrapes the backend /metrics endpoint and the Celery exporter.
-  prometheus:
-    image: prom/prometheus:v2.51.2
-    container_name: beacon-prometheus
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=30d
-      - --web.enable-lifecycle
-    volumes:
-      - ./configs/observability/prometheus:/etc/prometheus:ro
-      - prometheus_data:/prometheus
-    ports:
-      - "9090:9090"
-    depends_on:
-      - backend
-      - celery-exporter
-    networks:
-      - beacon-network
-    restart: unless-stopped
-
-  # Grafana with the Prometheus datasource and BEACON dashboard provisioned.
-  grafana:
-    image: grafana/grafana:10.4.2
-    container_name: beacon-grafana
-    environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-beacon}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_ANALYTICS_REPORTING_ENABLED: "false"
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/beacon-overview.json
-    volumes:
-      # Dashboards are mounted outside /var/lib/grafana on purpose: the state
-      # volume lives there, and nesting a bind mount inside a named volume is
-      # fragile. provisioning/dashboards.yml points at /etc/grafana/dashboards.
-      - ./configs/observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./configs/observability/grafana/dashboards:/etc/grafana/dashboards:ro
-      - grafana_data:/var/lib/grafana
-    ports:
-      - "3000:3000"
-    depends_on:
-      prometheus:
-        condition: service_started
-    healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-    networks:
-      - beacon-network
-    restart: unless-stopped
-
 volumes:
   postgres_data:
   redis_data:
-  prometheus_data:
-  grafana_data:
 
 networks:
   beacon-network:

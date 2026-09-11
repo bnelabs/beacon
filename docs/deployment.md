@@ -1,0 +1,217 @@
+# Deploying BEACON on this host
+
+This documents the stack as it runs on `ubuntuserver` (Ubuntu 24.04.4, i9-12900KF,
+62 GB RAM, RTX 3090 24 GB), and records the reasoning behind the choices so they
+can be revisited rather than reverse-engineered.
+
+---
+
+## 1. Docker Compose, not microk8s — and why
+
+The question was "microk8s or Docker, whichever is best for this server". The
+answer here is **Docker Engine + Compose v2**, on evidence rather than preference.
+
+| Consideration | This host's reality | Consequence |
+|---|---|---|
+| Node count | **One.** Single RTX 3090, single machine. | Kubernetes schedules across nodes. There is nothing to schedule across. |
+| HA / self-healing | No second machine exists to fail over to. | A control plane adds availability machinery with nothing to make available. |
+| Artefacts already written | `docker-compose.yml` (5 services), `.gpu.yml` / `.cpu.yml` overlays, 3 Dockerfiles — all already tuned (healthchecks, `depends_on: service_healthy`, BuildKit cache mounts). | microk8s would require rewriting all of it into manifests for zero functional gain. |
+| Idle cost | 62 GB RAM, 24 threads. | microk8s control plane (API server, etcd, kubelet, CNI) is roughly 1.5–2 GB resident before a single workload. Pure overhead on a single-node box. |
+| Prerequisite | `snapd` is installed but **inactive**. | microk8s installs via snap and would need snapd enabled and running permanently. |
+| GPU passthrough | `nvidia-container-toolkit` 1.20.0, verified working (**RTX 3090 visible inside a container**). | `deploy.resources.reservations.devices` in the compose overlay is already correct and tested. |
+
+**When to revisit:** if a second machine is added, if workloads need to be packed
+across heterogeneous nodes, or if the frontend/backend need independent rollout
+and rollback. At that point microk8s (or k3s, which is lighter) becomes the right
+call and the compose files are the migration source, not a dead end.
+
+---
+
+## 2. What is installed
+
+```bash
+docker --version          # 29.8.0
+docker compose version    # v5.5.1
+nvidia-container-toolkit  # 1.20.0
+```
+
+Docker was installed from Docker's official apt repository (not the distro
+package) and the NVIDIA runtime was registered with:
+
+```bash
+nvidia-ctk runtime configure --runtime=docker
+systemctl restart docker
+```
+
+`komedi` was added to the `docker` group — **log out and back in** for that to
+take effect in your own shell. Until then, prefix commands with `sudo`.
+
+Verified GPU passthrough:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi -L
+# GPU 0: NVIDIA GeForce RTX 3090 (UUID: GPU-...)
+```
+
+---
+
+## 3. Model weights live in visible folders, not a hidden cache
+
+The Toto 2.0 checkpoints were moved **out** of `~/.cache/huggingface` into:
+
+```
+/home/komedi/models/beacon/toto/
+├── Toto-2.0-313m/   1.2 GB   config.json  model.safetensors  README.md
+├── Toto-2.0-1B/     3.9 GB
+└── Toto-2.0-2.5B/   9.2 GB
+          total      ~14 GB
+```
+
+Each is a plain folder holding the real files (symlinks dereferenced), not a
+cache tree of blobs.
+
+`backend/modules/engine/foundation_encoders.py` loads them by **path**:
+
+* `resolve_model_dir()` consults `BEACON_MODEL_DIR` only. **`HF_HOME` is
+  deliberately ignored** — pointing the load path at a cache is what was removed.
+* `local_model_path(model_id)` resolves `Datadog/Toto-2.0-313m` to
+  `<root>/Toto-2.0-313m` and requires `config.json` plus at least one weight file,
+  so a half-copied directory fails where the message can name the folder.
+* The folder is passed to `from_pretrained` **as the model path, never as
+  `cache_dir=`**. There is no cache in the load path, so nothing can be fetched
+  and nothing can be hidden. A test asserts the string `cache_dir=` never appears
+  in the module.
+
+`TOTO_REPO_DEFAULT` is `Datadog/Toto-2.0-313m`. The 1B and 2.5B checkpoints remain
+on disk because the size comparison was measured with them; 313m is the model in
+use.
+
+### Inside containers
+
+The tree is bind-mounted **read-only** and never copied into an image:
+
+```yaml
+volumes:
+  - ${BEACON_MODEL_HOST_DIR:-/home/komedi/models/beacon/toto}:/models:ro
+environment:
+  BEACON_MODEL_DIR: /models
+```
+
+Read-only for two reasons: copying ~14 GB into every image (and every rebuild) is
+waste, and a mount no container can write to cannot corrupt a checkpoint.
+
+To point elsewhere: `BEACON_MODEL_HOST_DIR=/other/tree docker compose up -d`.
+
+---
+
+## 4. Reaching it from your local network
+
+The host is `192.168.68.57` on `wlo1` (Wi-Fi). All published ports bind `0.0.0.0`,
+so anything on `192.168.68.0/22` can reach them:
+
+| Service | URL | Notes |
+|---|---|---|
+| **Frontend (use this)** | `http://192.168.68.57:9876` | nginx serves the SPA and proxies `/api/` to the backend |
+| Backend API | `http://192.168.68.57:3456` | FastAPI; `/docs` for OpenAPI |
+
+**The frontend now calls its own origin.** Previously the bundle was built with
+`VITE_API_BASE_URL=http://localhost:3456`, which is resolved by *the browser* — so
+from another machine it called that machine's own `localhost` and silently failed.
+The build arg is now empty and the code defaults to a relative base, so nginx
+proxies `/api/` and the UI works from anywhere that can reach the host. Only set
+`VITE_API_BASE_URL` if the API genuinely lives on a different origin.
+
+Verify from another device:
+
+```bash
+curl -sS http://192.168.68.57:9876/health      # healthy
+curl -sS http://192.168.68.57:3456/api/v1/countries/ | head -c 200
+```
+
+If a device cannot connect, the host firewall is the first suspect:
+
+```bash
+sudo ufw status
+```
+
+---
+
+## 5. Operating the stack
+
+```bash
+cd /home/komedi/Denemeler/beacon
+
+# GPU build + start
+sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+
+# CPU-only (no GPU needed)
+sudo docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d --build
+
+sudo docker compose ps
+sudo docker compose logs -f backend
+sudo docker compose down          # add -v to drop the database volume
+```
+
+Confirm the containers can actually see the weights and the GPU:
+
+```bash
+sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  exec backend python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+
+sudo docker compose exec backend python -c \
+  "from backend.modules.engine.foundation_encoders import local_model_path; print(local_model_path('Datadog/Toto-2.0-313m'))"
+# /models/Toto-2.0-313m
+```
+
+### A note on the two backend images
+
+Both now install torch from an **explicit index**, because the default is a trap:
+
+* PyPI's plain `torch==2.14.0` Linux wheel **is** the CUDA 13.0 build — its
+  dependencies are `nvidia-*-cu13`. Installing `requirements.txt` alone therefore
+  pulled ~3 GB of CUDA into the *CPU* image.
+* `Dockerfile.cpu` now uses `TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu`
+  and asserts `torch.version.cuda is None`.
+* `Dockerfile` uses `.../whl/cu130` and asserts a CUDA torch is present.
+* The GPU image no longer bases on `nvidia/cuda:*`. torch's wheels bundle the CUDA
+  runtime, so the base contributed a second, differently-versioned copy (the old
+  base was CUDA 12.6 against a 13.0 torch). The *driver* is injected by the
+  container runtime, so nothing is lost. Both images now share the same code
+  layout (`COPY . backend/`), which is what makes the compose command
+  `backend.api.main:app` valid for both.
+
+---
+
+## 6. Secrets
+
+`.env` was **tracked in git on `main`** and its committed blob contained real
+`FRED_API_KEY`, `ALPHA_VANTAGE_API_KEY`, `SEC_API_KEY` and `POSTGRES_PASSWORD`
+values. It has been untracked (`git rm --cached .env`); the working file stays on
+disk so compose still reads it.
+
+**Untracking does not remove it from history.** Anyone with the repository can
+read those values from earlier commits, so all four must be **rotated**. Treat
+them as public.
+
+`.env.example` is the tracked template. Keep real values in `.env` (gitignored)
+or in a secret manager.
+
+---
+
+## 7. Verifying a deployment
+
+```bash
+cd /home/komedi/Denemeler/beacon
+
+# Unit + integration suite (offline; no network needed)
+PYTHONPATH=. /home/komedi/Denemeler/beacon-venv/bin/python -m pytest backend/tests -o addopts='' -q
+
+# Real-weight encoder tests run only when the model tree is set
+BEACON_MODEL_DIR=/home/komedi/models/beacon/toto \
+  PYTHONPATH=. /home/komedi/Denemeler/beacon-venv/bin/python -m pytest \
+  backend/tests/test_foundation_encoders.py -o addopts='' -q
+
+/home/komedi/Denemeler/beacon-venv/bin/python -m ruff check backend --select E9,F63,F7,F82
+```
+
+See `docs/data_connectors.md` for the NBFI/CCP ingestion feeds.

@@ -4,6 +4,22 @@
 # codebase uses no legacy numpy aliases removed in 2.0.
 # torch-geometric was removed with the static-graph models (HGTConv, GATConv).
 # It was imported by exactly one module, which no longer exists.
+#
+# torch: the bare pin below resolves differently depending on where it is
+# installed from, and that difference is gigabytes. VERIFIED against PyPI on
+# 2026-09-11 for torch 2.14.0:
+#   * PyPI's Linux wheel (torch-2.14.0-cp312-cp312-manylinux_2_28_x86_64.whl) is
+#     the CUDA 13.0 build -- its declared dependencies are nvidia-cudnn-cu13,
+#     nvidia-cusparselt-cu13, nvidia-nccl-cu13 and nvidia-nvshmem-cu13 -- and it
+#     reports torch.version.cuda == '13.0'.
+#   * The CPU build exists only as torch-2.14.0+cpu-* on
+#     https://download.pytorch.org/whl/cpu, and the CUDA build as
+#     torch-2.14.0+cu130-* on https://download.pytorch.org/whl/cu130.
+# So `pip install -r requirements.txt` on Linux pulls a CUDA torch. That is the
+# right default for a GPU host and the wrong one for the CPU image, so both
+# Dockerfiles pass an explicit TORCH_INDEX_URL and assert the result. Install
+# from the cpu index by hand when you want the lean, CUDA-free wheel:
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.0
 torch==2.14.0
 pandas==2.2.3
 numpy==2.5.3
@@ -60,9 +76,6 @@ redis==5.0.1
 
 # System Monitoring
 psutil==7.2.2
-
-# Observability (Prometheus metrics; Celery multiprocess mode supported)
-prometheus-client==0.26.0
 
 # Testing
 pytest==8.3.4

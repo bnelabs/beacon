@@ -139,16 +139,8 @@ app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["Advanced
 app.include_router(alert_rules.router, prefix="/api/v1/alert-rules", tags=["Alert Rules"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
 
-# Observability (workstream F): expose Prometheus metrics on GET /metrics and
-# instrument HTTP request count/latency.  This is intentionally best-effort so
-# that a missing/optional `prometheus_client` never prevents the API from
-# booting; `setup_metrics` degrades to a no-op in that case.
-try:
-    from backend.monitoring.metrics import setup_metrics as _setup_metrics
-
-    _setup_metrics(app)
-except Exception as _metrics_exc:  # pragma: no cover - observability must not break boot
-    logger.warning("Observability metrics could not be enabled: %s", _metrics_exc)
+# Prometheus instrumentation and the GET /metrics route were removed along with
+# the Prometheus/Grafana services; this API has no metrics endpoint.
 
 
 @app.exception_handler(BeaconError)

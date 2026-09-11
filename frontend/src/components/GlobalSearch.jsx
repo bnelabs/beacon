@@ -5,7 +5,9 @@ import Card from './ui/Card'
 import Badge from './ui/Badge'
 import LoadingSpinner from './ui/LoadingSpinner'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3456'
+// Same-origin by default; nginx proxies /api/ to the backend. See the note in
+// hooks/useCountries.js for why localhost:3456 is the wrong default here.
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 // Fuzzy match scoring
 function fuzzyMatch(str, pattern) {

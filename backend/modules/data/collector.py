@@ -24,22 +24,6 @@ from .country_utils import CountryMatcher
 logger = logging.getLogger(__name__)
 
 
-def record_ingestion_failure(plugin_type: str, error_code: str) -> None:
-    """Publish an ingestion failure to the metrics registry when available.
-
-    The import is intentionally lazy: metrics are an optional dependency and a
-    missing (or broken) monitoring stack must never abort data collection.
-    """
-    try:
-        from backend.monitoring.metrics import record_ingestion_failure as _record
-    except Exception:  # noqa: BLE001 - monitoring is strictly best-effort
-        return
-    try:
-        _record(plugin_type, error_code)
-    except Exception:  # noqa: BLE001
-        logger.debug("Could not record ingestion failure metric", exc_info=True)
-
-
 @dataclass
 class CollectionFailure:
     """A single catalogue item that could not be collected."""
@@ -155,7 +139,6 @@ class DataCollector:
                 report.collected.append(item.code)
                 logger.info("Collected %d records for %s", len(df), item.code)
             except BeaconError as exc:
-                record_ingestion_failure(plugin_type, exc.code)
                 report.failures.append(
                     CollectionFailure(
                         code=item.code,
@@ -167,7 +150,6 @@ class DataCollector:
                 )
                 logger.error("[%s] Failed to collect %s (%s): %s", self.job_id, item.code, exc.code, exc)
             except Exception as exc:  # noqa: BLE001 - unexpected provider errors still need a code
-                record_ingestion_failure(plugin_type, "DATA_INGESTION_FAILED")
                 report.failures.append(
                     CollectionFailure(
                         code=item.code,

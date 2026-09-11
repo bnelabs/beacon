@@ -1,63 +1,66 @@
 """Foundation-model encoders for node features.
 
-Two models, one interface, and an important asymmetry
------------------------------------------------------
+One encoder, one honest caveat, and a deterministic stand-in
+------------------------------------------------------------
 
-The plan calls for frozen time-series foundation models as *node encoders*: take a
-node's raw series, produce an embedding, feed that into the temporal graph. Two
-models are wired here, and they do not do the same job:
+The plan calls for a frozen time-series foundation model as a *node encoder*: take
+a node's raw series, produce an embedding, feed that into the temporal graph.
 
-* **MOMENT** is a representation model. It is pre-trained by masked reconstruction
-  and its patch embeddings are the intended output, so using it as an encoder is
-  using it as designed. It is loaded through plain ``transformers`` rather than the
-  ``momentfm`` package, because that package pins ``numpy==1.25.2`` and this
-  project runs numpy 2.x -- the pin would silently downgrade the array library and
-  break scipy 1.18, which requires numpy>=2.0. MOMENT-1-large is a T5 encoder with
-  no custom code in its repository, so nothing is lost by bypassing the wrapper.
-* **TimesFM 3.0** is a *forecaster*. It is decoder-only and emits forecast
-  horizons; it has no embedding API and its card documents none. Presenting it as
-  an "encoder" would be misrepresenting it, so it is wired as what it is -- a
-  forecast-feature extractor -- and its output is the forecast path and its
-  quantiles, not a learned representation. The class is named accordingly.
+* **Toto 2.0** (Datadog, 2026) is what is wired here. It is Apache-2.0 and
+  currently leads GIFT-Eval, BOOM and TIME. It is a *forecaster*: like every
+  leading time-series foundation model now, it publishes no embedding API, so the
+  node embedding is a pooled encoder-trunk hidden state rather than a vector
+  trained to be linearly separable. That distinction is carried on the provenance
+  as ``kind='forecast'`` rather than quietly glossed over.
 
-Licensing is recorded, not assumed
-----------------------------------
+  Two earlier candidates were removed rather than kept: MOMENT-1-large, which this
+  plan originally named and which is now superseded, and TimesFM 3.0, which is
+  **non-commercial** and so cannot serve the stated goal of MRM validation at a
+  G-SIB or central bank. Neither is referenced by this module or its tests.
 
-Both are surfaced as :class:`EncoderProvenance` and every encoder reports its
-licence in ``to_dict()``, because this matters before deployment rather than after:
+Weights are read from an explicit local folder
+----------------------------------------------
 
-* MOMENT-1-large is **MIT**.
-* timesfm-3.0-pytorch is **non-commercial** (TimesFM Non-Commercial License v1.0).
-  The plan's stated goal is MRM validation at a G-SIB or central bank, and a
-  non-commercial licence does not permit that. The licence is therefore carried on
-  the provenance object and asserted in the tests, so it cannot be forgotten at
-  legal review. Choosing to use it is a decision for the operator; the code's job
-  is to make the decision visible rather than implicit.
+Nothing here downloads. :func:`local_model_path` resolves each checkpoint to a
+plain directory under ``BEACON_MODEL_DIR`` and the model is loaded from that path
+directly, so there is no hidden cache anywhere in the load path and a misconfigured
+folder raises instead of quietly pulling gigabytes. Materialising checkpoints as
+ordinary folders -- rather than pointing at a HuggingFace cache -- is deliberate:
+an operator can see, copy, mount and audit a folder, and a container can
+bind-mount it read-only.
+
+Licence is recorded, not assumed
+--------------------------------
+
+Every encoder surfaces an :class:`EncoderProvenance` carrying its licence and
+whether commercial use is permitted, because that matters before deployment rather
+than after. Toto 2.0 is Apache-2.0.
 
 Why the input has two channels
 ------------------------------
 
-MOMENT applies reversible instance normalisation inside the model, subtracting the
-mean and dividing by the standard deviation before the patches are embedded. That
-makes it **structurally blind to vertical shifts**: two series at different levels
-with the same shape produce identical embeddings. For a systemic-risk signal, whose
-whole point is often that a level has moved somewhere it has not been before, that
-is a real limitation.
+Toto applies its own normalisation inside the model (``PatchedCausalStdScaler``),
+subtracting the mean and dividing by the standard deviation before patches are
+embedded. That makes it **structurally blind to vertical shifts**: two series at
+different levels with the same shape produce identical embeddings. For a
+systemic-risk signal, whose whole point is often that a level has moved somewhere
+it has not been before, that is a real limitation.
 
 The chosen input therefore carries both channels: raw levels, and fractional
 differences from the Phase 2 module. Levels preserve the information the model can
-see of its own dynamics; the fractional channel restores the level information
-MOMENT's normalisation discards, and does so without the memory loss that integer
-differencing would cause. Both are concatenated, and the graph network decides how
-much of each to use.
+see of its own dynamics; the fractional channel restores the level information the
+scaler discards, and does so without the memory loss that integer differencing
+would cause. Both are concatenated, and the graph network decides how much of each
+to use.
 
 A deterministic local fallback
 ------------------------------
 
 :class:`HashedFallbackEncoder` needs no weights, is fully deterministic, and is
 explicitly marked so that no downstream consumer can mistake it for a pretrained
-model. Tests run against it, so the suite is runnable without a 2.7 GB download,
-and the real encoders are validated separately when the weights are present.
+model. Tests run against it, so the suite is runnable without a multi-gigabyte
+weight download, and the real encoders are validated separately when the weights
+are present.
 """
 
 from __future__ import annotations
@@ -66,6 +69,7 @@ import logging
 import math
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Protocol, Tuple
 
 import numpy as np
@@ -82,6 +86,7 @@ __all__ = [
     "build_encoder",
     "available_encoders",
     "resolve_model_dir",
+    "local_model_path",
 ]
 
 TOTO_REPO_DEFAULT = "Datadog/Toto-2.0-313m"
@@ -89,11 +94,18 @@ TOTO_LICENSE = "apache-2.0"
 TOTO_PATCH_SIZE_DEFAULT = 32
 TOTO_EMBED_DIM_DEFAULT = 1024
 
-#: Model folder, resolved from the environment. Defaults to the shared
-#: HuggingFace cache so nothing is re-downloaded: every encoder loads with
-#: ``local_files_only=True`` and will refuse rather than fetch.
+#: Root of the local model tree, resolved from the environment. Each checkpoint
+#: lives in a plain folder beneath it (``<root>/Toto-2.0-313m/``), never in a
+#: HuggingFace cache: the load path passes the folder itself to
+#: ``from_pretrained`` and never a ``cache_dir``, so there is no cache to populate
+#: and nothing can be fetched.
 MODEL_DIR_ENV = "BEACON_MODEL_DIR"
-HF_HOME_ENV = "HF_HOME"
+
+#: Files a folder must contain before it is treated as a materialised checkpoint.
+REQUIRED_MODEL_FILES = ("config.json",)
+
+#: Suffixes accepted as a weight file when materialising a checkpoint.
+WEIGHT_FILE_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth")
 
 
 @dataclass(frozen=True)
@@ -240,20 +252,69 @@ def compose_input(
 # ---------------------------------------------------------------------------
 
 def resolve_model_dir(explicit: Optional[str] = None) -> Optional[str]:
-    """Where to look for model folders.
+    """Root of the local model tree.
 
-    Precedence: an explicit argument, then ``BEACON_MODEL_DIR``, then ``HF_HOME``,
-    then ``None`` (meaning "use the library default"). Nothing here downloads; the
-    encoders always load with ``local_files_only=True`` so a misconfigured path
-    raises instead of quietly pulling ten gigabytes.
+    Precedence: an explicit argument, then ``BEACON_MODEL_DIR``, then ``None``.
+
+    ``HF_HOME`` is deliberately **not** consulted. Pointing the load path at a
+    HuggingFace cache makes a checkpoint a pile of symlinks into ``blobs`` that an
+    operator cannot see, copy or mount as a unit, and it leaves in place a code
+    path capable of populating that cache. Weights live in an ordinary folder.
+
+    Nothing here downloads: a missing root simply yields ``None`` and the caller
+    raises rather than falling back to the network.
     """
     if explicit:
         return explicit
-    for variable in (MODEL_DIR_ENV, HF_HOME_ENV):
-        value = os.environ.get(variable)
-        if value:
-            return value
+    value = os.environ.get(MODEL_DIR_ENV)
+    if value:
+        return value
     return None
+
+
+def _model_leaf(model_id: str) -> str:
+    """Folder name a Hub-style id materialises to (``a/b`` -> ``b``)."""
+    return str(model_id).strip().rstrip("/").split("/")[-1]
+
+
+def _expected_model_path(model_id: str, root: Optional[str]) -> str:
+    """The path a missing checkpoint was looked for at, for error messages."""
+    leaf = _model_leaf(model_id)
+    if not root:
+        return f"<{MODEL_DIR_ENV} unset>/{leaf}"
+    return str(Path(root).expanduser() / leaf)
+
+
+def local_model_path(model_id: str, root: Optional[str] = None) -> Optional[Path]:
+    """Materialised checkpoint folder for ``model_id``, or ``None``.
+
+    ``model_id`` is a Hub-style id (``"Datadog/Toto-2.0-313m"``) and the folder is
+    its leaf name beneath ``root`` (``<root>/Toto-2.0-313m``). A folder qualifies
+    only when it holds every file in :data:`REQUIRED_MODEL_FILES` and at least one
+    weight file, so a half-copied directory fails here -- where the message can
+    name the folder -- rather than inside ``from_pretrained``.
+
+    Returns ``None`` when no root is configured, or the folder is absent or
+    incomplete. Absence is not treated as a fault here because this function is
+    also the way to ask whether a checkpoint is present at all.
+    """
+    resolved_root = resolve_model_dir(root)
+    if not resolved_root:
+        return None
+    leaf = _model_leaf(model_id)
+    if not leaf:
+        return None
+    candidate = Path(resolved_root).expanduser() / leaf
+    if not candidate.is_dir():
+        return None
+    if not all((candidate / name).is_file() for name in REQUIRED_MODEL_FILES):
+        return None
+    if not any(
+        entry.is_file() and entry.suffix in WEIGHT_FILE_SUFFIXES
+        for entry in candidate.iterdir()
+    ):
+        return None
+    return candidate
 
 
 class TotoEncoder:
@@ -324,16 +385,30 @@ class TotoEncoder:
 
         from toto2 import Toto2Model
 
-        load_kwargs: Dict[str, Any] = {"local_files_only": True}
-        if self.model_dir:
-            load_kwargs["cache_dir"] = self.model_dir
+        self.local_path = local_model_path(self.model_id, self.model_dir)
+        if self.local_path is None:
+            raise RuntimeError(
+                f"no local checkpoint folder for {self.model_id!r} under "
+                f"model_dir={self.model_dir!r}. Expected a directory holding "
+                f"{' and '.join(REQUIRED_MODEL_FILES)} plus a weight file, at "
+                f"{_expected_model_path(self.model_id, self.model_dir)}. This "
+                "encoder never downloads and never reads a HuggingFace cache, so "
+                "the checkpoint must be materialised as a plain folder first (see "
+                "docs/deployment.md) or " + MODEL_DIR_ENV + " must point at the "
+                "tree that holds it."
+            )
         try:
-            self.model = Toto2Model.from_pretrained(self.model_id, **load_kwargs)
+            # The folder is handed over as the *model path*, never as a
+            # cache_dir: transformers loads these files in place, so there is no
+            # cache to consult and no cache to populate.
+            self.model = Toto2Model.from_pretrained(
+                str(self.local_path), local_files_only=True
+            )
         except Exception as error:
             raise RuntimeError(
-                f"could not load {self.model_id} from local files "
-                f"(model_dir={self.model_dir!r}): {type(error).__name__}: {error}. "
-                "This encoder never downloads; populate the folder first."
+                f"could not load {self.model_id} from {self.local_path}: "
+                f"{type(error).__name__}: {error}. This encoder never downloads; "
+                "the folder above is incomplete or corrupt."
             ) from error
 
         self.model.eval()

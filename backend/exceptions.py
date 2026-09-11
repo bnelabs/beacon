@@ -1,7 +1,7 @@
 """Domain exceptions for BEACON.
 
 Every exception carries a stable machine-readable ``code`` so that API
-responses, error logs, and Prometheus counters can distinguish "the upstream
+responses, error logs, and metrics counters can distinguish "the upstream
 provider is down" from "the provider returned data we refuse to trust".
 Callers should catch :class:`BeaconError` and branch on ``code`` rather than
 on message text.
@@ -102,6 +102,23 @@ class DataQualityError(DataIngestionError):
     code = "DATA_QUALITY_FAILED"
     http_status = 422
     severity = "critical"
+
+
+class RestrictedSourceError(DataIngestionError):
+    """The source exists but may not be retrieved by this pipeline.
+
+    Distinct from :class:`DataSourceUnavailableError`: nothing is broken and no
+    retry will help. The data is withheld by law or by the publisher's terms, so
+    the only correct response is to stop and say so. HTTP 451 is literal here.
+
+    Raised by connectors that are deliberately non-functional without an
+    entitlement, so that a caller cannot mistake "restricted" for "temporarily
+    down" and paper over the gap with synthesised data.
+    """
+
+    code = "DATA_SOURCE_RESTRICTED"
+    http_status = 451
+    severity = "warning"
 
 
 class PredictionBlockedError(BeaconError):

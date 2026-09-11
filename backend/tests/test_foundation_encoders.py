@@ -2,8 +2,11 @@
 
 Two layers. The input assembly and the deterministic fallback need no weights and
 always run. The real checkpoint is exercised only when it is already on disk, so
-the suite never downloads ten gigabytes -- and the load path is ``local_files_only``,
-so a missing folder raises rather than quietly fetching.
+the suite never downloads ten gigabytes.
+
+Checkpoints are read from a plain folder under ``BEACON_MODEL_DIR``, passed to
+``from_pretrained`` as the model path. No HuggingFace cache is consulted anywhere in
+this module, which the tests below assert directly rather than assume.
 """
 
 from __future__ import annotations
@@ -15,7 +18,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from backend.modules.engine import foundation_encoders as fe
 from backend.modules.engine.foundation_encoders import (
+    MODEL_DIR_ENV,
     TOTO_LICENSE,
     EncoderProvenance,
     HashedFallbackEncoder,
@@ -23,6 +28,7 @@ from backend.modules.engine.foundation_encoders import (
     available_encoders,
     build_encoder,
     compose_input,
+    local_model_path,
     resolve_model_dir,
 )
 
@@ -41,9 +47,14 @@ def random_levels(n_series: int = 3, n_steps: int = 200, seed: int = 7) -> np.nd
 
 
 def cached_toto_313m() -> bool:
-    """Whether the 313m checkpoint is already in the local cache."""
-    root = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub"
-    return (root / "models--Datadog--Toto-2.0-313m").is_dir()
+    """Whether the 313m checkpoint is materialised in the local model tree.
+
+    Deliberately delegates to the same resolver the encoder uses. Probing a cache
+    path here instead would let this guard and the load path drift apart, and the
+    failure mode is silent: the real-weight tests would skip forever while
+    reporting green.
+    """
+    return local_model_path("Datadog/Toto-2.0-313m") is not None
 
 
 class TestComposeInput:
@@ -111,15 +122,89 @@ class TestModelDirResolution:
         monkeypatch.setenv("HF_HOME", "/hf")
         assert resolve_model_dir() == "/beacon"
 
-    def test_hf_home_is_the_fallback(self, monkeypatch):
+    def test_hf_home_is_deliberately_ignored(self, monkeypatch):
+        # A HuggingFace cache is exactly what the load path must NOT consult:
+        # checkpoints are ordinary folders, and HF_HOME must not be able to steer
+        # resolution towards a pile of blob symlinks.
         monkeypatch.delenv("BEACON_MODEL_DIR", raising=False)
         monkeypatch.setenv("HF_HOME", "/hf")
-        assert resolve_model_dir() == "/hf"
+        assert resolve_model_dir() is None
 
     def test_none_when_nothing_is_set(self, monkeypatch):
         monkeypatch.delenv("BEACON_MODEL_DIR", raising=False)
         monkeypatch.delenv("HF_HOME", raising=False)
         assert resolve_model_dir() is None
+
+
+class TestLocalModelPath:
+    """Checkpoints resolve to ordinary folders, and half-copied ones are rejected."""
+
+    @staticmethod
+    def _materialise(root: Path, leaf: str, *, config: bool = True, weight: bool = True):
+        folder = root / leaf
+        folder.mkdir(parents=True, exist_ok=True)
+        if config:
+            (folder / "config.json").write_text("{}", encoding="utf-8")
+        if weight:
+            (folder / "model.safetensors").write_bytes(b"0")
+        return folder
+
+    def test_resolves_a_hub_id_to_its_leaf_folder(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(MODEL_DIR_ENV, str(tmp_path))
+        expected = self._materialise(tmp_path, "Toto-2.0-313m")
+        assert local_model_path("Datadog/Toto-2.0-313m") == expected
+
+    def test_returns_none_when_no_root_is_configured(self, monkeypatch):
+        monkeypatch.delenv(MODEL_DIR_ENV, raising=False)
+        assert local_model_path("Datadog/Toto-2.0-313m") is None
+
+    def test_returns_none_when_the_folder_is_absent(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(MODEL_DIR_ENV, str(tmp_path))
+        assert local_model_path("Datadog/Toto-2.0-313m") is None
+
+    def test_rejects_a_folder_without_a_config(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(MODEL_DIR_ENV, str(tmp_path))
+        self._materialise(tmp_path, "Toto-2.0-313m", config=False)
+        assert local_model_path("Datadog/Toto-2.0-313m") is None
+
+    def test_rejects_a_folder_without_weights(self, tmp_path, monkeypatch):
+        # A half-copied checkpoint has to fail here -- where the message can name
+        # the folder -- rather than deep inside from_pretrained.
+        monkeypatch.setenv(MODEL_DIR_ENV, str(tmp_path))
+        self._materialise(tmp_path, "Toto-2.0-313m", weight=False)
+        assert local_model_path("Datadog/Toto-2.0-313m") is None
+
+    def test_an_explicit_root_beats_the_environment(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(MODEL_DIR_ENV, str(tmp_path / "absent"))
+        expected = self._materialise(tmp_path, "Toto-2.0-1B")
+        assert local_model_path("Datadog/Toto-2.0-1B", str(tmp_path)) == expected
+
+    def test_accepts_every_documented_weight_suffix(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(MODEL_DIR_ENV, str(tmp_path))
+        for suffix in fe.WEIGHT_FILE_SUFFIXES:
+            leaf = "model" + suffix.replace(".", "")
+            folder = tmp_path / leaf
+            folder.mkdir()
+            (folder / "config.json").write_text("{}", encoding="utf-8")
+            (folder / f"weights{suffix}").write_bytes(b"0")
+            assert local_model_path(f"Org/{leaf}") == folder
+
+
+class TestNoHiddenCacheInLoadPath:
+    """The deployment mounts a folder; these guard that nothing reintroduces a cache."""
+
+    def test_the_module_never_passes_a_cache_dir(self):
+        # `cache_dir=` would hand the checkpoint back to HuggingFace's cache
+        # machinery, which is precisely the behaviour that was removed. A comment
+        # may still mention the word; a keyword argument may not.
+        source = Path(fe.__file__).read_text(encoding="utf-8")
+        assert "cache_dir=" not in source
+
+    def test_loading_names_the_expected_folder_instead_of_fetching(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(MODEL_DIR_ENV, str(tmp_path))
+        # No folder was materialised, so this must refuse and say where it looked.
+        with pytest.raises(RuntimeError, match="no local checkpoint folder"):
+            build_encoder(model_id="Datadog/Toto-2.0-313m")
 
 
 class TestFallbackEncoder:
@@ -231,8 +316,11 @@ class TestTotoContractWithoutWeights:
             TotoEncoder(dtype="int8")
 
     def test_a_missing_folder_refuses_rather_than_downloads(self):
-        with pytest.raises(RuntimeError, match="could not load"):
+        # The message must name the folder it looked in, because "not found" on
+        # its own gives an operator nothing to act on.
+        with pytest.raises(RuntimeError, match="no local checkpoint folder") as excinfo:
             TotoEncoder(model_id="Datadog/definitely-not-a-real-repo-xyz")
+        assert "definitely-not-a-real-repo-xyz" in str(excinfo.value)
 
 
 @pytest.mark.skipif(not cached_toto_313m(), reason="Toto-2.0-313m not in the local cache")

@@ -1,6 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3456'
+// Defaults to the SAME ORIGIN (empty base), not to http://localhost:3456.
+// The bundled nginx proxies /api/ to the backend container, so a relative base
+// works for every host that can reach the frontend -- which is what makes the
+// stack usable from another machine on the LAN. Hard-coding localhost:3456 baked
+// the *build* machine's idea of the backend into the bundle and then resolved it
+// against the *browser's* localhost, so a remote browser silently called itself.
+// Set VITE_API_BASE_URL only to point at a genuinely different origin.
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 // Fetch countries with filters
 export function useCountries(filters = {}) {

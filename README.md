@@ -2,7 +2,7 @@
 
 **Banking Early Alert Comprehensive Observation Network (BEACON)** – a systemic liquidity risk monitoring platform powered by the Banking Network Engine (BNE).
 
-Systemic liquidity-risk predictions from temporal graph models, with a 2D geographic risk map, a data-quality gate, and Prometheus/Grafana observability.
+Systemic liquidity-risk predictions from temporal graph models, with a 2D geographic risk map and a data-quality gate that fails closed.
 
 ---
 
@@ -16,8 +16,6 @@ docker compose up -d
 # Access the platform
 open http://localhost:9876      # Frontend UI
 open http://localhost:3456/docs # API Documentation
-open http://localhost:9090      # Prometheus
-open http://localhost:3000      # Grafana (admin / beacon)
 ```
 
 **View logs:**
@@ -46,26 +44,21 @@ Backend (FastAPI + Celery + Redis)
   └── 6-stage data pipeline (collection → validation → cleaning → formatting → analysis → certification)
   └── Data-quality gate: nothing is certified or predicted on without a verified attestation
   └── 14+ data plugins: ECB, FRED, BIS, IMF, World Bank, Yahoo Finance, FDIC, FMP, SEC, AI4Risk
-  └── HGT models with multi-scale training
-  └── RESTful API (port 3456) + WebSocket job progress + /metrics
+  └── Temporal graph models with a frozen Toto 2.0 node encoder
+  └── RESTful API (port 3456) + WebSocket job progress
 
 Storage (TimescaleDB + Redis)
   └── TimescaleDB: PostgreSQL with hypertables, compression, and continuous
       aggregates for indicator observations, risk scores, and model metrics
-  └── Redis: Celery broker/result backend and queue metrics
+  └── Redis: Celery broker and result backend
 
-ML Stack (PyTorch + PyTorch Geometric)
-  └── Heterogeneous Graph Transformers (HGT)
-  └── Temporal Attention Networks
+ML Stack (PyTorch)
+  └── Toto 2.0 foundation-model node encoder (loaded from a local model folder)
+  └── Temporal Attention Networks and continuous-time temporal graph memory
   └── Metrics: MSE, MAE, RMSE, R², directional accuracy
   └── Walk-forward backtesting with Sharpe, Sortino, Calmar, max drawdown, VaR/CVaR
   └── SHAP values, attention weights, feature importance
   └── CUDA + mixed precision training
-
-Observability (Prometheus + Grafana)
-  └── API latency/errors, pipeline throughput, ingestion failures by plugin
-  └── Feature drift (PSI / KS) per feature
-  └── Celery queue depth and worker liveness
 ```
 
 ---
@@ -85,9 +78,9 @@ refuses to guess:
   emit a data-quality notification.
 - **Predictions are gated.** A prediction or backtest requires a data-quality
   attestation from the DATA stage and raises `PredictionBlockedError` without one.
-- **Every failure is counted.** Ingestion failures increment
-  `beacon_data_ingestion_failures_total{plugin,error_code}` and appear on the
-  Grafana dashboard.
+- **Every failure is reported.** Ingestion failures are returned in the
+  collection report as typed `CollectionFailure` entries carrying the plugin and
+  a stable `error_code`, so a partial run is auditable rather than silent.
 
 See [docs/EXECUTIVE_REVIEW_REMEDIATION.md](docs/EXECUTIVE_REVIEW_REMEDIATION.md)
 for the mapping from review findings to code.
@@ -171,9 +164,6 @@ curl http://localhost:3456/api/v1/jobs/{jobId}
 # Reports
 curl http://localhost:3456/api/v2/reports/brief/{jobId}
 curl http://localhost:3456/api/v2/reports/detailed/{jobId}
-
-# Prometheus metrics
-curl http://localhost:3456/metrics
 ```
 
 ---
@@ -194,9 +184,7 @@ curl http://localhost:3456/metrics
 
 **Storage**: TimescaleDB (PostgreSQL 15), Redis 7
 
-**ML**: PyTorch 2.5.1, PyTorch Geometric 2.6, pandas 2.2, NumPy 1.26, scikit-learn 1.5
-
-**Observability**: Prometheus, Grafana, prometheus-client
+**ML**: PyTorch 2.14.0, pandas 2.2, NumPy 2.5, scikit-learn 1.9
 
 ---
 
