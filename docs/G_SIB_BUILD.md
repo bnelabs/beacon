@@ -18,9 +18,8 @@ module was designed around MOMENT") had been superseded before it was written.
 |---|---|---|
 | Static conformal → **add Adaptive Conformal Inference** | Already done | `AdaptiveConformalInference` in `backend/modules/engine/conformal.py`, Gibbs–Candès update rule, drift tests in `test_conformal.py` |
 | **Rewrite the encoder for Toto 2.0** (hidden states, drop MOMENT) | Already done | `TotoEncoder` hooks the `transformer` trunk, pools patch positions, flattens variates (`foundation_encoders.py`); provenance is `kind='forecast'`; loads from a local folder only |
-| **Strip ghost MOMENT / TimesFM paths** | Already gone | Four matches total, all prose stating they were removed. No import, no load path |
-| **Strip ghost `model_type="HGT"` / `MultiScaleGNN`** | Already gone | Ten matches, all comments documenting the removal; no live branch accepts them |
-| Prometheus / Grafana leftovers | None | Zero matches anywhere in the repository |
+| **Strip ghost MOMENT / TimesFM paths** | Already gone | No import and no load path. The surviving mentions are prose in `foundation_encoders.py` recording why each was rejected (TimesFM on licence grounds) |
+| **Strip ghost `model_type="HGT"` / `MultiScaleGNN`** | Already gone | No live branch accepts either. The surviving occurrences are comments in `models.py`, `orchestrator.py` and `job_tasks.py` explaining the removal |
 | **Gaussian HMM tails → Student-t / generalized hyperbolic** | Correct, and now fixed | See §2.1 |
 | **Couple clearing × fire-sale** | Correct — and worse than stated | See §2.6 |
 | Neural SDE for stochastic volatility | Correct, and now added | See §2.7 |

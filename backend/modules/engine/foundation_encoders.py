@@ -383,8 +383,6 @@ class TotoEncoder:
         self.device = device
         self.dtype_name = dtype
 
-        from toto2 import Toto2Model
-
         self.local_path = local_model_path(self.model_id, self.model_dir)
         if self.local_path is None:
             raise RuntimeError(
@@ -397,6 +395,14 @@ class TotoEncoder:
                 "docs/deployment.md) or " + MODEL_DIR_ENV + " must point at the "
                 "tree that holds it."
             )
+        # Imported here, after the checkpoint check, rather than at the top of the
+        # constructor: the refusal above is about the weights on disk and must not
+        # depend on whether the optional Toto package is installed. With the import
+        # first, an environment lacking that package reported ModuleNotFoundError
+        # instead of naming the folder it looked in — which is the one thing the
+        # message exists to do.
+        from toto2 import Toto2Model
+
         try:
             # The folder is handed over as the *model path*, never as a
             # cache_dir: transformers loads these files in place, so there is no

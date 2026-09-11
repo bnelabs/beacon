@@ -37,15 +37,16 @@ docker compose down
 ```
 Frontend (React 18 + Vite + Deck.gl)
   └── 2D geographic risk map (heatmap, scatter, interbank arcs) - no GPU globe
-  └── Pages: Dashboard, Risk Map, Models, Jobs, Results, Data Sources, Data Quality
+  └── Pages: Dashboard, Risk Map, Models, Jobs, Results, Data Sources, Countries,
+      Data Quality, Model Performance, Analytics, Settings, Help
   └── Nginx production server (port 9876)
 
 Backend (FastAPI + Celery + Redis)
   └── 6-stage data pipeline (collection → validation → cleaning → formatting → analysis → certification)
   └── Data-quality gate: nothing is certified or predicted on without a verified attestation
-  └── 14+ data plugins: ECB, FRED, BIS, IMF, World Bank, Yahoo Finance, FDIC, FMP, SEC, AI4Risk
+  └── 15 data plugins: ECB, FRED, BIS, IMF, World Bank, Yahoo Finance, FDIC, FMP, SEC, AI4Risk, Kaggle, Alpha Vantage
   └── Temporal graph models with a frozen Toto 2.0 node encoder
-  └── RESTful API (port 3456) + WebSocket job progress
+  └── RESTful API (port 3456); job progress is refreshed by polling
 
 Storage (TimescaleDB + Redis)
   └── TimescaleDB: PostgreSQL with hypertables, compression, and continuous
@@ -55,6 +56,10 @@ Storage (TimescaleDB + Redis)
 ML Stack (PyTorch)
   └── Toto 2.0 foundation-model node encoder (loaded from a local model folder)
   └── Temporal Attention Networks and continuous-time temporal graph memory
+  └── Regime detection (Gaussian and Student-t HMM), Neural SDE latent dynamics,
+      NOTEARS causal discovery with declared-structure validation
+  └── Systemic risk: Basel III LCR/NSFR/leverage translation, coupled fire-sale
+      equilibrium, crowded-trade overlap, persistence-vector topology
   └── Metrics: MSE, MAE, RMSE, R², directional accuracy
   └── Walk-forward backtesting with Sharpe, Sortino, Calmar, max drawdown, VaR/CVaR
   └── SHAP values, attention weights, feature importance
@@ -180,7 +185,7 @@ curl http://localhost:3456/api/v2/reports/detailed/{jobId}
 
 **Frontend**: React 18.3, Vite 7.1, Deck.gl 9, Zustand 5, TanStack Query 5, Tailwind CSS 3.4
 
-**Backend**: FastAPI 0.109, Celery 5.3, SQLAlchemy 2.0, Alembic 1.13, Pydantic 2.5
+**Backend**: FastAPI 0.141, Celery 5.6, SQLAlchemy 2.0.52, Alembic 1.19, Pydantic 2.13
 
 **Storage**: TimescaleDB (PostgreSQL 15), Redis 7
 
@@ -190,7 +195,20 @@ curl http://localhost:3456/api/v2/reports/detailed/{jobId}
 
 ## Documentation
 
-- **API Docs**: http://localhost:3456/docs (Swagger UI)
+Full index: [`docs/README.md`](docs/README.md).
+
+| Document | Contents |
+|---|---|
+| [`docs/api.md`](docs/api.md) | API protocol: error codes, jobs vs. pipeline, WebSocket, quality score, notifications |
+| [`docs/api-endpoints.md`](docs/api-endpoints.md) | **Generated** endpoint inventory — do not edit by hand |
+| [`docs/frontend.md`](docs/frontend.md) | UI pages, navigation, search, onboarding, risk map, known gaps |
+| [`docs/deployment.md`](docs/deployment.md) | Deploying on this host: Compose, GPU, model weights, secrets |
+| [`docs/data_connectors.md`](docs/data_connectors.md) | NBFI/CCP ingestion feeds and their publication clocks |
+| [`docs/G_SIB_BUILD.md`](docs/G_SIB_BUILD.md) | G-SIB-grade build: added, verified, and still missing |
+| [`docs/EXECUTIVE_REVIEW_REMEDIATION.md`](docs/EXECUTIVE_REVIEW_REMEDIATION.md) | Review findings mapped to code |
+| [`.github/workflows/README.md`](.github/workflows/README.md) | CI/CD workflows and local equivalents |
+
+- **Swagger UI**: http://localhost:3456/docs
 - **Configuration**: edit `.env` (see `.env.example`) for API keys and database credentials
 
 ---

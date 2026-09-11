@@ -139,8 +139,7 @@ app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["Advanced
 app.include_router(alert_rules.router, prefix="/api/v1/alert-rules", tags=["Alert Rules"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
 
-# Prometheus instrumentation and the GET /metrics route were removed along with
-# the Prometheus/Grafana services; this API has no metrics endpoint.
+# This API exposes no metrics endpoint.
 
 
 @app.exception_handler(BeaconError)

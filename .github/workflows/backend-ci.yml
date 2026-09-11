@@ -94,6 +94,16 @@ jobs:
         # the slower test collection step.
         run: python -m compileall -q backend
 
+      - name: API docs are current
+        # why: docs/api-endpoints.md is generated from the app's own OpenAPI schema.
+        # The previous hand-written inventory drifted until seven of the fourteen
+        # endpoints it documented did not exist, and nothing caught it because a
+        # stale table still reads plausibly. This turns that silent failure into a
+        # build failure. Import only — the app's lifespan, and therefore the
+        # database, is never started.
+        run: |
+          PYTHONPATH=. python scripts/generate_api_docs.py --check
+
       - name: Run tests
         env:
           PYTHONUNBUFFERED: "1"
