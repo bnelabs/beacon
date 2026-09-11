@@ -24,11 +24,12 @@ SHAP:
   loaded for inference -- so the intervals described a different network from
   the one that produced the prediction.
 
-Local attributions return with SubgraphX over the temporal multiplex in the
-explainability phase, where the attribution is a subgraph with a defined
-objective rather than a per-feature scalar. Until then this module reports no
-per-feature attribution rather than an unverifiable one, and
-``feature_importances`` is left empty.
+Local attribution is now provided by SubgraphX
+(:mod:`backend.modules.engine.subgraphx`), which returns a connected subgraph with
+a defined game-theoretic objective rather than a per-feature scalar. Applying it
+requires a network and a value function over that network, which this engine's
+payload does not carry, so ``feature_importances`` remains empty here rather than
+being filled with something unverifiable.
 
 Uncertainty intervals are likewise reported as unavailable until conformal
 calibration is in place; the confidence fields are ``None`` and
@@ -70,8 +71,9 @@ class PredictionResult:
     per_bank_risks: Dict[str, Any]  # bank_id -> risk profile
     multi_bank_analysis: Optional[MultiBankAnalysis]
 
-    # Attribution. Empty until SubgraphX lands: see the module docstring for why
-    # the previous gradient*attention values were removed rather than kept.
+    # Attribution. Empty because this payload carries no network to explain; see
+    # the module docstring. SubgraphX (modules/engine/subgraphx.py) supplies it
+    # when a liability network and a game value are available.
     feature_importances: Dict[str, float]
     confidence_intervals: Dict[str, tuple]
     explanation_report: str
@@ -721,8 +723,9 @@ KEY FINDINGS:
 {self._generate_key_findings(predictions_df)}
 
 Attribution and calibrated uncertainty are not reported: local feature
-attribution returns with SubgraphX, and prediction intervals with conformal
-calibration. Both are absent rather than approximated.
+attribution is available through SubgraphX when a liability network and a game
+value are supplied, and intervals through conformal calibration. Neither is
+reported here rather than approximated.
 """
 
         return PredictionResult(
@@ -930,8 +933,12 @@ calibration. Both are absent rather than approximated.
         report += (
             "Local feature attribution is not reported. The previous implementation\n"
             "presented gradient*input scaled by uniform attention weights as SHAP\n"
-            "values; that routine was removed rather than re-tuned. SubgraphX over\n"
-            "the temporal multiplex is the intended replacement.\n\n"
+            "values; that routine was removed rather than re-tuned. It is replaced\n"
+            "by SubgraphX (modules/engine/subgraphx.py), which reports the connected\n"
+            "subgraph accounting for a prediction under a caller-supplied game value\n"
+            "such as the clearing shortfall. Attribution is omitted below because\n"
+            "this report carries no network to explain, and a per-feature scalar is\n"
+            "not the right object for a network model.\n\n"
         )
 
         if predictions_df.empty:
@@ -1009,7 +1016,9 @@ calibration. Both are absent rather than approximated.
 
         report += "\n" + "=" * 70 + "\n"
         report += (
-            "Attribution: none reported. SubgraphX attribution over the temporal\n"
-            "multiplex is pending; no approximate attribution is substituted.\n"
+            "Attribution: none reported. SubgraphX (modules/engine/subgraphx.py)\n"
+            "explains a prediction as a connected subgraph under a caller-supplied\n"
+            "game value; this report carries no network to explain, and no\n"
+            "approximate attribution is substituted.\n"
         )
         return report

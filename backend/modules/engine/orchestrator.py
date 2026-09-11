@@ -587,9 +587,17 @@ class EngineOrchestrator:
                 'min': float(scores.min()) if scores.size else None,
                 'max': float(scores.max()) if scores.size else None,
             }
+            # SubgraphX is implemented in modules/engine/subgraphx.py. What it
+            # needs here is a network to explain and a game value over it -- for
+            # BEACON, the clearing shortfall on the induced subnetwork. This job
+            # result carries neither, so attribution is omitted rather than
+            # approximated by a per-feature scalar, which is the object that was
+            # deleted in the first place.
             explanations['attribution'] = (
-                'unavailable: SubgraphX attribution over the temporal multiplex '
-                'is pending; no approximate attribution is substituted'
+                'not computed: SubgraphX requires a liability network and a game '
+                'value function (see modules/engine/subgraphx.py); neither is '
+                'carried on this result, and no approximate attribution is '
+                'substituted'
             )
 
             # Save to file
