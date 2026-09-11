@@ -180,35 +180,35 @@ Handshake and keepalive, as implemented in `backend/api/routes/jobs_ws.py`:
 | Server → Client | `{"type": "ping"}` | Server heartbeat, sent after 30 s of client silence |
 | Server → Client | `{"type": "job_update", "job": {...}}` | Job status or progress changed |
 
-### What is not wired
+### How `job_update` is delivered
 
-**No `job_update` is ever sent.** `broadcast_job_update()` exists and is
-exported in `__all__`, but no code path in the repository calls it. The
-connection establishes, the heartbeats work, and then nothing is pushed.
+Two processes are involved, which is the part that was originally missed. The
+socket lives in the API process, but most progress is written by the **Celery
+worker**. A process-local registry cannot see those writes, so delivery runs
+over Redis — already a hard dependency as the Celery broker:
 
-There is a second, independent defect on the client. The React hook
-`frontend/src/hooks/useJobsWebSocket.js` dials a hard-coded port:
+1. `JobService.update_job_status` is the single choke point through which every
+   status and progress change passes, in both processes. After each commit it
+   calls `job_events.publish_job_update`, which publishes to the Redis channel
+   `beacon:job_updates`. `create_job` publishes too, and `cancel_job` needs its
+   own call because it writes status directly rather than via that method.
+2. The API process runs `job_events.relay_job_updates` as a background task
+   started in the application lifespan. It subscribes to that channel and calls
+   `manager.broadcast`, which writes to every socket attached to this process.
 
-```js
-const wsUrl = `${protocol}//${window.location.hostname}:8000/api/v1/jobs/ws`
-```
+Publishing is **best-effort and never raises**, so a Redis outage cannot fail a
+job. The subscriber reconnects on a backoff, and the client independently falls
+back to polling after five failed socket connects — so degradation is gradual
+rather than silent.
 
-The backend is published on **3456**, and nginx already proxies `/api/` from
-**9876** with `Upgrade`/`Connection` headers. Port 8000 is exposed by nothing,
-so in the Docker deployment the browser cannot reach the socket at all.
+The client dials the socket **same-origin**
+(`${protocol}//${window.location.host}/api/v1/jobs/ws`), which nginx proxies with
+the `Upgrade`/`Connection` headers. It previously hard-coded port 8000, which
+nothing listens on.
 
-**Consequence.** The hook retries five times, then falls back to polling
-`['jobs']` every 5 seconds. The Jobs page therefore does refresh — via polling,
-not via the socket. The "Live updates active" badge never appears, because
-`isConnected` is read from a ref during render and no state change triggers a
-re-render when the socket opens.
-
-Treat the WebSocket as **scaffolding, not a working feature**. Restoring it
-requires both a same-origin URL (`${window.location.host}`) and a caller for
-`broadcast_job_update()` on job state transitions. Documented here rather than
-described as working, because the earlier
-`REAL_TIME_JOBS_DOCUMENTATION.md` claimed live updates shipped, and a reader
-would have had no way to tell that neither half was connected.
+This is a bus, not a queue: messages are dropped when no subscriber is attached,
+nothing is retried or replayed, and ordering between two publishers is not
+enforced. That is acceptable precisely because the polling fallback exists.
 
 ## Authentication
 

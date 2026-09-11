@@ -532,6 +532,43 @@ function jsonResponse(route, payload, status = 200) {
   })
 }
 
+// The header's NotificationBell polls /api/v1/notifications every 30s and its
+// /stats companion. Neither was mocked, and because the default GET fallback
+// used to answer 200 with an empty object the omission was invisible. Now that
+// unknown paths correctly 404, an unmocked endpoint surfaces immediately, so
+// these mirror the real NotificationListResponse / NotificationStats schemas.
+const notificationsList = [
+  {
+    id: 1,
+    title: 'Model training completed',
+    message: 'Liquidity Forecaster finished training.',
+    notification_type: 'success',
+    priority: 'medium',
+    category: 'model',
+    is_urgent: false,
+    is_read: false,
+    is_dismissed: false,
+    is_archived: false,
+    action_url: '/models',
+    action_label: 'View Models',
+    related_entity_type: 'job',
+    related_entity_id: 101,
+    extra_data: {},
+    expires_at: null,
+    created_at: '2024-02-15T10:20:00Z',
+    read_at: null,
+    dismissed_at: null
+  }
+]
+
+const notificationStats = {
+  total: notificationsList.length,
+  unread: notificationsList.filter((n) => !n.is_read).length,
+  by_priority: { medium: 1 },
+  by_category: { model: 1 },
+  urgent: 0
+}
+
 // 1x1 transparent PNG used to stub the CARTO/OSM raster basemap so the risk
 // map renders deterministically without reaching the public tile CDN.
 const TRANSPARENT_PNG = Buffer.from(
@@ -591,9 +628,10 @@ export async function registerApiMocks(page) {
 
     if (method === 'GET') {
       if (normalizedPath === '/api/v1/jobs') {
-        if (path.endsWith('/')) {
-          return respond({ jobs: jobsList })
-        }
+        // The real endpoint answers with a bare array on both the bare and the
+        // trailing-slash path (List[JobResponse]). An earlier version of this
+        // mock replied to the trailing-slash form with {jobs: [...]}, which
+        // matched a buggy caller rather than the API and let that bug pass e2e.
         return respond(jobsList)
       }
 
@@ -610,7 +648,9 @@ export async function registerApiMocks(page) {
         return respond(jobQualityMap[jobId] ?? {})
       }
 
-      if (normalizedPath === '/api/models') {
+      // The backend mounts the model catalogue at both /api/models and
+      // /api/v1/models, so the mock mirrors both.
+      if (normalizedPath === '/api/models' || normalizedPath === '/api/v1/models') {
         return respond(modelsList)
       }
 
@@ -634,8 +674,23 @@ export async function registerApiMocks(page) {
         return respond(bankCatalogue)
       }
 
-      if (normalizedPath === '/api/v1/data-catalogue') {
-        return respond({ items: catalogueItems })
+      if (normalizedPath === '/api/v1/notifications') {
+        return respond({
+          notifications: notificationsList,
+          total: notificationsList.length,
+          unread_count: notificationStats.unread
+        })
+      }
+
+      if (normalizedPath === '/api/v1/notifications/stats') {
+        return respond(notificationStats)
+      }
+
+      const notificationDetailMatch = normalizedPath.match(/\/api\/v1\/notifications\/(\d+)$/)
+      if (notificationDetailMatch) {
+        const wanted = Number(notificationDetailMatch[1])
+        const found = notificationsList.find((n) => n.id === wanted)
+        return respond(found ?? { detail: 'Not Found' }, found ? 200 : 404)
       }
 
       if (normalizedPath === '/api/v1/countries') {
@@ -691,8 +746,10 @@ export async function registerApiMocks(page) {
         return respond(bankCatalogue)
       }
 
-      // Default GET response
-      return respond({})
+      // Unknown GET path: answer 404, as the real API does. Returning 200 with
+      // an empty object here meant a wrong URL looked like a successful empty
+      // result, which is how the broken catalogue URL above stayed hidden.
+      return respond({ detail: 'Not Found' }, 404)
     }
 
     if (method === 'POST') {

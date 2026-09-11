@@ -42,8 +42,14 @@ RUN rm -rf /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY --from=builder /app/dist .
 
+# why 127.0.0.1 and not localhost: nginx listens on 0.0.0.0:80 only (see
+# nginx.conf), but this image ships a /etc/hosts that maps `localhost` to ::1
+# *and* 127.0.0.1, and busybox wget prefers the IPv6 address. Probing
+# `http://localhost/health` therefore got "connection refused" and the container
+# reported unhealthy for its entire life while serving every real request
+# correctly on IPv4. Addressing the loopback explicitly says what is meant.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --quiet --tries=1 --spider http://localhost/health || exit 1
+  CMD wget --quiet --tries=1 --spider http://127.0.0.1/health || exit 1
 
 EXPOSE 80
 

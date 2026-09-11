@@ -99,6 +99,14 @@ frontend/.pnp
 frontend/.pnp.js
 frontend/coverage/
 
+# Playwright output. `npx playwright test` writes traces, screenshots and an
+# HTML report here on every run; committing them would add megabytes of binary
+# per failure.
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/.playwright/
+
 
 # Frontend environment
 frontend/.env.local

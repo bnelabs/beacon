@@ -46,7 +46,8 @@ Backend (FastAPI + Celery + Redis)
   └── Data-quality gate: nothing is certified or predicted on without a verified attestation
   └── 15 data plugins: ECB, FRED, BIS, IMF, World Bank, Yahoo Finance, FDIC, FMP, SEC, AI4Risk, Kaggle, Alpha Vantage
   └── Temporal graph models with a frozen Toto 2.0 node encoder
-  └── RESTful API (port 3456); job progress is refreshed by polling
+  └── RESTful API (port 3456) + WebSocket job progress, relayed over Redis
+      because progress is written by the Celery worker process
 
 Storage (TimescaleDB + Redis)
   └── TimescaleDB: PostgreSQL with hypertables, compression, and continuous
