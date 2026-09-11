@@ -288,7 +288,34 @@ The exposure is `sum_c share_ic * f(basis_c)` with the basis indexed by **fundin
 currency**, and in the default mode only the dollar-squeeze direction counts — a
 negative basis is the stress sign, and a basis in the other direction is not
 evidence of a squeeze and is not counted as one. A missing basis for a non-zero
-funding share **raises** rather than defaulting to zero.
+### 2.10 Feeding the systemic modules (`backend/modules/risk/bank_analyzer.py`)
+
+The three modules above began as engine-level capabilities with no route into the
+analysis pipeline. Wiring them in meant either extending the caller's input contract
+or inventing the inputs — and inventing them would have produced an infinite LCR for
+every institution and a crowding score of exactly zero, plausible-looking numbers
+manufactured from absence. So the contract was extended instead, and every input
+fails closed.
+
+`BankRiskAnalyzer.analyze_multiple_banks` now accepts five optional arguments:
+
+| Argument | Feeds | When absent | When invalid |
+|---|---|---|---|
+| `regulatory_states` | `regulatory.py` | `regulatory_stress` stays `None` | must cover *every* analysed institution; a partial table raises, because omitting one reads as though it were unaffected |
+| `price_decline` | `regulatory.py` | pre-stress ratios only, and the report says so | propagates into the translation |
+| `holdings` | `portfolio_overlap.py` | `crowding` stays `None` | a NaN raises under the fail-closed policy rather than becoming a zero position; an institution outside the analysis raises |
+| `concentration_threshold` | `portfolio_overlap.py` | the correlated-unwind measure is not computed | — |
+| `topology_parameters` | `persistence_vectors.py` | `topology` stays `None` | requesting topology with no exposure network raises, since a signature of a network that was never built is a number without a subject |
+
+The multi-institution report renders each of them and names plainly which are
+unavailable and why, rather than leaving a blank a reader could take for zero.
+
+**This work also caught a bug in itself, which is worth recording because the suite
+did not.** During development the fire-sale call was accidentally placed inside the
+topology branch, so a supplied scenario was validated and then silently ignored
+unless topology was requested too — and every existing test still passed. The
+regression test that now guards it asserts that a supplied input *produces a
+result*, not merely that the call does not raise.
 
 ---
 
@@ -301,7 +328,7 @@ PYTHONPATH=. /home/komedi/Denemeler/beacon-venv/bin/python -m pytest backend/tes
 /home/komedi/Denemeler/beacon-venv/bin/python -m ruff check backend --select E9,F63,F7,F82
 ```
 
-Last recorded result: **1634 passed, 8 skipped**, ruff clean.
+Last recorded result: **1655 passed, 8 skipped**, ruff clean.
 
 New test files added by this work, and what each is anchored to:
 
@@ -316,6 +343,7 @@ New test files added by this work, and what each is anchored to:
 | `test_student_t_hmm.py` | 21 | `scipy.stats.t.logpdf`; numerical integration of the scale-mixture definition; `scipy.stats.t.fit` as an independent optimiser |
 | `test_causal_validation.py` | 18 | Generated data from a known DAG; the refusal path; and that the counterfactual is passed through unaltered |
 | `test_fire_sale.py` | 49 | A hand-computed three-round fixed point; a divergence case past lambda*; and the feedback-caused default set |
+| `test_systemic_module_inputs.py` | 21 | That each optional input is used or refused; that a NaN holding raises rather than becoming zero; and the regression guard for the misplaced fire-sale call |
 
 The Student-t suite is the clearest example of the standard applied throughout:
 none of its five independent checks compares the implementation against itself,
@@ -341,13 +369,9 @@ useful to a reviewer.
   orientation is identified only up to the Markov equivalence class.
 - **No principled selector** for the causal-discovery sparsity penalty or the
   persistence-vector parameters.
-- **The new risk modules are engine-level capabilities with explicit input
-  contracts, not yet wired into the live report pipeline.** `regulatory.py`,
-  `portfolio_overlap.py` and `persistence_vectors.py` need inputs the current
-  analysis path does not carry — HQLA/ASF/RSF line items, a holdings matrix, and a
-  graph. Wiring them in means either extending the caller's input contract or
-  inventing those inputs. Inventing them would violate the no-fabrication rule that
-  the rest of this work exists to serve, so the honest state is: available, tested,
-  documented, and not yet fed by the pipeline. §2.5 and §2.6 are the exceptions:
-  both are wired into the engine, §2.6 through `analyze_multiple_banks` and the
-  multi-institution report.
+- ~~The new risk modules are engine-level capabilities with explicit input
+  contracts, not yet wired into the live report pipeline.~~ **Closed in §2.10.**
+  `regulatory.py`, `portfolio_overlap.py` and `persistence_vectors.py` are now
+  fed from `analyze_multiple_banks` through optional, fail-closed arguments, and
+  rendered in the multi-institution report. Every one of the nine review items is
+  therefore both implemented and reachable from the engine.

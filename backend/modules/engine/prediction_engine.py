@@ -1009,6 +1009,68 @@ reported here rather than approximated.
                 )
         report += "\n"
 
+        if analysis.regulatory_stress is None:
+            report += (
+                "Basel III stress translation: UNAVAILABLE - per-institution liquidity,\n"
+                "funding and leverage positions were not supplied. A model risk score is\n"
+                "not a substitute for a regulatory ratio.\n"
+            )
+        else:
+            stress = analysis.regulatory_stress
+            if not stress.stress_applied:
+                report += (
+                    "Basel III stress translation: no stress was supplied, so these are\n"
+                    "pre-stress ratios only.\n"
+                )
+            for row in stress.rows:
+                report += f"\n  {row.institution_id}:\n"
+                report += f"    LCR: {row.lcr_before:.3f} -> {row.lcr_after:.3f}\n"
+                if row.nsfr_after is not None:
+                    report += f"    NSFR: {row.nsfr_before:.3f} -> {row.nsfr_after:.3f}\n"
+                if row.leverage_after is not None:
+                    report += (
+                        f"    Leverage ratio: {row.leverage_before:.4f} -> "
+                        f"{row.leverage_after:.4f}\n"
+                    )
+                if row.thresholds_breached_after:
+                    report += (
+                        "    Breached after stress: "
+                        + ", ".join(row.thresholds_breached_after)
+                        + "\n"
+                    )
+        report += "\n"
+
+        if analysis.crowding is None:
+            report += (
+                "Crowded-trade overlap: UNAVAILABLE - no holdings matrix was supplied.\n"
+                "Overlap is a volatility channel invisible in exposure data: two\n"
+                "institutions can hold identical positions and owe each other nothing.\n"
+            )
+        else:
+            crowding = analysis.crowding
+            score = crowding.system_crowding
+            report += (
+                f"Crowded-trade overlap across {len(crowding.institution_ids)} "
+                f"institution(s) and {len(crowding.instrument_ids)} instrument(s); "
+                f"system crowding {score.normalized:.3f} (raw {score.raw:.3f})\n"
+            )
+        report += "\n"
+
+        if analysis.topology is None:
+            report += (
+                "Network topology: UNAVAILABLE - no persistence parameters were supplied,\n"
+                "or the exposure network does not exist. Average degree and volatility can\n"
+                "both be unchanged while the routes between members quietly collapse.\n"
+            )
+        else:
+            summary = analysis.topology.summary
+            report += (
+                "Network topology: "
+                f"{summary['beta_0']:.0f} component(s), "
+                f"{summary['beta_1']:.0f} independent cycle(s), "
+                f"fragmentation {summary['fragmentation']:.3f}, "
+                f"redundancy {summary['redundancy']:.3f}\n"
+            )
         report += "\n"
 
         report += "INSTITUTION ASSESSMENTS:\n" + "-" * 70 + "\n"
