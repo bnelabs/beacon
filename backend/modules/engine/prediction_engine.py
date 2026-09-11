@@ -438,6 +438,8 @@ class RealPredictionEngine:
         bank_endowments: Optional[Dict[str, float]] = None,
         *,
         attestation: Optional[QualityAttestation] = None,
+        spiral_parameters: Optional[Dict[str, Any]] = None,
+        latent_dynamics_scenario: Optional[Any] = None,
     ) -> PredictionResult:
         """
         Score the payload and, when a balance sheet is supplied, clear the network.
@@ -454,6 +456,22 @@ class RealPredictionEngine:
             attestation: DATA-stage quality verdict for this payload. Overrides the
                 engine-level default; pass it explicitly when the frame has been
                 transformed since the gate ran.
+            spiral_parameters: ``bank_id ->``
+                :class:`~backend.modules.risk.liquidity_spiral.SpiralParameters`.
+                When supplied, each institution that failed to pay in the clearing
+                equilibrium has its shortfall turned into the adverse price move its
+                forced sale implies, and the Brunnermeier-Pedersen spiral is solved
+                from there. Requires ``bank_exposures`` and ``bank_endowments``,
+                because the shock *is* the clearing shortfall.
+            latent_dynamics_scenario: Optional
+                :class:`~backend.modules.engine.latent_dynamics.LatentDynamicsScenario`.
+                When supplied, each analysed institution's declared initial latent
+                stress state is advanced stochastically and the terminal
+                dispersion is attached to the analysis and rendered in the report.
+                Its drift and diffusion are caller inputs, so the result is a
+                **simulated scenario dispersion under a declared SDE, not a
+                calibrated prediction interval**; it is never written into the
+                ``confidence_*`` fields.
 
         Returns:
             PredictionResult with per-source risk scores and network analysis
@@ -467,7 +485,13 @@ class RealPredictionEngine:
 
         if has_bank_id:
             # Multi-bank analysis
-            return self._predict_multi_bank(input_data, bank_exposures, bank_endowments)
+            return self._predict_multi_bank(
+                input_data,
+                bank_exposures,
+                bank_endowments,
+                spiral_parameters,
+                latent_dynamics_scenario,
+            )
         else:
             # Single entity analysis
             return self._predict_single(input_data)
@@ -753,6 +777,8 @@ reported here rather than approximated.
         input_data: pd.DataFrame,
         bank_exposures: Optional[Dict[tuple, float]],
         bank_endowments: Optional[Dict[str, float]] = None,
+        spiral_parameters: Optional[Dict[str, Any]] = None,
+        latent_dynamics_scenario: Optional[Any] = None,
     ) -> PredictionResult:
         """Predict for multiple institutions and clear the network if possible."""
 
@@ -765,11 +791,17 @@ reported here rather than approximated.
 
         # Run multi-bank analysis. Clearing runs only when both exposures and
         # endowments are supplied; otherwise the analysis reports network
-        # topology and says plainly that the balance sheet is unknown.
+        # topology and says plainly that the balance sheet is unknown. The
+        # liquidity spiral is solved only when the clearing equilibrium exists,
+        # because its initial shock is the clearing shortfall. The latent SDE
+        # scenario needs no balance sheet: its inputs are the caller's declared
+        # initial states and SDE parameters.
         multi_bank_analysis = self.bank_analyzer.analyze_multiple_banks(
             bank_data,
             bank_exposures,
             bank_endowments=bank_endowments,
+            spiral_parameters=spiral_parameters,
+            latent_dynamics_scenario=latent_dynamics_scenario,
         )
 
         # Extract predictions
@@ -1070,6 +1102,69 @@ reported here rather than approximated.
                 f"{summary['beta_1']:.0f} independent cycle(s), "
                 f"fragmentation {summary['fragmentation']:.3f}, "
                 f"redundancy {summary['redundancy']:.3f}\n"
+            )
+        report += "\n"
+
+        if not analysis.liquidity_spiral:
+            report += (
+                "Liquidity spiral: UNAVAILABLE - no spiral parameters were supplied, or\n"
+                "no institution failed to pay in the clearing equilibrium. The initial\n"
+                "shock is the clearing shortfall, so with no clearing equilibrium there\n"
+                "is no shock to propagate and none is invented from the model score.\n"
+            )
+        else:
+            report += (
+                "Liquidity spiral (Brunnermeier-Pedersen) for "
+                f"{len(analysis.liquidity_spiral)} institution(s):\n"
+            )
+            for bank_id, spiral in analysis.liquidity_spiral.items():
+                if spiral.collapsed:
+                    outcome = "COLLAPSED - no finite equilibrium"
+                elif spiral.fully_liquidated:
+                    outcome = "fully liquidated"
+                else:
+                    outcome = f"amplification {spiral.amplification:.3f}"
+                report += (
+                    f"  {bank_id}: shock {spiral.shock:.6g} -> total price move "
+                    f"{spiral.total_price_change:.6g} ({outcome})\n"
+                )
+        report += "\n"
+
+        if analysis.latent_dynamics is None:
+            report += (
+                "Latent stress dispersion: UNAVAILABLE - no latent dynamics scenario\n"
+                "was supplied. The SDE is not run by default: its drift, diffusion and\n"
+                "initial latent states must be declared by the caller, and a dispersion\n"
+                "invented from the model risk score would be a restatement of the model\n"
+                "rather than a simulated latent path.\n"
+            )
+        else:
+            latent = analysis.latent_dynamics
+            report += (
+                "Latent stress dispersion (simulated scenario under a caller-declared\n"
+                "SDE; NOT a calibrated prediction interval):\n"
+                f"  drift {latent.drift_description}\n"
+                f"  diffusion {latent.diffusion_description}\n"
+                f"  horizon {latent.horizon:g} in {latent.steps} step(s) of dt "
+                f"{latent.dt:g}; {latent.n_paths} path(s); seed {latent.seed}; "
+                f"{latent.integrator}\n"
+            )
+            for bank_id in latent.institution_ids:
+                reference = " ".join(
+                    f"{value:.6g}" for value in latent.drift_only_terminal[bank_id]
+                )
+                report += (
+                    f"  {bank_id}: terminal dispersion "
+                    f"{latent.terminal_dispersion[bank_id]:.6g}; drift-only terminal "
+                    f"[{reference}]\n"
+                )
+            report += (
+                f"  Mean dispersion across {len(latent.institution_ids)} institution(s): "
+                f"{latent.mean_dispersion:.6g}; maximum {latent.max_dispersion:.6g}\n"
+                "  Calibration: NONE. The drift and diffusion are caller declarations,\n"
+                "  not estimates, and no coverage guarantee, threshold probability or\n"
+                "  forecast follows from this dispersion. It is a simulated scenario\n"
+                "  dispersion and is not written to the prediction-interval fields.\n"
             )
         report += "\n"
 

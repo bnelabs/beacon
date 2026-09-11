@@ -588,3 +588,508 @@ With the two blockers fixed, a baseline reported as lift, and every artefact
 carrying a verifiable provenance manifest and a content-addressed data snapshot,
 the core is defensible for regulated use. API auth and operational monitoring
 were out of scope and are unchanged.
+
+---
+
+# Third Review Round — Reachability, Stationarity and the Clearing–Spiral Join
+
+This round answers a *trajectory* review that credited BEACON with several
+state-of-the-art capabilities. Most of that credit was accurate. The organising
+finding of this round is narrower and more uncomfortable: **two of the
+capabilities the review praised most confidently were implemented and thoroughly
+tested but not reachable from the engine at all.**
+
+That makes reachability a *recurring* failure mode here, not a one-off. The same
+defect had already been found and closed twice (§2.10 of `G_SIB_BUILD.md`, for the
+fire-sale and TNCM-VAE modules), and the document at that point claimed: *"Every
+one of the nine review items is therefore both implemented and reachable from the
+engine."* It was not. Two more had been missed, and a third orphan layer is
+recorded below.
+
+## 5.0 The finding: implemented is not reachable
+
+**Method.** For each module the review credits, the import graph was traversed:
+grep the symbol across the repository, drop matches inside the defining module
+itself, drop `tests/` and `docs/`, and ask what remains. What remains is what runs.
+
+| Module | Lines | Test lines | Non-test importers before this round |
+|---|---|---|---|
+| `backend/modules/engine/cpcv.py` | 335 | 414 | **none** — only `tests/test_cpcv.py` |
+| `backend/modules/engine/neural_sde.py` | 950 | 1141 | **none** — only `tests/test_neural_sde.py` |
+
+The review's two headline claims were therefore false as stated:
+
+* *"The system uses Combinatorial Purged Cross-Validation (CPCV) with Embargo."*
+  It did not. Production validated with `backtesting.generate_walk_forward_folds`
+  — walk-forward with an optional embargo, a genuinely weaker method — while
+  `cpcv.py` sat unused.
+* *"Neural SDEs: Replaces deterministic Neural ODEs."* They replaced nothing,
+  because nothing called them.
+
+A third case was found while checking the second, and it is a *finer-grained*
+version of the same defect rather than a module-level one:
+`backend/modules/engine/temporal_graph.py` is now loaded, because `neural_sde`
+reuses its memory primitives (`MemoryState`, `NeuralODEField`, `TimeEncoder`,
+`rk4_integrate`). But its actual model, `TemporalGraphNetwork`, is referenced
+nowhere outside its own file — the module is on the import path and contributes no
+capability. That is why the regression test below checks reachability *from the
+production roots* rather than "has an importer", and separately checks recorded
+symbols.
+
+This is the reason the round is framed as reachability rather than as model work:
+a tested module that nothing calls is indistinguishable from a capability the
+system does not have, except that it makes the documentation overstate the system
+to a reader who trusts it — which, for an auditor, is the worse failure.
+
+## 5.1 CPCV is now the production validation scheme — *Done*
+
+`backtesting.py` gains `generate_cpcv_folds`, `cpcv_split_boundaries`,
+`CPCVFoldResult`, `CPCVBacktestResult` and `CPCVBacktester`, and `ModelTrainer`
+selects the scheme from configuration (`validation_scheme` ∈
+`walk_forward` / `cpcv` / `both`).
+
+Three design points that are not incidental:
+
+* **Predictions are not concatenated.** `WalkForwardBacktester` concatenates fold
+  predictions because its test blocks are disjoint and cover the sample once.
+  CPCV does not have that property: with `n_groups=6, n_test_groups=2` every
+  observation is test data in five of the fifteen splits, so a concatenated series
+  would be longer than the sample and would score the same observation repeatedly.
+  The result is therefore a *distribution* (mean, dispersion, min, max across
+  splits), and `CPCVBacktestResult` deliberately exposes no `predictions` key.
+  A test asserts that the test sets overlap, which is the property that forbids
+  concatenation.
+* **Fold sizes are counted, not spanned.** `FoldResult` derives
+  `n_train = train_end - train_start`, which assumes contiguity. A CPCV training
+  set is the complement of the test groups *minus* purged and embargoed rows, so
+  it has holes and its span overstates its size. A dedicated `CPCVFoldResult`
+  records the counted sizes, and a test asserts the count is below the span for a
+  split with an interior test group.
+* **An unusable configuration raises.** A configuration whose splits are all
+  purged to nothing raises rather than returning an empty fold list, because an
+  empty list reads downstream as "the model was validated". Degenerate individual
+  splits are returned and counted rather than dropped, so the fold count is
+  auditable.
+* **A misspelled scheme raises.** `validation_scheme: "CPVC"` raises instead of
+  silently falling back to walk-forward, which would let a caller believe a
+  stronger check ran than did.
+
+Directional scoring pools within each contiguous test block, via the existing
+`boundaries` argument, for the same reason walk-forward pools within folds: two
+non-adjacent held-out groups are not adjacent in time, and differencing across
+the gap scores a transition that never occurred.
+
+**Tests:** `backend/tests/test_cpcv_wiring.py` (15 tests), including reachability
+through `ModelTrainer._baseline_comparison`. Existing walk-forward behaviour is
+unchanged and still tested: `test_cpcv.py` (38), `test_backtesting.py` (43),
+`test_baselines.py` (7).
+
+## 5.2 The clearing engine now drives the liquidity spiral — *Done*
+
+The spiral's own docstring claimed it "composes with the clearing engine", and
+`G_SIB_BUILD.md` recorded that the module had been un-orphaned. Both were
+partly true: the spiral was reachable through `fire_sale.py`, but the *join the
+review asked for* did not exist. Clearing produced a cash shortfall; the spiral
+expected a price shock; nothing translated between them.
+
+* `liquidity_spiral.shock_from_shortfall(shortfall, *, price, price_impact)`
+  performs the translation: a shortfall `S` requires selling `S / price` units,
+  which at impact `λ` moves the price by `λ · S / price`, returned negative. The
+  docstring states the first-order approximation explicitly and records what is
+  **not** double-counted (the shortfall-driven sale is the exogenous shock; the
+  spiral's own sales are the separate leverage-driven ones).
+* `analyze_multiple_banks` gains `spiral_parameters`, a new
+  `MultiBankAnalysis.liquidity_spiral` field, and its `to_dict()` entry.
+* `RealPredictionEngine.predict` and `_predict_multi_bank` forward the parameter,
+  and `_generate_multi_bank_explanation_report` renders the section, with an
+  explicit `UNAVAILABLE` branch naming the reason when it is absent.
+
+Fail-closed behaviour, matching the reasoning already used for the regulatory
+table: spiral parameters supplied **without** a clearing equilibrium raise
+(the shock *is* the shortfall, so there is nothing to propagate and none is
+invented from the model score); a table that omits a defaulting institution
+raises (a partial table reads as though that institution had no spiral); an
+unknown institution raises; a wrongly typed value raises.
+
+**Tests:** `backend/tests/test_clearing_spiral_coupling.py` (23 tests), including
+a check that deepening the default (by halving the endowment) deepens the shock,
+and reachability through `RealPredictionEngine._predict_multi_bank`.
+
+## 5.3 Stationarity: the review was half right — *Done*
+
+The review asked to "add ADF and KPSS to `validator.py`". ADF was already
+implemented and tested (`backend/modules/data/fractional.py`), so only KPSS was a
+real gap; and the gate that matters is `quality_gate.py`, not `validator.py`.
+
+`kpss_test` / `kpss_statistic` / `KPSSResult` were added alongside the existing
+ADF implementation, mirroring its return shape, with the Newey-West/Bartlett
+long-run variance and the same Schwert lag rule. **Verified independently**: a
+from-the-definition reimplementation written without reference to the module
+agrees to `1e-9` on white noise, a random walk and a trend-plus-noise series, under
+both the level and trend variants. Critical values are the published KPSS (1992)
+Table 1 values.
+
+Two deliberate choices, both documented in the module:
+
+* **Non-stationarity is reported by default, not fatal.** The gate certifies
+  *raw* collected data, and raw financial levels are I(1) by construction; failing
+  every unit root would reject the standard input of the models built to handle
+  it (`fractional.py` already ships fractional differencing for the feature
+  stage), and operators would simply disable the gate. The finding is always
+  recorded and logged, never silent, and `require_stationarity=True` makes it
+  blocking for a deployment that wants that.
+* **Both variants must reject.** A trend-stationary series rejects the level
+  variant but not the trend variant, and is accepted. Without this rule the gate
+  would flag every deterministic trend as non-stationary.
+
+The empty-payload guarantee from §2A is preserved and re-tested: an empty payload
+still raises `EmptyDatasetError` even under `require_stationarity=True`. Stationarity
+is deliberately kept out of `_structural_checks`, so the composite score
+arithmetic is unchanged.
+
+**Tests:** `backend/tests/test_stationarity.py` (18 tests); `test_fractional.py`
+and `test_data_governance.py` stay green (84 passed together).
+
+## 5.4 Legacy heuristics: verified absent, and one real drift fixed — *Done*
+
+The review asked to "ensure no legacy code remains" that divides by `1e9` or uses
+an arbitrary `risk > 0.8` failure rule. Rather than grep — which cannot tell a
+docstring from a live expression — the check was done with `ast`: every numeric
+and string constant was located, and constants that are docstrings (the first
+statement of a module, class or function) were excluded.
+
+* `1e9` / `1e10` scaling: **0 occurrences in executable code.**
+* `HGT` / `MultiScaleGNN`: **0 occurrences in executable code.**
+
+Both survive only inside docstrings that *document the removal* (`clearing.py`,
+`bank_analyzer.py`, `models.py`, `orchestrator.py`). The review also asked to
+delete those references. They are deliberately kept: `models.py` states plainly
+that the graph models "were dead code that made the system *claim* a capability it
+never used", which is exactly the audit trail a reader needs. Deleting the note
+that a defect existed is how the defect returns.
+
+**Correction to the review on `validator.py` and one genuine fix.** The surviving
+`0.8`/`0.85` literals outside tests are train/test split fractions, Basel RSF
+weights, inline R² bands, or the documented constants in `constants.py`. Two of
+them were a real defect: `constants.py` carried the risk bands twice — a 0-1 scale
+(`RISK_THRESHOLD_HIGH = 0.85`) and a 0-100 scale (which read `80`) — so 0.82 was
+"high" on one scale and "critical" on the other; and `bank_analyzer._risk_to_text`
+repeated the literals a third time instead of importing them, so the narrative
+summary could silently disagree with the per-institution band it summarises. The
+percentage scale is now *derived* from the 0-1 scale, and `_risk_to_text` reads
+the named constants.
+
+**Tests:** `backend/tests/test_risk_thresholds.py` (21 tests) locks the derivation
+and asserts the two renderings describe the same band across a score grid.
+
+## 5.5 A recommendation rejected on evidence: no graph database — *Rejected, with reasons*
+
+The review recommends integrating "a specialized graph engine (like TigerGraph,
+Neo4j, or DuckDB) to handle the heavy matrix multiplications ... more efficiently
+than Postgres", on the stated premise that "querying dense adjacency matrices
+(graph structures) in Postgres is inefficient".
+
+**The premise is false for this codebase.** Verified: the database schema defines
+17 tables (`notifications`, `error_logs`, `pipeline_jobs`, `data_jobs`,
+`engine_jobs`, `result_jobs`, `jobs`, `indicator_observations`, `risk_scores`,
+`model_metrics`, `country_profiles`, `country_indicators`, `country_comparisons`,
+`alert_rules`, `data_catalogue`, `assets`, `data_sources`) and **none of them
+stores an adjacency or exposure matrix**. The network is built in memory as a
+numpy array from a caller-supplied `(debtor, creditor) -> amount` mapping and
+cleared by `clear_multiplex`; the multiply-heavy work is already dense
+linear algebra in numpy.
+
+Adding a graph engine would therefore: add an operational dependency; introduce a
+second, redundant representation of the network to keep in sync; and solve no
+query the system performs. The recommendation is recorded as **rejected**, not
+deferred, and the reason is the evidence above rather than effort.
+
+The *real* gap the review was reaching for is that exposures had no persistence at
+all — a caller had to hold the matrix in memory. That is now addressed by the
+bilateral exposure store and upload endpoint (§5.6).
+
+## A third orphan layer, recorded rather than fixed: the data connectors
+
+While checking the SDE's reachability, a third instance of the same defect was
+found, and it is larger than either of the first two. **The entire
+`backend/modules/data/connectors/` package is orphaned.**
+
+The package contains a base class, a lazy registry and five connectors:
+
+| Connector | Source | Test lines |
+|---|---|---|
+| `sec_n_mfp` | SEC Form N-MFP money-market fund portfolios | 863 |
+| `payments` | Payments data | 793 |
+| `ecb_ccp` | ECB / CPMI-IOSCO CCP disclosures | 640 |
+| `bis_credit` | BIS total credit to the private non-financial sector | 604 |
+| `sec_form_pf` | SEC Form PF — refuses by design (confidential) | — |
+
+**Evidence of orphaning.** Traversing every reference to `build_connector`,
+`available_connectors`, and each connector's module name: outside `tests/` and
+`docs/`, every hit is *inside the package itself* — the registry in `__init__.py`
+and its docstring examples. Nothing in the production ingestion path uses them.
+That path uses a different abstraction: `backend/modules/data/collector.py` and
+`backend/services/data_source_service.py` both call
+`backend.plugins.base.get_plugin`. A check for a name-based or config-based
+invocation found none: no connector key appears in `configs/`, and there is no
+dynamic dispatch to the registry.
+
+So BEACON has **two overlapping ingestion layers**: `backend/plugins/` (14
+plugins, one of them the live path) and `backend/modules/data/connectors/` (5
+connectors, none of them the live path). `docs/data_connectors.md` documents the
+second layer as a capability, including its point-in-time guarantees ("revision
+history is mostly absent", "assumed" late bounds) — which is exactly the kind of
+honest documentation that makes the orphaning misleading to a reader.
+
+**Why this is recorded and not fixed in this round.** Closing it is a design
+decision, not a wiring task, and the two candidate resolutions have different
+consequences:
+
+1. *Migrate* the production ingestion path onto the connectors. The connectors
+   carry stricter point-in-time semantics than the plugins layer, so this is
+   probably the right long-term answer — but it is a migration of the ingestion
+   path for five public sources, and it needs its own round with its own tests.
+2. *Bridge* the connectors into the plugin registry so both are reachable, at the
+   cost of keeping two abstractions indefinitely.
+
+Choosing between them is the maintainer's call. What this round establishes is the
+fact the review did not: the connectors are not a capability the system has.
+
+## Reachability census: what the engine actually runs
+
+Because the defect kept recurring, the whole backend was scanned once rather than
+chasing individual modules. The scan parses every non-test module's imports with
+`ast` (resolving relative imports), then reports modules that nothing else
+imports. Every entry below was additionally confirmed with a direct grep for both
+the module name and its principal class/function names, to rule out string- or
+registry-based dynamic dispatch.
+
+**Modules with a complete implementation and a test suite but zero production
+importers:**
+
+| Module | Review said | Reality |
+|---|---|---|
+| `engine/conformal.py` | "implements Split Conformal Prediction and ACI" | implemented; **unreachable** |
+| `engine/hidden_markov.py` (`StudentTHMM`) | "Gaussian assumptions replaced with Student-t" | implemented; **unreachable** |
+| `engine/federated.py` | "correctly implements Bonawitz secure aggregation" | implemented; **unreachable** |
+| `engine/uncertainty.py` | — | implemented; **unreachable** |
+| `engine/subgraphx.py` | "SubgraphX modules" | implemented; **unreachable** |
+| `engine/event_metrics.py` | — | implemented; **unreachable** |
+| `engine/causal_validation.py` | counterfactual validation | implemented; **unreachable** |
+| `engine/causal_discovery.py` | "uses NOTEARS" | implemented; imported only by the unreachable `causal_validation`, so **unreachable** |
+| `engine/tncm_vae.py` | "counterfactual analysis (TNCM-VAE)" | implemented; reached only through the unreachable causal subsystem |
+| `engine/mixture_of_experts.py` | — | implemented; **unreachable** |
+| `data/network_gate.py` | — | implemented; **unreachable** |
+| `data/streaming.py` | — | implemented; **unreachable** |
+| `results/timeseries_store.py` | "uses PostgreSQL with TimescaleDB" | implemented; **no runtime caller** |
+| `data/connectors/*` (5 modules) | "plugin ecosystem is extensive" | implemented; **unreachable** |
+
+This is the honest answer to the review's central question. The review's verdict
+was that BEACON "has successfully transitioned into a G-SIB grade platform" and
+that its logic "is leading the industry standard". Several of the specific
+capabilities it credited — conformal intervals, Student-t regimes, federated
+aggregation, SubgraphX attribution — are implemented to a high standard and are
+**not running**. The engine was also observed telling the truth about this: the
+production `PredictionResult` reports `confidence_intervals` as `(None, None)` and
+its own docstring says no calibrated interval exists yet, while
+`docs/G_SIB_BUILD.md` describes the conformal machinery as built.
+
+**Method limits, stated so the table is not over-read.**
+
+* Plugins (`backend/plugins/*`) load by *name* through `get_plugin`, so they are
+  excluded: they are an intentional dynamic registry, not orphans. Their
+  reachability was checked separately — `collector.py` and
+  `data_source_service.py` call `get_plugin`, so the registry is live.
+* Alembic migrations, `backend/scripts/`, `__init__.py` packages and entry points
+  are excluded: they are not capabilities.
+* "Zero importers" is a sufficient condition for an orphan, not a proof of
+  usefulness for the rest. A module can be imported and still be dead.
+
+**Recommendation, not performed in this round.** Wiring twelve modules is twelve
+integration decisions, each of which needs a real production entry point and a
+semantic decision (where do conformal calibration labels come from? what supplies
+the federated training coordinator? what is SubgraphX's game value on a real
+network?). Rushing them would produce exactly the defect this round is about — code
+that looks integrated and is not. The two with the clearest production homes, and
+therefore the recommended first two, are:
+
+1. `conformal.py` — the engine already reports intervals as unavailable *pending
+   conformal calibration*, so the entry point is written down already.
+2. `hidden_markov.py` — a regime label attached to the existing per-source score.
+
+## 5.6 The network is now served live, and exposures can be uploaded — *Done*
+
+The review's most concrete UI finding was correct and verified: `RiskMap.jsx`
+imported `networkConnections` and `regions` from static JSON files, and no
+network-graph endpoint existed anywhere in the API.
+
+**`GET /api/v1/network/graph`** returns the current multiplex network. It returns
+`status: "available"` with real nodes, edges and layers, or `status:
+"unavailable"` with a reason and empty arrays. It never fabricates a node or an
+edge — the repo treats invented network data as a serious defect, and an
+unavailable network is a fact worth reporting rather than papering over.
+
+**`POST /api/v1/network/exposures`** accepts an institution's bilateral matrix as
+CSV or Parquet and persists it through `backend/services/bilateral_exposure_store.py`,
+which also exposes `load_bank_exposures()` — the exact
+`(debtor, creditor) -> amount` shape `analyze_multiple_banks` accepts.
+
+Verification of the security-relevant properties, done after the fact rather than
+taken on trust: the Parquet reader is pinned to `pyarrow`, so an upload cannot
+execute code the way a pickle-based engine could; the byte cap is enforced
+(64 MiB default, env-overridable); writes are atomic (temp file plus `os.replace`),
+so a crash cannot leave a truncated adjacency matrix for a later reader to open;
+and `source_institution` is stored as manifest metadata only, never used to build
+a path, so it cannot traverse directories.
+
+Three decisions worth recording, because they were judgement calls:
+
+* **Geography stays static; exposures do not.** Region boundaries and centroids
+  are reference data and legitimately static. Institution-level ids have no
+  coordinates, so an institution-level edge that cannot be placed is reported in
+  the UI as unplaced rather than being given an invented position.
+* **No invented risk score.** Uploaded exposures carry no risk score, so the API
+  returns `risk_score: null` and the UI says "unavailable" instead of colouring an
+  arc from a number nobody computed.
+* **Auth.** There is no auth layer in this application; the upload endpoint
+  follows the existing convention and is documented in its module docstring as
+  **unprotected** — anyone who can reach the API can replace the matrix that drives
+  the map and (once wired) clearing. This is a platform-level decision that was
+  not invented locally.
+
+**Honest status of the wiring.** The uploaded matrix is reachable through the API
+and through `load_bank_exposures()`, but the prediction engine does **not** yet
+pull it automatically; a caller still passes exposures explicitly. That is
+recorded here rather than papered over. Closing it is a semantic decision (should
+an uploaded matrix silently change engine output for every existing caller?), and
+the safe form is an explicit opt-in rather than a default.
+
+The static fixture file survives, relabelled as a fixture and gated behind
+`VITE_ALLOW_STATIC_NETWORK_FALLBACK=true` plus an explicit prop, with a visible
+"DEMO NETWORK" banner when used. A silent fallback would have hidden backend
+failure, which is the behaviour the review was right to object to.
+
+**Verification:** `backend/tests/test_network_api.py` (17 tests), `npm run build`
+clean, and the existing Playwright e2e suite passes against the changed UI.
+
+## 5.7 The Neural SDE is on the engine path — *Done*
+
+`neural_sde.py` is no longer an orphan. A new
+`backend/modules/engine/latent_dynamics.py` exposes a caller-declared scenario for
+propagating latent stress forward under the SDE; `analyze_multiple_banks` accepts
+it, `RealPredictionEngine.predict` forwards it, and the multi-institution report
+renders the section (with an explicit `UNAVAILABLE` branch when absent). The
+integration follows the same shape as the clearing–spiral join in §5.2.
+
+The most important property of this change is what it **refuses** to do. This
+repository rejects fake uncertainty: `prediction_engine.py` refuses to report
+MC-dropout intervals because they describe a different network from the one
+loaded, and `bank_analyzer.CONFIDENCE_METHOD_PENDING` records that calibrated
+intervals do not exist yet. An SDE dispersion is exactly the kind of plausible
+number that could be smuggled into `confidence_lower`/`confidence_upper`, so:
+
+* the result has **no** `confidence_*` field at all;
+* it carries `calibrated: bool = False` (always) and
+  `label = "simulated_terminal_dispersion_under_declared_sde"`;
+* its docstrings and the rendered report section both state that it is a
+  simulated dispersion under a declared SDE, not a calibrated interval;
+* a test asserts the confidence fields remain unset.
+
+The drift and diffusion are declared by the caller, not fitted — the module fits
+nothing, and says so.
+
+**Tests:** `backend/tests/test_latent_dynamics.py`, including determinism under a
+fixed seed, zero-diffusion reproducing the deterministic drift-only path, and
+widening diffusion widening the terminal dispersion. Verified together with the
+existing `test_neural_sde.py`: 171 passed.
+
+## 5.8 Dropout-resilient federated aggregation — *Implemented, still unreachable*
+
+`federated.py` previously documented its own gap: no dropout recovery, so the
+aggregator refused to aggregate when participants were missing rather than
+returning a corrupted number. That gap is now closed with the Bonawitz
+construction: each participant's finite-field Diffie-Hellman key is Shamir-shared
+`t`-of-`n`, Feldman VSS commitments authenticate the shares, and on dropout the
+server reconstructs the missing key from at least `t` verified shares and
+regenerates the pairwise masks that no longer cancel. Only the reconstructed
+integer secret crosses into floating point (by seeding the PRG), so masks
+regenerate bit-for-bit and recovery is exact. It fails closed when survivors fall
+below the threshold, which is the same honest failure mode the module had before —
+just at a higher threshold.
+
+**The cryptographic foundation was verified independently**, not taken on trust:
+the 2048-bit modulus is prime, `(P-1)/2` is prime (so it is a genuine safe prime),
+and 2 lies in the order-`(P-1)/2` subgroup. The construction is the standard one
+and the parameters are the RFC 3526 Group 14 group. **Tests:**
+`backend/tests/test_federated_dropout.py` (43 tests, 75 with the existing file).
+
+**It remains unreachable from production, and this is documented rather than
+hidden.** A real integration needs a multi-institution training coordinator owning
+the participant roster, model shape and transport — `EngineOrchestrator` and
+`ModelTrainer` are both single-node, so any call site today would be an import
+that never exercises masking, sharing or recovery. Adding one would be precisely
+the "green import, no capability" defect this round exists to remove. The module
+docstring now carries a "Reachability (honest status)" section naming what calls
+it (nothing), what does not, and what a real integration requires.
+
+## 5.9 A guard against recurrence — *Done*
+
+`backend/tests/test_reachability.py` makes the defect a test failure instead of a
+discovery. It walks the import graph **from the production roots**
+(`backend.api.main` and `backend.tasks.celery_app`) and asserts that every module
+in a declared capability list is reachable, and that every module in a declared
+orphan list is not. It also checks recorded *symbols*, because a module can be on
+the import path and still contribute nothing.
+
+Two details are the point of the file rather than incidental:
+
+* Reachability is computed **transitively from the roots**, not as "has an
+  importer". A direct-importer check misclassified `temporal_graph`: it is
+  imported by `neural_sde`, but for its memory primitives, and its
+  `TemporalGraphNetwork` model is referenced nowhere. "Imported by another orphan"
+  must not read as reachable.
+* The orphan list is asserted to be **still orphaned**. If someone wires one, the
+  test fails and forces the entry to be promoted into the capability list — so the
+  census cannot rot into a stale claim, which is how the original problem went
+  unnoticed.
+
+## Verification summary for this round
+
+Starting point: **1676 passed, 7 skipped** (measured before any change).
+
+| Check | Result |
+|---|---|
+| Full backend suite | **1880 passed, 7 skipped** |
+| Coverage of the CI correctness gate (`ruff --select E9,F63,F7,F82`) | passes |
+| Frontend production build (`npm run build`) | passes |
+| Frontend Playwright e2e (`npx playwright test`) | 2 passed |
+| KPSS statistic re-derived independently from the definition | agrees to `1e-9`, level and trend |
+| Federated DH group re-checked for primality / safe-prime / subgroup order | 2048-bit prime, `(P-1)/2` prime, `2` of order `(P-1)/2` |
+| Legacy `1e9` / `HGT` / `MultiScaleGNN` in executable code (AST, docstrings excluded) | 0 occurrences |
+
+Tests are the evidence for the rest, and each new file states the property it
+exists to establish rather than restating the implementation.
+
+## What this round did not do
+
+Recorded plainly, because the value of a remediation record is that a reader can
+tell the difference between "verified" and "asserted".
+
+* **The twelve orphaned modules other than `cpcv` and `neural_sde` are still
+  orphaned.** They are now enumerated, each with what a real integration would
+  require, and guarded by a test that fails if the census drifts. Wiring them is
+  the largest remaining item and is deliberately not rushed here.
+* **The uploaded exposure matrix does not yet drive the engine automatically.**
+  The endpoint, validation, persistence and an engine-ready reader all exist; an
+  explicit opt-in to consume them was not added, because changing engine output
+  for existing callers is a semantic decision rather than a wiring detail.
+* **The connector layer is still unreachable.** Migrating ingestion onto it is a
+  design decision between two overlapping abstractions, not a wiring task.
+* **`TemporalGraphNetwork` is still unused.** Its module is loaded; its model is
+  not constructed.
+* **API authentication remains absent**, including on the new upload endpoint,
+  which can replace the matrix driving the map. This is pre-existing and
+  platform-level; the module docstring says so rather than implying protection
+  that does not exist.
+* **Non-linear causal discovery** is the one review recommendation whose status is
+  recorded separately below rather than claimed here.

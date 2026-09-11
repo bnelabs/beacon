@@ -324,7 +324,22 @@ class ModelTrainer:
         lift is a conservative claim. Returns ``None`` (with a logged reason) when
         the test window is too short or the model is not single-input.
         """
-        from backend.modules.engine.backtesting import WalkForwardBacktester, WalkForwardConfig
+        from backend.modules.engine.backtesting import (
+            CPCVBacktester,
+            WalkForwardBacktester,
+            WalkForwardConfig,
+        )
+        from backend.modules.engine.cpcv import CPCVConfig
+
+        # Which validation schemes to report. An unrecognised value raises rather
+        # than being ignored: a caller who asks for CPCV and silently receives only
+        # walk-forward would believe a stronger claim was checked than actually was.
+        scheme = str(self.config.get("validation_scheme", "walk_forward")).strip().lower()
+        if scheme not in ("walk_forward", "cpcv", "both"):
+            raise ValueError(
+                f"validation_scheme must be one of 'walk_forward', 'cpcv', 'both'; "
+                f"got {scheme!r}"
+            )
 
         windows = np.asarray(dataset.sequences, dtype=np.float32)
         if windows.ndim != 3 or windows.shape[0] < 30:
@@ -348,28 +363,65 @@ class ModelTrainer:
             target_std=float(dataset.target_std),
         )
         config = WalkForwardConfig(n_splits=3, test_size=0.2, gap=0, expanding=True, min_train_size=5)
-        try:
-            # The factory returns the same frozen adapter every fold: `fit` is a
-            # no-op, so there is no state to leak between folds.
-            comparison = WalkForwardBacktester(lambda: adapter, config).compare(
-                features, target, baselines=("persistence", "ar1")
+
+        walk_forward_payload: Optional[Dict[str, Any]] = None
+        if scheme in ("walk_forward", "both"):
+            try:
+                # The factory returns the same frozen adapter every fold: `fit` is a
+                # no-op, so there is no state to leak between folds.
+                comparison = WalkForwardBacktester(lambda: adapter, config).compare(
+                    features, target, baselines=("persistence", "ar1")
+                )
+            except (TypeError, ValueError) as exc:
+                logger.warning("Walk-forward comparison skipped: %s", exc)
+                if scheme == "walk_forward":
+                    return None
+            else:
+                payload = comparison.to_dict()
+                walk_forward_payload = {
+                    "config": payload["primary"]["config"],
+                    "aggregation": payload["primary"]["aggregation"],
+                    "primary_metrics": payload["primary"]["metrics"],
+                    "baseline_metrics": {
+                        name: result["metrics"]
+                        for name, result in payload["baselines"].items()
+                    },
+                    "lift": payload["lift"],
+                    "lift_convention": payload["lift_convention"],
+                    "lower_is_better": payload["lower_is_better"],
+                }
+
+        cpcv_payload: Optional[Dict[str, Any]] = None
+        if scheme in ("cpcv", "both"):
+            cpcv_config = CPCVConfig(
+                n_groups=int(self.config.get("cpcv_n_groups", 6)),
+                n_test_groups=int(self.config.get("cpcv_n_test_groups", 2)),
+                label_horizon=int(self.config.get("cpcv_label_horizon", 0)),
+                embargo_pct=float(self.config.get("cpcv_embargo_pct", 0.0)),
             )
-        except (TypeError, ValueError) as exc:
-            logger.warning("Baseline comparison skipped: %s", exc)
+            try:
+                cpcv_payload = CPCVBacktester(lambda: adapter, cpcv_config).run(
+                    features, target
+                ).to_dict()
+            except (TypeError, ValueError) as exc:
+                logger.warning("CPCV comparison skipped: %s", exc)
+                if scheme == "cpcv":
+                    return None
+
+        if walk_forward_payload is None and cpcv_payload is None:
             return None
 
-        payload = comparison.to_dict()
-        return {
-            "config": payload["primary"]["config"],
-            "aggregation": payload["primary"]["aggregation"],
-            "primary_metrics": payload["primary"]["metrics"],
-            "baseline_metrics": {
-                name: result["metrics"] for name, result in payload["baselines"].items()
-            },
-            "lift": payload["lift"],
-            "lift_convention": payload["lift_convention"],
-            "lower_is_better": payload["lower_is_better"],
+        result: Dict[str, Any] = {
+            "validation_scheme": scheme,
+            "walk_forward": walk_forward_payload,
+            "cpcv": cpcv_payload,
         }
+        # Walk-forward's fields stay at the top level when it ran, so existing
+        # consumers are unaffected. A `cpcv`-only run deliberately omits them
+        # rather than presenting CPCV numbers under a walk-forward key.
+        if walk_forward_payload is not None:
+            result.update(walk_forward_payload)
+        return result
 
     def _train_epoch(self, dataloader: DataLoader) -> float:
         """Train for one epoch."""

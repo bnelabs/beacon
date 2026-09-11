@@ -729,6 +729,29 @@ export async function registerApiMocks(page) {
         return respond(analyticsAnomalies)
       }
 
+      // The risk map now reads live exposures from the backend instead of the
+      // bundled fixture. The mock answers the explicit "unavailable" state so
+      // the e2e run exercises the no-network path rather than a 404.
+      if (normalizedPath === '/api/v1/network/graph') {
+        return respond({
+          status: 'unavailable',
+          as_of: null,
+          generated_at: '2024-02-19T12:00:00Z',
+          source: 'bilateral_exposure_store',
+          unavailable_reason: 'no bilateral exposure matrix has been uploaded',
+          nodes: [],
+          edges: [],
+          layers: [],
+          metadata: {
+            n_nodes: 0,
+            n_edges: 0,
+            gross_notional: null,
+            geography_resolution: 'client_reference_data',
+            risk_score_available: false
+          }
+        })
+      }
+
       if (normalizedPath === '/api/v1/data-quality/stats') {
         return respond(dataQualityStats)
       }

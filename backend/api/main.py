@@ -36,6 +36,7 @@ from .routes import (
     analytics,
     alert_rules,
     reports,
+    network,
 )
 from backend.database import init_db, close_db
 from backend.exceptions import BeaconError
@@ -151,6 +152,7 @@ app.include_router(data_quality.router, prefix="/api/v1/data-quality", tags=["Da
 app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["Advanced Analytics"])
 app.include_router(alert_rules.router, prefix="/api/v1/alert-rules", tags=["Alert Rules"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
+app.include_router(network.router, prefix="/api/v1/network", tags=["Network Graph & Bilateral Exposures"])
 
 # This API exposes no metrics endpoint.
 

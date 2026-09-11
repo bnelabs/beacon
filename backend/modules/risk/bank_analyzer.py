@@ -84,6 +84,17 @@ from .regulatory import (
     translate_systemic_stress,
 )
 from .fire_sale import FireSaleResult, FireSaleScenario, solve_fire_sale
+from .liquidity_spiral import (
+    LiquiditySpiralModel,
+    SpiralParameters,
+    SpiralResult,
+    shock_from_shortfall,
+)
+from ..engine.latent_dynamics import (
+    LatentDynamicsResult,
+    LatentDynamicsScenario,
+    simulate_latent_stress,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -310,6 +321,29 @@ class MultiBankAnalysis:
     collapse; this measures whether they did.
     """
 
+    liquidity_spiral: Dict[str, SpiralResult] = field(default_factory=dict)
+    """Per-institution Brunnermeier-Pedersen spiral, keyed by institution id.
+
+    Populated only for institutions that both failed to pay in the clearing
+    equilibrium *and* had a :class:`SpiralParameters` supplied. Empty otherwise:
+    a spiral needs a shock, and the shock comes from a real clearing shortfall --
+    without liabilities and endowments there is none, and inventing one from a
+    model risk score would make the spiral a restatement of the model rather than
+    a consequence of the balance sheet.
+    """
+
+    latent_dynamics: Optional[LatentDynamicsResult] = None
+    """Terminal dispersion of the caller-declared latent SDE, when one was given.
+
+    ``None`` unless a :class:`LatentDynamicsScenario` was supplied. It is a
+    **simulated scenario dispersion under a declared SDE**, not a calibrated
+    prediction interval: the drift and diffusion are caller inputs, not
+    estimates, and this field must never be read as ``confidence_lower`` /
+    ``confidence_upper``. The result carries its own
+    :data:`~backend.modules.engine.latent_dynamics.DISPERSION_LABEL` and a
+    ``calibrated`` flag that is always ``False``.
+    """
+
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -329,6 +363,13 @@ class MultiBankAnalysis:
             ),
             "crowding": self.crowding.to_dict() if self.crowding else None,
             "topology": self.topology.to_dict() if self.topology else None,
+            "liquidity_spiral": {
+                bank_id: result.to_dict()
+                for bank_id, result in self.liquidity_spiral.items()
+            },
+            "latent_dynamics": (
+                self.latent_dynamics.to_dict() if self.latent_dynamics else None
+            ),
             "shock_scenarios": {
                 bank_id: result.to_dict()
                 for bank_id, result in self.shock_scenarios.items()
@@ -373,6 +414,8 @@ class BankRiskAnalyzer:
         holdings: Optional[pd.DataFrame] = None,
         concentration_threshold: Optional[float] = None,
         topology_parameters: Optional[PersistenceVectorParameters] = None,
+        spiral_parameters: Optional[Mapping[str, SpiralParameters]] = None,
+        latent_dynamics_scenario: Optional[LatentDynamicsScenario] = None,
     ) -> MultiBankAnalysis:
         """Score every institution, then analyse the network if possible.
 
@@ -400,6 +443,26 @@ class BankRiskAnalyzer:
             topology_parameters: Optional persistence-vector parameters. When
                 supplied, the exposure network's topological signature is computed;
                 this requires the network to exist.
+            spiral_parameters: Optional per-institution Brunnermeier-Pedersen
+                parameters. When supplied, each institution that failed to pay in
+                the clearing equilibrium has its shortfall translated into the
+                adverse price move its forced sale implies
+                (:func:`~backend.modules.risk.liquidity_spiral.shock_from_shortfall`),
+                and the coupled market/funding spiral is solved from there. This
+                requires the clearing equilibrium to exist -- the shock *is* the
+                shortfall -- and must cover every defaulting institution, since a
+                partial table would omit institutions silently.
+            latent_dynamics_scenario: Optional caller-declared latent SDE. When
+                supplied, every analysed institution's initial latent stress state
+                is advanced stochastically and the terminal dispersion is attached
+                as :attr:`MultiBankAnalysis.latent_dynamics`. The scenario must
+                cover *every* analysed institution: a partial scenario would
+                attach a dispersion table that reads as though the omitted
+                institutions had none. The output is a **simulated scenario
+                dispersion under a declared SDE, not a calibrated prediction
+                interval** -- the drift and diffusion are caller inputs and are
+                neither fitted nor validated here -- so it is deliberately not
+                placed in ``confidence_lower``/``confidence_upper``.
 
         Returns:
             A :class:`MultiBankAnalysis`. ``systemic_risk_score`` is ``None``
@@ -586,6 +649,93 @@ class BankRiskAnalyzer:
                 reference=str(topology_parameters.reference),
             )
 
+        spiral_results: Dict[str, SpiralResult] = {}
+        if spiral_parameters is not None:
+            if clearing is None:
+                raise ValueError(
+                    "spiral_parameters were supplied but there is no clearing "
+                    "equilibrium: the spiral's initial shock is the clearing "
+                    "shortfall, so supply interbank exposures and endowments. Without "
+                    "them a shock would have to be invented from the model score, "
+                    "which would make the spiral a restatement of the model."
+                )
+
+            unknown_spiral = sorted(set(spiral_parameters) - set(bank_ids))
+            if unknown_spiral:
+                raise KeyError(
+                    "spiral_parameters names institutions outside the analysis: "
+                    f"{unknown_spiral}"
+                )
+            for institution, parameters in spiral_parameters.items():
+                if not isinstance(parameters, SpiralParameters):
+                    raise TypeError(
+                        f"spiral_parameters[{institution!r}] must be a SpiralParameters, "
+                        f"got {type(parameters).__name__}"
+                    )
+
+            # The shock is the institution's own unpaid obligation. `node_ids`
+            # defines the clearing vector's index order, so resolve positions
+            # through it rather than assuming it matches `bank_ids`.
+            position_of = {
+                bank_id: index for index, bank_id in enumerate(clearing.node_ids)
+            }
+            shortfalls: Dict[str, float] = {
+                bank_id: float(
+                    clearing.nominal_liabilities[position_of[bank_id]]
+                    - clearing.payments[position_of[bank_id]]
+                )
+                for bank_id in bank_ids
+            }
+            defaulting = {
+                bank_id for bank_id, shortfall in shortfalls.items() if shortfall > 0.0
+            }
+            missing = sorted(defaulting - set(spiral_parameters))
+            if missing:
+                # Same reasoning as the regulatory table: a partial spiral table
+                # omits institutions, which reads as though they were unaffected.
+                raise ValueError(
+                    "spiral_parameters must cover every institution that failed to pay "
+                    f"in the clearing equilibrium; missing {missing}"
+                )
+
+            for bank_id, parameters in spiral_parameters.items():
+                shock = shock_from_shortfall(
+                    shortfalls[bank_id],
+                    price=parameters.price,
+                    price_impact=parameters.price_impact,
+                )
+                spiral_results[bank_id] = LiquiditySpiralModel(parameters).cascade(shock)
+
+        latent_result: Optional[LatentDynamicsResult] = None
+        if latent_dynamics_scenario is not None:
+            if not isinstance(latent_dynamics_scenario, LatentDynamicsScenario):
+                raise TypeError(
+                    "latent_dynamics_scenario must be a LatentDynamicsScenario, got "
+                    f"{type(latent_dynamics_scenario).__name__}"
+                )
+            named = set(latent_dynamics_scenario.institution_ids)
+            analysed = {str(bank_id) for bank_id in bank_ids}
+            unknown_latent = sorted(named - analysed)
+            if unknown_latent:
+                raise KeyError(
+                    "latent_dynamics_scenario names institutions outside the analysis: "
+                    f"{unknown_latent}"
+                )
+            absent_latent = sorted(analysed - named)
+            if absent_latent:
+                # Same reasoning as the regulatory and spiral tables: omitting an
+                # institution would attach a dispersion table that reads as though
+                # the omitted institutions had no simulated dispersion.
+                raise ValueError(
+                    "latent_dynamics_scenario must cover every analysed institution; "
+                    f"missing {absent_latent}"
+                )
+            # Nothing here is derived from the model score. The initial latent
+            # states are the caller's declaration; manufacturing them from a risk
+            # score would make the simulated dispersion a restatement of the
+            # model rather than a property of the declared process.
+            latent_result = simulate_latent_stress(latent_dynamics_scenario)
+
         return MultiBankAnalysis(
             analysis_date=pd.Timestamp.now().isoformat(),
             num_banks=len(bank_ids),
@@ -604,6 +754,8 @@ class BankRiskAnalyzer:
             regulatory_stress=regulatory_stress_result,
             crowding=crowding_result,
             topology=topology_result,
+            liquidity_spiral=spiral_results,
+            latent_dynamics=latent_result,
         )
 
     def _score_bank(self, bank_id: str, df: pd.DataFrame) -> float:
@@ -860,11 +1012,18 @@ OVERALL SYSTEM HEALTH:
 
 
 def _risk_to_text(risk: float) -> str:
-    """Convert a risk score to human-readable text."""
-    if risk < 0.3:
+    """Convert a risk score to human-readable text.
+
+    Reads the same named thresholds as :meth:`BankRiskAnalyzer._risk_level`
+    instead of repeating the literals. The two functions previously hard-coded the
+    same three numbers independently, so a change to ``constants.py`` would have
+    left the narrative summary disagreeing with the per-institution risk level it
+    summarises -- with nothing to detect the drift.
+    """
+    if risk < RISK_THRESHOLD_LOW:
         return "LOW RISK"
-    if risk < 0.6:
+    if risk < RISK_THRESHOLD_MODERATE:
         return "MODERATE RISK"
-    if risk < 0.85:
+    if risk < RISK_THRESHOLD_HIGH:
         return "HIGH RISK"
     return "CRITICAL RISK"

@@ -51,6 +51,14 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
+from backend.modules.engine.cpcv import (
+    CPCVConfig,
+    CPCVSplit,
+    _contiguous_blocks,
+    combinatorial_purged_splits,
+    n_backtest_paths,
+)
+
 try:  # pandas is a runtime convenience, not a hard requirement of the framework
     import pandas as pd
 
@@ -655,6 +663,72 @@ def walk_forward_folds_per_segment(
 
 
 # ---------------------------------------------------------------------------
+# Combinatorial purged cross-validation
+# ---------------------------------------------------------------------------
+def generate_cpcv_folds(
+    n_samples: int,
+    config: Optional[CPCVConfig] = None,
+) -> List[CPCVSplit]:
+    """Build combinatorial purged, embargoed splits for the harness.
+
+    This is a thin adapter over
+    :func:`backend.modules.engine.cpcv.combinatorial_purged_splits`, so the
+    backtest harness and the combinatorics share one definition of a split rather
+    than two that can drift.
+
+    **Why CPCV at all.** Walk-forward uses a single chronological ordering of
+    disjoint test blocks, so it yields one out-of-sample path and its metrics carry
+    the sampling error of that one path. CPCV holds out *every* combination of
+    ``n_test_groups`` contiguous groups, which produces several complete backtest
+    paths and turns a point estimate into a distribution. That is the only way to
+    see whether a model's edge survives re-orderings of which period is out of
+    sample -- the question a single walk-forward number cannot answer.
+
+    Degenerate splits (no training or no test data left after purging) are
+    returned rather than dropped, so a caller can report how many were unusable.
+    A configuration that leaves *no* usable split raises here: silently returning
+    an empty fold list would read downstream as "the model was validated" when
+    nothing was evaluated.
+
+    Args:
+        n_samples: Total number of time-ordered observations.
+        config: CPCV parameters. Defaults to :class:`CPCVConfig`.
+
+    Returns:
+        Every split, in the deterministic lexicographic order the generator yields.
+
+    Raises:
+        ValueError: If the configuration yields no usable split.
+    """
+    config = config or CPCVConfig()
+    splits = list(combinatorial_purged_splits(n_samples, config))
+    if not any(split.is_usable for split in splits):
+        raise ValueError(
+            f"CPCV configuration {config.to_dict()} yields no usable split of "
+            f"{n_samples} observations: every combination leaves an empty train or "
+            "test set after purging. Use fewer groups, fewer test groups, or more "
+            "samples."
+        )
+    return splits
+
+
+def cpcv_split_boundaries(split: CPCVSplit) -> np.ndarray:
+    """Interior segment boundaries of a split's test indices.
+
+    A CPCV test set is a union of non-adjacent contiguous groups, so scoring the
+    directional hit rate across the whole union would difference across the gap
+    between two groups -- a transition that never occurred in the series, exactly
+    the artefact :class:`WalkForwardBacktester` already corrects for fold seams.
+    The boundaries returned here let :func:`hit_rate` pool within each contiguous
+    test block instead.
+    """
+    blocks = _contiguous_blocks(np.asarray(split.test_indices, dtype=int))
+    return np.asarray(
+        boundaries_from_group_sizes([end - start for start, end in blocks]), dtype=int
+    )
+
+
+# ---------------------------------------------------------------------------
 # Result objects
 # ---------------------------------------------------------------------------
 
@@ -922,3 +996,218 @@ class WalkForwardBacktester:
             )
             named_results[str(name)] = runner.run(X, y)
         return BaselineComparison(primary=primary, baselines=named_results)
+
+
+# ---------------------------------------------------------------------------
+# CPCV backtester
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CPCVFoldResult:
+    """One CPCV split's bookkeeping and metrics.
+
+    This is deliberately **not** :class:`FoldResult`. That class derives
+    ``n_train`` as ``train_end - train_start``, which is only correct when the
+    training indices are contiguous. A CPCV training set is the complement of the
+    test groups *minus* the purged and embargoed observations, so it has holes and
+    its span overstates its size -- reporting it through ``FoldResult`` would
+    overstate the training data in every fold. Sizes are counted explicitly here.
+    """
+
+    fold: int
+    test_groups: Tuple[int, ...]
+    n_train: int
+    n_test: int
+    n_purged: int
+    n_embargoed: int
+    metrics: Dict[str, float] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "fold": int(self.fold),
+            "test_groups": [int(group) for group in self.test_groups],
+            "n_train": int(self.n_train),
+            "n_test": int(self.n_test),
+            "n_purged": int(self.n_purged),
+            "n_embargoed": int(self.n_embargoed),
+            "metrics": {key: _json_safe(value) for key, value in self.metrics.items()},
+        }
+
+
+@dataclass
+class CPCVBacktestResult:
+    """CPCV output: a metric *distribution* across splits, not one OOS series.
+
+    **Why predictions are not concatenated.** :class:`WalkForwardBacktester`
+    concatenates fold predictions because its test blocks are disjoint and cover
+    the sample once. CPCV does not have that property: every observation is test
+    data in ``n_test_groups * C(N, k) / N`` different splits, so concatenating the
+    split predictions would score the same observation several times and produce a
+    series longer than the sample. The statistically meaningful object is the
+    distribution of each metric across splits, which is what this class reports:
+    a central tendency plus the dispersion, minimum and maximum.
+
+    A wide dispersion is the finding, not noise to be averaged away -- it says the
+    model's score depends on which period happened to be held out.
+    """
+
+    config: CPCVConfig
+    metrics: BacktestMetrics
+    metric_dispersion: Dict[str, float]
+    metric_min: Dict[str, float]
+    metric_max: Dict[str, float]
+    fold_results: List[CPCVFoldResult]
+    unusable_splits: List[Dict[str, Any]]
+    n_usable_splits: int
+    n_backtest_paths: int
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "scheme": "cpcv",
+            "config": self.config.to_dict(),
+            "metrics": self.metrics.to_dict(),
+            "metric_dispersion": {
+                key: _json_safe(value) for key, value in self.metric_dispersion.items()
+            },
+            "metric_min": {key: _json_safe(value) for key, value in self.metric_min.items()},
+            "metric_max": {key: _json_safe(value) for key, value in self.metric_max.items()},
+            "folds": [fold.to_dict() for fold in self.fold_results],
+            "unusable_splits": list(self.unusable_splits),
+            "n_usable_splits": int(self.n_usable_splits),
+            "n_backtest_paths": int(self.n_backtest_paths),
+            "aggregation": (
+                "mean/std/min/max across splits; predictions are NOT concatenated, "
+                "because CPCV test sets overlap and a concatenated series would "
+                "score observations more than once"
+            ),
+        }
+
+
+class CPCVBacktester:
+    """Run a duck-typed model through combinatorial purged cross-validation.
+
+    ``model_factory`` is a zero-argument callable returning a *fresh* object
+    exposing ``.fit(X, y)`` and ``.predict(X)``, exactly as
+    :class:`WalkForwardBacktester` requires. A new model is built for every split,
+    so no state can leak between splits.
+
+    Use this *in addition to* walk-forward, not instead of it. CPCV answers "does
+    the edge survive re-orderings of which period is out of sample"; walk-forward
+    answers "does it survive the one ordering that actually happened". They are
+    different questions and a model should be believed only if both are answered.
+    """
+
+    def __init__(
+        self,
+        model_factory: Callable[[], Any],
+        config: Optional[CPCVConfig] = None,
+    ) -> None:
+        if not callable(model_factory):
+            raise TypeError("model_factory must be a zero-argument callable")
+        if config is not None and not isinstance(config, CPCVConfig):
+            raise TypeError(f"config must be a CPCVConfig, got {type(config).__name__}")
+        self.model_factory = model_factory
+        self.config = config if config is not None else CPCVConfig()
+
+    def run(self, X: ArrayLike, y: ArrayLike) -> CPCVBacktestResult:
+        features = _as_2d(X)
+        target = _as_1d(y)
+        if features.shape[0] != target.size:
+            raise ValueError(
+                f"X and y have mismatched lengths: X has {features.shape[0]} rows, "
+                f"y has {target.size}"
+            )
+
+        splits = generate_cpcv_folds(target.size, self.config)
+
+        fold_results: List[CPCVFoldResult] = []
+        unusable: List[Dict[str, Any]] = []
+        per_metric: Dict[str, List[float]] = {key: [] for key in _METRIC_KEYS}
+
+        for split in splits:
+            if not split.is_usable:
+                unusable.append(split.to_dict())
+                continue
+
+            model = self.model_factory()
+            if not hasattr(model, "fit") or not hasattr(model, "predict"):
+                raise TypeError(
+                    "model_factory must return an object exposing .fit(X, y) and "
+                    f".predict(X); got {type(model).__name__}"
+                )
+
+            model.fit(features[split.train_indices], target[split.train_indices])
+            predictions = np.asarray(
+                model.predict(features[split.test_indices]), dtype=float
+            ).ravel()
+            if predictions.size != split.test_indices.size:
+                raise ValueError(
+                    f"Split {split.fold}: model returned {predictions.size} predictions "
+                    f"for {split.test_indices.size} test samples"
+                )
+
+            # Pool the directional score within each contiguous test block: a CPCV
+            # test set is a union of non-adjacent groups, so scoring across the gap
+            # between two groups would difference a transition that never happened.
+            metrics = compute_metrics(
+                actual=target[split.test_indices],
+                predicted=predictions,
+                boundaries=cpcv_split_boundaries(split),
+            )
+            for key in _METRIC_KEYS:
+                per_metric[key].append(float(metrics.get(key, float("nan"))))
+
+            fold_results.append(
+                CPCVFoldResult(
+                    fold=split.fold,
+                    test_groups=split.test_groups,
+                    n_train=split.n_train,
+                    n_test=split.n_test,
+                    n_purged=split.n_purged,
+                    n_embargoed=split.n_embargoed,
+                    metrics=metrics,
+                )
+            )
+
+        def _aggregate(reducer: Callable[[np.ndarray], float]) -> Dict[str, float]:
+            out: Dict[str, float] = {}
+            for key in _METRIC_KEYS:
+                values = np.asarray(per_metric[key], dtype=float)
+                finite = values[np.isfinite(values)]
+                out[key] = float(reducer(finite)) if finite.size else float("nan")
+            return out
+
+        mean_metrics = _aggregate(np.mean)
+        return CPCVBacktestResult(
+            config=self.config,
+            metrics=BacktestMetrics.from_dict(mean_metrics),
+            metric_dispersion=_aggregate(lambda v: float(np.std(v))),
+            metric_min=_aggregate(np.min),
+            metric_max=_aggregate(np.max),
+            fold_results=fold_results,
+            unusable_splits=unusable,
+            n_usable_splits=len(fold_results),
+            n_backtest_paths=n_backtest_paths(
+                self.config.n_groups, self.config.n_test_groups
+            ),
+        )
+
+    def compare(
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        baselines: Sequence[str] = ("persistence", "ar1"),
+    ) -> Dict[str, CPCVBacktestResult]:
+        """Run the primary model and each named baseline over the same splits.
+
+        Every model sees the identical CPCV splits and the identical pooled-metric
+        rules, so a difference between two entries is attributable to the model.
+        """
+        results: Dict[str, CPCVBacktestResult] = {"primary": self.run(X, y)}
+        for name in baselines:
+            runner = CPCVBacktester(
+                model_factory=baseline_factory(name), config=self.config
+            )
+            results[str(name)] = runner.run(X, y)
+        return results

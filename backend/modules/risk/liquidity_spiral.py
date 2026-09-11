@@ -78,6 +78,7 @@ __all__ = [
     "SpiralResult",
     "LiquiditySpiralModel",
     "linear_amplification",
+    "shock_from_shortfall",
     "stability_impact_limit",
     "solve_quadratic_price_change",
 ]
@@ -283,6 +284,62 @@ def linear_amplification(
     if denominator <= 0:
         return float("inf")
     return float(1.0 + numerator / denominator)
+
+
+def shock_from_shortfall(
+    shortfall: float,
+    *,
+    price: float,
+    price_impact: float,
+) -> float:
+    """Translate a cash shortfall into the adverse price move its liquidation implies.
+
+    This is the bridge from the clearing engine to the spiral. Clearing answers
+    *who fails to pay and by how much*; that shortfall has to be met in cash, and
+    the only way to raise cash in this model is to sell the risky asset. Selling
+    ``S / price`` units at an impact of ``lambda`` per unit moves the price by
+    ``lambda * S / price``. The move is returned negative because a forced sale is
+    adverse.
+
+    **What this does and does not count.** The returned move is the *exogenous*
+    shock passed to :meth:`LiquiditySpiralModel.cascade`. It represents the price
+    move caused by the shortfall-driven sale. The spiral then adds the *further*
+    deleveraging forced by the margin constraint. Those are two different sales
+    (one required by the cash shortfall, one required by the leverage constraint),
+    so the initial sale is not counted twice.
+
+    This is a first-order approximation and is stated as one: it assumes the
+    impact is linear and that the sale is small relative to the market. A large
+    shortfall will be understated, because the true proceeds of a forced sale fall
+    as the price moves against the seller within the sale itself. The spiral's own
+    iteration handles that feedback for the *subsequent* sales; it does not correct
+    for it within this initial one.
+
+    Args:
+        shortfall: Cash the holder cannot pay, in the same units as ``price``.
+            Must be non-negative; a negative shortfall is a surplus, which forces
+            no sale and is a caller error rather than a shock of the opposite sign.
+        price: Pre-shock asset price. Must be positive.
+        price_impact: ``lambda``, the price move per unit sold. Non-negative.
+
+    Returns:
+        The exogenous price change, ``<= 0``, ready for
+        :meth:`LiquiditySpiralModel.cascade`.
+    """
+    if not math.isfinite(shortfall):
+        raise ValueError(f"shortfall must be finite, got {shortfall}")
+    if shortfall < 0:
+        raise ValueError(
+            f"shortfall must be non-negative; a negative value is a surplus and "
+            f"forces no sale, got {shortfall}"
+        )
+    if not math.isfinite(price) or price <= 0:
+        raise ValueError(f"price must be positive and finite, got {price}")
+    if not math.isfinite(price_impact) or price_impact < 0:
+        raise ValueError(f"price_impact must be non-negative and finite, got {price_impact}")
+
+    units_sold = shortfall / price
+    return float(-price_impact * units_sold)
 
 
 def solve_quadratic_price_change(

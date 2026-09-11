@@ -6,11 +6,22 @@ import { TileLayer } from '@deck.gl/geo-layers'
 import { HeatmapLayer } from '@deck.gl/aggregation-layers'
 import MapLegend from './MapLegend'
 import { getRiskColor, networkConnections } from '../../data/network-connections'
+import { normalizeNetworkGraph, useNetworkGraph } from '../../hooks/useApi'
 import { regions } from '../../data/regions'
 import regionBoundaries from '../../data/region-boundaries.json'
 
 const BASEMAP_URL = 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-const MAX_EXPOSURE = 312_000_000_000
+
+// Visual placeholder for a region with no scored corridor. It is a colour input,
+// not a financial figure: a risk score is never invented for an exposure that
+// has none, but the marker still has to be drawn.
+const NEUTRAL_REGION_RISK = 0.35
+
+// Neutral arc colour used when the API reports no risk score for an edge.
+// Painting an unscored exposure with a "low risk" green would assert something
+// the data does not say.
+const UNSCORED_ARC_COLOR = [96, 165, 250]
+
 const MAX_BANK_POINTS = 500
 
 const INITIAL_VIEW_STATE = {
@@ -60,7 +71,8 @@ export default function RiskMap({
   showHeatmap = true,
   banks = [],
   onConnectionClick,
-  resetToken = 0
+  resetToken = 0,
+  allowStaticNetworkFallback = false
 }) {
   const [viewState, setViewState] = useState(INITIAL_VIEW_STATE)
 
@@ -68,11 +80,58 @@ export default function RiskMap({
     setViewState(INITIAL_VIEW_STATE)
   }, [resetToken])
 
+  const {
+    data: networkPayload,
+    isLoading: networkLoading,
+    isError: networkIsError,
+    error: networkError,
+    refetch: refetchNetwork
+  } = useNetworkGraph()
+
+  const network = useMemo(() => normalizeNetworkGraph(networkPayload), [networkPayload])
+
+  // The bundled file is demo data. It is only ever rendered when the caller
+  // explicitly opts in AND the backend has nothing to serve; the opt-in path is
+  // surfaced in the UI so it cannot be mistaken for a live network.
+  const fallbackActive = Boolean(
+    allowStaticNetworkFallback &&
+      !networkLoading &&
+      (networkIsError || network.status === 'unavailable') &&
+      networkConnections.length > 0
+  )
+
+  const connections = useMemo(() => {
+    if (network.status === 'available') {
+      return network.edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        exposure: Number(edge.exposure),
+        riskScore: typeof edge.risk_score === 'number' ? edge.risk_score : null,
+        layer: edge.layer,
+        kind: edge.kind
+      }))
+    }
+    if (fallbackActive) {
+      return networkConnections.map((connection) => ({
+        ...connection,
+        riskScore: typeof connection.riskScore === 'number' ? connection.riskScore : null
+      }))
+    }
+    return []
+  }, [network, fallbackActive])
+
+  const maxExposure = useMemo(
+    () => connections.reduce((max, connection) => Math.max(max, connection.exposure || 0), 0) || 1,
+    [connections]
+  )
+
   const riskByRegion = useMemo(() => {
     const totals = {}
-    for (const connection of networkConnections) {
+    for (const connection of connections) {
       for (const regionId of [connection.source, connection.target]) {
         const entry = totals[regionId] || (totals[regionId] = { sum: 0, count: 0, max: 0 })
+        if (typeof connection.riskScore !== 'number') continue
         entry.sum += connection.riskScore
         entry.count += 1
         entry.max = Math.max(entry.max, connection.riskScore)
@@ -82,12 +141,12 @@ export default function RiskMap({
     return Object.fromEntries(
       regions.map((region) => {
         const entry = totals[region.id]
-        if (!entry) return [region.id, 0.35]
+        if (!entry || entry.count === 0) return [region.id, NEUTRAL_REGION_RISK]
         const blended = (entry.sum / entry.count) * 0.6 + entry.max * 0.4
         return [region.id, Number(blended.toFixed(3))]
       })
     )
-  }, [])
+  }, [connections])
 
   const regionPoints = useMemo(
     () =>
@@ -99,7 +158,7 @@ export default function RiskMap({
         bankCount: region.bankCount,
         regionId: region.id,
         position: [region.lon, region.lat],
-        risk: riskByRegion[region.id] ?? 0.35
+        risk: riskByRegion[region.id] ?? NEUTRAL_REGION_RISK
       })),
     [riskByRegion]
   )
@@ -129,7 +188,7 @@ export default function RiskMap({
 
   const arcs = useMemo(
     () =>
-      networkConnections
+      connections
         .map((connection) => {
           const source = regionById[connection.source]
           const target = regionById[connection.target]
@@ -142,8 +201,10 @@ export default function RiskMap({
           }
         })
         .filter(Boolean),
-    []
+    [connections]
   )
+
+  const unplacedEdges = connections.length - arcs.length
 
   const heatPoints = useMemo(() => {
     if (!bankPoints.length) return regionPoints
@@ -231,9 +292,11 @@ export default function RiskMap({
           pickable: true,
           getSourcePosition: (arc) => arc.sourcePosition,
           getTargetPosition: (arc) => arc.targetPosition,
-          getSourceColor: (arc) => riskColor(arc.riskScore, 230),
-          getTargetColor: (arc) => riskColor(arc.riskScore, 80),
-          getWidth: (arc) => 1 + (arc.exposure / MAX_EXPOSURE) * 4,
+          getSourceColor: (arc) =>
+            arc.riskScore == null ? [...UNSCORED_ARC_COLOR, 230] : riskColor(arc.riskScore, 230),
+          getTargetColor: (arc) =>
+            arc.riskScore == null ? [...UNSCORED_ARC_COLOR, 80] : riskColor(arc.riskScore, 80),
+          getWidth: (arc) => 1 + (arc.exposure / maxExposure) * 4,
           widthUnits: 'pixels',
           getHeight: 0.35,
           updateTriggers: {
@@ -324,6 +387,7 @@ export default function RiskMap({
     bankPoints,
     baseLayer,
     heatPoints,
+    maxExposure,
     riskByRegion,
     scatterRegionPoints,
     selectedIso3,
@@ -356,6 +420,26 @@ export default function RiskMap({
     setViewState((previous) => ({ ...previous, ...next }))
   }, [])
 
+  // Explicit, visible states for the live network. The map must never look the
+  // same when the backend failed as when it legitimately has no network yet.
+  let networkStatus = null
+  if (networkLoading) {
+    networkStatus = 'Loading interbank exposures…'
+  } else if (fallbackActive) {
+    networkStatus =
+      'DEMO NETWORK — the backend has no exposure matrix; showing the bundled sample file. Not live data; do not use for decisions.'
+  } else if (networkIsError) {
+    networkStatus = `Interbank exposures unavailable: ${networkError?.message ?? 'request failed'}.`
+  } else if (network.status === 'unavailable') {
+    networkStatus = `No interbank exposure network available. ${network.reason ?? ''}`.trim()
+  } else {
+    const vintage = network.asOf ? `as of ${network.asOf}` : 'vintage unknown'
+    const unplaced = unplacedEdges
+      ? ` ${unplacedEdges} edge(s) could not be placed (no region reference for an endpoint).`
+      : ''
+    networkStatus = `Live interbank network, ${vintage} — ${network.edges.length} edge(s), ${network.nodes.length} institution(s).${unplaced}`
+  }
+
   return (
     <div
       data-testid="risk-map"
@@ -371,6 +455,31 @@ export default function RiskMap({
         onClick={handleClick}
         getCursor={({ isDragging, isHovering }) => (isDragging ? 'grabbing' : isHovering ? 'pointer' : 'grab')}
       />
+
+      {showNetwork && (
+        <div
+          data-testid="network-status"
+          className={[
+            'absolute left-4 top-4 z-10 max-w-xs rounded-lg px-3 py-2 text-xs',
+            fallbackActive
+              ? 'bg-amber-500/90 text-slate-950'
+              : networkIsError
+              ? 'bg-red-900/85 text-red-50'
+              : 'bg-slate-950/80 text-slate-200'
+          ].join(' ')}
+        >
+          <p>{networkStatus}</p>
+          {networkIsError && !fallbackActive && (
+            <button
+              type="button"
+              onClick={() => refetchNetwork()}
+              className="mt-1 underline underline-offset-2"
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )}
 
       <MapLegend showNetwork={showNetwork} className="absolute right-4 top-4 z-10" />
 

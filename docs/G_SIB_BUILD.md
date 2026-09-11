@@ -372,5 +372,17 @@ useful to a reviewer.
   contracts, not yet wired into the live report pipeline.~~ **Closed in §2.10.**
   `regulatory.py`, `portfolio_overlap.py` and `persistence_vectors.py` are now
   fed from `analyze_multiple_banks` through optional, fail-closed arguments, and
-  rendered in the multi-institution report. Every one of the nine review items is
-  therefore both implemented and reachable from the engine.
+  rendered in the multi-institution report.
+- **The claim that followed that closure was wrong and is corrected here.** This
+  document previously said "every one of the nine review items is therefore both
+  implemented and reachable from the engine". A transitive import-graph scan of
+  the whole backend (see `EXECUTIVE_REVIEW_REMEDIATION.md`, third round) found
+  that this was false: `conformal.py`, `federated.py`, `hidden_markov.py`,
+  `subgraphx.py`, `uncertainty.py`, `event_metrics.py`, `causal_validation.py`,
+  `causal_discovery.py`, `tncm_vae.py`, `mixture_of_experts.py`,
+  `network_gate.py`, `streaming.py`, `timeseries_store.py` and the whole
+  `modules/data/connectors/` package are implemented and tested but reachable
+  from nothing that runs. The sentence is left visible above rather than deleted,
+  because "the note said it was done" is how the gap survived two review rounds.
+  Reachability is now asserted by `backend/tests/test_reachability.py`, which
+  fails when the census and the code disagree in either direction.

@@ -280,3 +280,58 @@ export function useBanksByRegion(filters) {
     }
   })
 }
+
+/**
+ * The current interbank multiplex network graph.
+ *
+ * Interbank exposures change daily and are an obligation set, so they come from
+ * the backend (`GET /api/v1/network/graph`) rather than from a bundled fixture.
+ * The endpoint answers 200 with `status: "unavailable"` when no institution has
+ * uploaded a bilateral exposure matrix; that is a first-class state, not an
+ * error, so callers should render it as "no network available" and must not
+ * substitute the static demo file.
+ */
+export function useNetworkGraph(options = {}) {
+  return useQuery({
+    queryKey: ['network', 'graph'],
+    queryFn: () => fetchApi('/v1/network/graph'),
+    staleTime: options.staleTime ?? 30_000,
+    enabled: options.enabled ?? true
+  })
+}
+
+/**
+ * Flatten an API network payload into the shape the map components render.
+ *
+ * Kept next to the hook so the unavailable/available distinction is decoded in
+ * exactly one place; a component must never have to guess whether an empty
+ * `edges` array means "no network" or "a network with no edges".
+ */
+export function normalizeNetworkGraph(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return {
+      status: 'unavailable',
+      asOf: null,
+      generatedAt: null,
+      source: null,
+      reason: 'No network response was returned.',
+      nodes: [],
+      edges: [],
+      layers: [],
+      metadata: {}
+    }
+  }
+
+  return {
+    status: payload.status === 'available' ? 'available' : 'unavailable',
+    asOf: payload.as_of ?? null,
+    generatedAt: payload.generated_at ?? null,
+    source: payload.source ?? null,
+    reason: payload.unavailable_reason ?? null,
+    nodes: Array.isArray(payload.nodes) ? payload.nodes : [],
+    edges: Array.isArray(payload.edges) ? payload.edges : [],
+    layers: Array.isArray(payload.layers) ? payload.layers : [],
+    metadata:
+      payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}
+  }
+}
