@@ -180,6 +180,9 @@ def run_data_collection(self, job_id: int, parameters: dict):
             "fit_for_engine": data_package.quality_report.fit_for_engine,
             "anomalies_detected": data_package.quality_report.anomalies_detected,
             "quality_attestation": (data_package.metadata or {}).get("quality_attestation"),
+            # Content address of the exact rows this verdict was issued against.
+            "snapshot_id": (data_package.metadata or {}).get("snapshot_id"),
+            "dataset_snapshot": (data_package.metadata or {}).get("dataset_snapshot"),
             "output_path": data_package.timeseries_path,
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "regions": selected_regions,
@@ -398,6 +401,12 @@ def run_training(self, job_id: int, parameters: dict):
         # Prepare results with training metrics
         data_job = service.get_job(data_job_id)
 
+        # Walk-forward lift over simple baselines. Only the single-scale trainer
+        # produces it today: the multi-scale model takes several heterogeneous
+        # inputs, so the flat design matrix the backtest harness needs does not
+        # describe it. Absent means "not measured", not "no lift".
+        baseline_comparison = getattr(training_metrics, "baseline_comparison", None)
+
         result = {
             "status": "completed",
             "message": f"Model training completed successfully with {model_type.upper()}",
@@ -422,6 +431,9 @@ def run_training(self, job_id: int, parameters: dict):
             "test_mae": float(training_metrics.test_mae),
             "test_rmse": float(training_metrics.test_rmse),
             "test_r2": float(training_metrics.test_r2),
+            # Walk-forward lift over simple baselines: without it, the complexity
+            # of a bespoke attention model is unjustified.
+            "baseline_comparison": baseline_comparison,
             "model_path": training_metrics.model_path,
             "predictions_path": training_metrics.predictions_path,
             "training_history_path": str(history_path),
@@ -434,6 +446,44 @@ def run_training(self, job_id: int, parameters: dict):
         data_scope = data_job.result if (data_job and isinstance(data_job.result, dict)) else {}
         result["regions"] = data_scope.get("regions")
         result["countries"] = data_scope.get("countries")
+
+        # Reproducibility manifest: bind the artefact to the code revision, the
+        # resolved config, the DATA attestation and the data snapshot it was
+        # trained on, and hash the weights so tampering is detectable.
+        from backend.modules.engine.reproducibility import ModelManifest
+
+        attestation_payload = data_scope.get("quality_attestation") or {}
+        training_summary = {
+            "epochs_trained": int(training_metrics.total_epochs),
+            "best_epoch": int(training_metrics.best_epoch) + 1,
+            "best_val_loss": float(min(training_metrics.val_loss)),
+            "test_loss": float(training_metrics.test_loss),
+            "test_mae": float(training_metrics.test_mae),
+            "test_rmse": float(training_metrics.test_rmse),
+            "test_r2": float(training_metrics.test_r2),
+        }
+        manifest = ModelManifest.capture(
+            training_metrics.model_path,
+            config,
+            job_id=str(job_id),
+            model_type=str(model_type).upper(),
+            attestation_id=attestation_payload.get("attestation_id"),
+            snapshot_id=data_scope.get("snapshot_id"),
+            dataset_row_counts=attestation_payload.get("dataset_row_counts"),
+            training_metrics=training_summary,
+            backtest=baseline_comparison,
+            extra={
+                "data_source_job": str(data_job_id),
+                "multi_scale": bool(has_multi_source),
+                "train_records": int(len(train_subset)),
+                "val_records": int(len(val_subset)),
+                "test_records": int(len(test_df)),
+            },
+        )
+        manifest_path = manifest.write()
+        result["reproducibility_manifest"] = manifest_path
+        result["reproducibility"] = manifest.to_dict()
+        logger.info("[%s] Model provenance: %s", job_id, manifest.describe())
 
         # Add per-source metrics if available
         if hasattr(training_metrics, 'per_source_metrics'):
@@ -540,14 +590,15 @@ def run_prediction(self, job_id: int, parameters: dict):
 
         # Initialize prediction engine
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        attestation = DataQualityGate.attestation_from_job_result(
+            data_scope if isinstance(data_scope, dict) else {},
+            job_id=str(data_source_job),
+        )
         engine = RealPredictionEngine(
             model_path=model_path,
             device=device,
             config=parameters.get('config', {}),
-            quality_attestation=DataQualityGate.attestation_from_job_result(
-                data_scope if isinstance(data_scope, dict) else {},
-                job_id=str(data_source_job),
-            ),
+            quality_attestation=attestation,
         )
 
         self.update_progress(job_id, 40.0)
@@ -562,8 +613,9 @@ def run_prediction(self, job_id: int, parameters: dict):
         if data_job and isinstance(data_job.result, dict):
             data_scope = data_job.result
 
-        # Generate predictions
-        prediction_result = engine.predict(data)
+        # Generate predictions. The attestation travels as an explicit argument,
+        # so no pandas reshape between loading and inference can drop it.
+        prediction_result = engine.predict(data, attestation=attestation)
 
         self.update_progress(job_id, 80.0)
 
@@ -701,86 +753,108 @@ def run_backtest(self, job_id: int, parameters: dict):
 
         # Initialize prediction engine with trained model
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        attestation = DataQualityGate.attestation_from_job_result(
+            data_scope if isinstance(data_scope, dict) else {},
+            job_id=str(data_source_job),
+        )
         engine = RealPredictionEngine(
             model_path=model_path,
             device=device,
             config=parameters.get('config', {}),
-            quality_attestation=DataQualityGate.attestation_from_job_result(
-                data_scope if isinstance(data_scope, dict) else {},
-                job_id=str(data_source_job),
-            ),
+            quality_attestation=attestation,
         )
 
         self.update_progress(job_id, 60.0)
 
-        # Generate predictions on test set
-        prediction_result = engine.predict(test_data)
+        # Generate predictions on test set, with the source attestation passed
+        # explicitly rather than assumed from the frame.
+        prediction_result = engine.predict(test_data, attestation=attestation)
 
         actuals = None
+        pred_values = None
 
-        # Calculate backtest metrics
+        def _extract_risk_scores() -> np.ndarray:
+            """Pull the engine's per-source risk scores out of the result frame."""
+            frame = prediction_result.predictions_df
+            if 'risk_score' in frame.columns:
+                column = frame['risk_score']
+            elif 'prediction' in frame.columns:
+                column = frame['prediction']
+            else:
+                column = frame.iloc[:, -1]
+            return np.asarray(column.values, dtype=float)
+
+        # Calculate backtest metrics. The engine emits one risk score per data
+        # source while a target column is per-row, so the two series only describe
+        # the same observations when their lengths agree. A mismatch is reported as
+        # a skip instead of being truncated into confident-looking numbers.
         if 'actual_risk' in test_data.columns or 'target' in test_data.columns:
             target_col = 'actual_risk' if 'actual_risk' in test_data.columns else 'target'
-            actuals = test_data[target_col].values
+            actuals = np.asarray(test_data[target_col].values, dtype=float)
+            pred_values = _extract_risk_scores()
 
-            # Extract prediction values from PredictionResult
-            if 'risk_score' in prediction_result.predictions_df.columns:
-                pred_values = prediction_result.predictions_df['risk_score'].values
-            elif 'prediction' in prediction_result.predictions_df.columns:
-                pred_values = prediction_result.predictions_df['prediction'].values
+            if pred_values.size == actuals.size and pred_values.size > 0:
+                mse = float(np.mean((actuals - pred_values) ** 2))
+                mae = float(np.mean(np.abs(actuals - pred_values)))
+                rmse = float(np.sqrt(mse))
+                ss_res = float(np.sum((actuals - pred_values) ** 2))
+                ss_tot = float(np.sum((actuals - np.mean(actuals)) ** 2))
+                r2 = float(1 - (ss_res / (ss_tot + 1e-8)))
+
+                if actuals.size > 1:
+                    directional_accuracy = float(
+                        np.mean((np.diff(actuals) > 0) == (np.diff(pred_values) > 0))
+                    )
+                else:
+                    directional_accuracy = 0.0
+
+                backtest_metrics = {
+                    "mse": mse,
+                    "mae": mae,
+                    "rmse": rmse,
+                    "r2": r2,
+                    "directional_accuracy": directional_accuracy,
+                }
             else:
-                pred_values = prediction_result.predictions_df.iloc[:, -1].values
-
-            # Align lengths
-            min_len = min(len(actuals), len(pred_values))
-            actuals = actuals[:min_len]
-            pred_values = pred_values[:min_len]
-
-            # Calculate metrics
-            mse = np.mean((actuals - pred_values) ** 2)
-            mae = np.mean(np.abs(actuals - pred_values))
-            rmse = np.sqrt(mse)
-
-            ss_res = np.sum((actuals - pred_values) ** 2)
-            ss_tot = np.sum((actuals - np.mean(actuals)) ** 2)
-            r2 = 1 - (ss_res / (ss_tot + 1e-8))
-
-            # Directional accuracy
-            if len(actuals) > 1:
-                actual_direction = np.diff(actuals) > 0
-                pred_direction = np.diff(pred_values) > 0
-                directional_accuracy = np.mean(actual_direction == pred_direction)
-            else:
-                directional_accuracy = 0.0
-
-            backtest_metrics = {
-                "mse": float(mse),
-                "mae": float(mae),
-                "rmse": float(rmse),
-                "r2": float(r2),
-                "directional_accuracy": float(directional_accuracy)
-            }
+                backtest_metrics = {
+                    "prediction_count": int(pred_values.size),
+                    "target_count": int(actuals.size),
+                    "note": (
+                        "skipped: the engine returned "
+                        f"{pred_values.size} per-source risk scores for "
+                        f"{actuals.size} labelled test rows, so the series are not aligned"
+                    ),
+                }
+                # The comparison is unusable for this job; drop the target series so
+                # the return-based block below also reports a skip instead of
+                # differencing unrelated values.
+                actuals = None
+                logger.warning(
+                    "Backtest metrics skipped for job %s: %s",
+                    job_id,
+                    backtest_metrics["note"],
+                )
         else:
             # No ground truth - compute prediction statistics
-            if 'risk_score' in prediction_result.predictions_df.columns:
-                pred_values = prediction_result.predictions_df['risk_score'].values
-            elif 'prediction' in prediction_result.predictions_df.columns:
-                pred_values = prediction_result.predictions_df['prediction'].values
-            else:
-                pred_values = prediction_result.predictions_df.iloc[:, -1].values
+            pred_values = _extract_risk_scores()
 
             backtest_metrics = {
-                "mean_prediction": float(np.mean(pred_values)),
-                "std_prediction": float(np.std(pred_values)),
-                "min_prediction": float(np.min(pred_values)),
-                "max_prediction": float(np.max(pred_values)),
+                "mean_prediction": float(np.mean(pred_values)) if pred_values.size else None,
+                "std_prediction": float(np.std(pred_values)) if pred_values.size else None,
+                "min_prediction": float(np.min(pred_values)) if pred_values.size else None,
+                "max_prediction": float(np.max(pred_values)) if pred_values.size else None,
                 "note": "No ground truth available"
             }
 
         # Quantitative extension: risk-signal returns, tail-risk statistics, and
-        # walk-forward fold diagnostics. Purely additive to backtest_metrics; the
-        # pre-trained engine is evaluated on each fold's out-of-sample segment
-        # (per-fold retraining is owned by the training job).
+        # walk-forward fold diagnostics. Purely additive to backtest_metrics.
+        #
+        # These metrics are return- and transition-based, so they require a series
+        # ordered in time. They are reported only when the engine's risk scores are
+        # genuinely aligned with the target rows; otherwise a concatenation of
+        # per-source scores would invent transitions between unrelated entities --
+        # the same class of artefact the boundary-aware aggregation in
+        # `backtesting` exists to remove.
         from backend.modules.engine.backtesting import (
             WalkForwardConfig,
             compute_metrics,
@@ -802,8 +876,7 @@ def run_backtest(self, job_id: int, parameters: dict):
             logger.warning(f"Invalid walk_forward parameters for job {job_id}, using defaults: {config_exc}")
             wf_config = WalkForwardConfig()
 
-        quant_metrics = compute_metrics(actual=actuals, predicted=pred_values)
-        for quant_key in (
+        quant_keys = (
             "sharpe_ratio",
             "sortino_ratio",
             "max_drawdown",
@@ -812,29 +885,62 @@ def run_backtest(self, job_id: int, parameters: dict):
             "hit_rate",
             "var_95",
             "cvar_95",
-        ):
-            backtest_metrics[quant_key] = quant_metrics[quant_key]
+        )
 
-        walk_forward = {"config": {}, "folds": []}
-        try:
-            walk_forward["config"] = wf_config.to_dict()
-            folds = generate_walk_forward_folds(len(pred_values), wf_config)
-            for fold_index, (train_idx, test_idx) in enumerate(folds):
-                fold_actuals = actuals[test_idx] if actuals is not None else None
-                walk_forward["folds"].append({
-                    "fold": fold_index,
-                    "train_start": int(train_idx[0]),
-                    "train_end": int(train_idx[-1]) + 1,
-                    "test_start": int(test_idx[0]),
-                    "test_end": int(test_idx[-1]) + 1,
-                    "n_train": int(len(train_idx)),
-                    "n_test": int(len(test_idx)),
-                    "metrics": compute_metrics(actual=fold_actuals, predicted=pred_values[test_idx]),
-                })
-        except (TypeError, ValueError) as wf_exc:
-            walk_forward["error"] = str(wf_exc)
-            logger.warning(f"Walk-forward folds skipped for job {job_id}: {wf_exc}")
-        backtest_metrics["walk_forward"] = walk_forward
+        aligned_series = (
+            actuals is not None
+            and pred_values is not None
+            and np.asarray(pred_values).size == np.asarray(actuals).size
+            and np.asarray(pred_values).size > 1
+        )
+
+        if aligned_series:
+            quant_metrics = compute_metrics(actual=actuals, predicted=pred_values)
+            for quant_key in quant_keys:
+                backtest_metrics[quant_key] = quant_metrics[quant_key]
+
+            walk_forward = {"config": {}, "folds": []}
+            try:
+                walk_forward["config"] = wf_config.to_dict()
+                folds = generate_walk_forward_folds(len(pred_values), wf_config)
+                for fold_index, (train_idx, test_idx) in enumerate(folds):
+                    walk_forward["folds"].append({
+                        "fold": fold_index,
+                        "train_start": int(train_idx[0]),
+                        "train_end": int(train_idx[-1]) + 1,
+                        "test_start": int(test_idx[0]),
+                        "test_end": int(test_idx[-1]) + 1,
+                        "n_train": int(len(train_idx)),
+                        "n_test": int(len(test_idx)),
+                        "metrics": compute_metrics(
+                            actual=actuals[test_idx],
+                            predicted=pred_values[test_idx],
+                        ),
+                    })
+            except (TypeError, ValueError) as wf_exc:
+                walk_forward["error"] = str(wf_exc)
+                logger.warning(f"Walk-forward folds skipped for job {job_id}: {wf_exc}")
+            backtest_metrics["walk_forward"] = walk_forward
+        else:
+            if actuals is None:
+                skip_reason = (
+                    "the test window carries no ground-truth target column, so the "
+                    "risk signal cannot be scored against realised outcomes"
+                )
+            else:
+                skip_reason = (
+                    f"the engine returned {np.asarray(pred_values).size} per-source risk "
+                    f"scores for {np.asarray(actuals).size} test rows, so the two series "
+                    "are not a time series of the same observations"
+                )
+            quant_metrics = {quant_key: None for quant_key in quant_keys}
+            backtest_metrics["quant_metrics_skipped"] = skip_reason
+            backtest_metrics["walk_forward"] = {
+                "config": wf_config.to_dict(),
+                "folds": [],
+                "skipped": skip_reason,
+            }
+            logger.info("Return-based backtest metrics skipped for job %s: %s", job_id, skip_reason)
 
         self.update_progress(job_id, 95.0)
 

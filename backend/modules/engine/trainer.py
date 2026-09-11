@@ -6,7 +6,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import numpy as np
-from typing import Dict, Tuple, List, Optional
+from typing import Any, Dict, Tuple, List, Optional
 from dataclasses import dataclass
 import logging
 from pathlib import Path
@@ -31,6 +31,45 @@ class TrainingMetrics:
     total_epochs: int
     model_path: str
     predictions_path: str
+    baseline_comparison: Optional[Dict[str, Any]] = None
+
+
+class _FrozenSequenceModelAdapter:
+    """Expose a trained sequence model to :class:`WalkForwardBacktester`.
+
+    The harness works on 2-D design matrices, so each row here is one flattened
+    window; ``predict`` reshapes it back and runs the frozen artefact. ``fit`` is
+    a no-op on purpose -- the comparison measures the trained model out-of-sample
+    against baselines that are free to refit on every fold, which is the
+    conservative direction for a credibility claim about model complexity.
+    """
+
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        device: torch.device,
+        sequence_length: int,
+        n_features: int,
+        target_mean: float,
+        target_std: float,
+    ) -> None:
+        self.model = model
+        self.device = device
+        self.sequence_length = int(sequence_length)
+        self.n_features = int(n_features)
+        self.target_mean = float(target_mean)
+        self.target_std = float(target_std)
+
+    def fit(self, X, y) -> "_FrozenSequenceModelAdapter":  # noqa: N803 - harness duck type
+        return self
+
+    def predict(self, X) -> np.ndarray:  # noqa: N803 - harness duck type
+        flat = np.asarray(X, dtype=np.float32)
+        windows = flat.reshape(-1, self.sequence_length, self.n_features)
+        self.model.eval()
+        with torch.no_grad():
+            outputs = self.model(torch.FloatTensor(windows).to(self.device))
+        return outputs.detach().cpu().numpy().ravel() * self.target_std + self.target_mean
 
 
 class TimeSeriesDataset(Dataset):
@@ -226,6 +265,8 @@ class ModelTrainer:
                 'config': self.config
             }, f, indent=2)
 
+        baseline_comparison = self._baseline_comparison(test_dataset)
+
         return TrainingMetrics(
             train_loss=train_losses,
             val_loss=val_losses,
@@ -236,8 +277,65 @@ class ModelTrainer:
             best_epoch=best_epoch,
             total_epochs=epochs,
             model_path=str(model_path),
-            predictions_path=str(predictions_path)
+            predictions_path=str(predictions_path),
+            baseline_comparison=baseline_comparison,
         )
+
+    def _baseline_comparison(self, dataset: "TimeSeriesDataset") -> Optional[Dict[str, Any]]:
+        """Report walk-forward lift over simple baselines.
+
+        A bespoke attention model earns its complexity only by beating something
+        simple on the same folds under the same seam-free metrics. The trained
+        artefact is frozen here while the baselines refit per fold, so a positive
+        lift is a conservative claim. Returns ``None`` (with a logged reason) when
+        the test window is too short or the model is not single-input.
+        """
+        from backend.modules.engine.backtesting import WalkForwardBacktester, WalkForwardConfig
+
+        windows = np.asarray(dataset.sequences, dtype=np.float32)
+        if windows.ndim != 3 or windows.shape[0] < 30:
+            logger.info(
+                "Baseline comparison skipped: %s window(s) is too few for walk-forward folds",
+                0 if windows.ndim != 3 else int(windows.shape[0]),
+            )
+            return None
+
+        sequence_length = int(windows.shape[1])
+        n_features = int(windows.shape[2])
+        features = windows.reshape(windows.shape[0], -1)
+        target = dataset.denormalize(np.asarray(dataset.targets, dtype=float))
+
+        adapter = _FrozenSequenceModelAdapter(
+            model=self.model,
+            device=self.device,
+            sequence_length=sequence_length,
+            n_features=n_features,
+            target_mean=float(dataset.target_mean),
+            target_std=float(dataset.target_std),
+        )
+        config = WalkForwardConfig(n_splits=3, test_size=0.2, gap=0, expanding=True, min_train_size=5)
+        try:
+            # The factory returns the same frozen adapter every fold: `fit` is a
+            # no-op, so there is no state to leak between folds.
+            comparison = WalkForwardBacktester(lambda: adapter, config).compare(
+                features, target, baselines=("persistence", "ar1")
+            )
+        except (TypeError, ValueError) as exc:
+            logger.warning("Baseline comparison skipped: %s", exc)
+            return None
+
+        payload = comparison.to_dict()
+        return {
+            "config": payload["primary"]["config"],
+            "aggregation": payload["primary"]["aggregation"],
+            "primary_metrics": payload["primary"]["metrics"],
+            "baseline_metrics": {
+                name: result["metrics"] for name, result in payload["baselines"].items()
+            },
+            "lift": payload["lift"],
+            "lift_convention": payload["lift_convention"],
+            "lower_is_better": payload["lower_is_better"],
+        }
 
     def _train_epoch(self, dataloader: DataLoader) -> float:
         """Train for one epoch."""

@@ -12,12 +12,22 @@ VaR/CVaR) consumes that sign-flipped series. The public helper
 :func:`risk_signal_to_returns` implements the convention so callers do not have
 to restate it.
 
-When :class:`WalkForwardBacktester` concatenates out-of-sample predictions
-across folds, ``np.diff`` is applied to the concatenated signal, so each fold
-boundary contributes exactly one transition that did not exist in the
-underlying series. Per-fold metrics are computed *inside* each fold (and are
-therefore free of that artefact); the aggregate metrics should be read with the
-boundary transition in mind.
+Fold-boundary handling
+======================
+:class:`WalkForwardBacktester` evaluates the model on disjoint out-of-sample
+test blocks. Naively concatenating those blocks and differencing the result
+creates one synthetic risk-change at every fold boundary -- a transition that
+never occurred in the underlying series -- which biases Sharpe, Sortino,
+drawdown, Calmar, volatility, and VaR/CVaR.
+
+The backtester therefore converts each fold's predictions into returns *inside*
+that fold and concatenates the resulting per-fold return series:
+:func:`risk_signal_to_returns` takes a ``boundaries`` argument, and
+:func:`hit_rate` pools its directional score across the same segments instead of
+scoring across the seams. Aggregate metrics are consequently free of the
+artefact by construction rather than annotated with a caveat: the result records
+``boundaries`` and ``n_boundary_transitions_removed`` so the correction is
+auditable.
 
 Degenerate-input policy
 =======================
@@ -146,16 +156,64 @@ def _validate_periods(periods_per_year: float) -> float:
 # ---------------------------------------------------------------------------
 # Signal / return transformations
 # ---------------------------------------------------------------------------
-def risk_signal_to_returns(risk_signal: ArrayLike) -> np.ndarray:
+def _normalise_boundaries(boundaries: Optional[Sequence[int]], size: int) -> List[int]:
+    """Validate interior segment starts; return them sorted and de-duplicated.
+
+    ``boundaries`` lists the index at which each segment *after the first*
+    begins, so ``[10, 20]`` describes the segments ``[0:10]``, ``[10:20]`` and
+    ``[20:]``.
+    """
+    if boundaries is None:
+        return []
+    interior: List[int] = []
+    for raw in boundaries:
+        if isinstance(raw, bool) or not isinstance(raw, (int, np.integer)):
+            raise ValueError(f"boundaries must contain integers, got {raw!r}")
+        value = int(raw)
+        if value <= 0:
+            raise ValueError(f"boundaries must be positive interior offsets, got {value!r}")
+        if value >= size:
+            raise ValueError(f"boundary {value} is at or beyond the series length {size}")
+        interior.append(value)
+    return sorted(set(interior))
+
+
+def segment_slices(boundaries: Optional[Sequence[int]], size: int) -> List[slice]:
+    """Split ``range(size)`` into the contiguous segments named by ``boundaries``."""
+    interior = _normalise_boundaries(boundaries, size)
+    edges = [0, *interior, size]
+    return [slice(edges[index], edges[index + 1]) for index in range(len(edges) - 1)]
+
+
+def count_segment_transitions(boundaries: Optional[Sequence[int]], size: int) -> int:
+    """Number of across-segment transitions that ``boundaries`` suppresses."""
+    return max(len(segment_slices(boundaries, size)) - 1, 0)
+
+
+def risk_signal_to_returns(
+    risk_signal: ArrayLike, boundaries: Optional[Sequence[int]] = None
+) -> np.ndarray:
     """Convert a predicted risk level into returns via ``-(risk_t - risk_{t-1})``.
 
     A rise in liquidity risk is treated as a negative return. Fewer than two
     observations produce an empty return series.
+
+    ``boundaries`` names interior segment starts (see
+    :func:`_normalise_boundaries`). When supplied, the difference is taken
+    *within* each segment and the per-segment return series are concatenated, so
+    no return spans a segment seam. Use this whenever the input series is a
+    concatenation of separately generated blocks -- for example walk-forward
+    out-of-sample folds. A segment with fewer than two points contributes
+    nothing, so the result can be shorter than ``len(signal) - 1``.
     """
     risk = _as_1d(risk_signal)
     if risk.size < 2:
         return np.array([], dtype=float)
-    return -np.diff(risk)
+    if boundaries is None:
+        return -np.diff(risk)
+    chunks = [(-np.diff(risk[segment])) for segment in segment_slices(boundaries, risk.size)]
+    chunks = [chunk for chunk in chunks if chunk.size]
+    return np.concatenate(chunks) if chunks else np.array([], dtype=float)
 
 
 def equity_curve_from_returns(returns: ArrayLike, initial: float = 1.0) -> np.ndarray:
@@ -250,27 +308,61 @@ def calmar_ratio(
     return float(annualized_return / drawdown)
 
 
-def hit_rate(actual: ArrayLike, predicted: ArrayLike) -> float:
+def hit_rate(
+    actual: ArrayLike,
+    predicted: ArrayLike,
+    boundaries: Optional[Sequence[int]] = None,
+) -> float:
     """Fraction of periods where actual and predicted *changes* share a sign.
 
-    A constant (all-zero-change) series carries no directional signal, so
-    ``nan`` is returned instead of a meaningless perfect score.
+    A segment whose changes are all zero carries no directional signal and is
+    left out of the pooled score; ``nan`` is returned when no segment carries
+    signal.
+
+    ``boundaries`` names interior segment starts, exactly as in
+    :func:`risk_signal_to_returns`: agreement is measured inside each segment and
+    pooled with the number of comparisons as the weight, so a seam between two
+    separately generated blocks is never scored. A boundary at or beyond the
+    common prefix of the two series starts no non-empty segment and is ignored.
     """
     actual_series = _as_1d(actual)
     predicted_series = _as_1d(predicted)
     n = min(actual_series.size, predicted_series.size)
     if n < 2:
         return float("nan")
-    actual_direction = np.sign(np.diff(actual_series[:n]))
-    predicted_direction = np.sign(np.diff(predicted_series[:n]))
-    if not np.any(actual_direction) or not np.any(predicted_direction):
+
+    interior: List[int] = []
+    for raw in boundaries if boundaries is not None else ():
+        if isinstance(raw, bool) or not isinstance(raw, (int, np.integer)):
+            raise ValueError(f"boundaries must contain integers, got {raw!r}")
+        value = int(raw)
+        if 0 < value < n:
+            interior.append(value)
+
+    matches = 0
+    comparisons = 0
+    for segment in segment_slices(interior, n):
+        actual_segment = actual_series[segment]
+        predicted_segment = predicted_series[segment]
+        if actual_segment.size < 2 or predicted_segment.size < 2:
+            continue
+        actual_direction = np.sign(np.diff(actual_segment))
+        predicted_direction = np.sign(np.diff(predicted_segment))
+        if not np.any(actual_direction) or not np.any(predicted_direction):
+            continue
+        matches += int(np.sum(actual_direction == predicted_direction))
+        comparisons += int(actual_direction.size)
+
+    if comparisons == 0:
         return float("nan")
-    return float(np.mean(actual_direction == predicted_direction))
+    return float(matches / comparisons)
 
 
-def directional_accuracy(actual: ArrayLike, predicted: ArrayLike) -> float:
+def directional_accuracy(
+    actual: ArrayLike, predicted: ArrayLike, boundaries: Optional[Sequence[int]] = None
+) -> float:
     """Alias of :func:`hit_rate` kept for the existing ML-metric vocabulary."""
-    return hit_rate(actual, predicted)
+    return hit_rate(actual, predicted, boundaries)
 
 
 def mean_squared_error(actual: ArrayLike, predicted: ArrayLike) -> float:
@@ -345,12 +437,162 @@ def conditional_value_at_risk(returns: ArrayLike, level: float = 0.95) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Baseline models
+# ---------------------------------------------------------------------------
+# A custom attention/GNN model is only justified if it beats something simple.
+# These baselines need nothing beyond numpy, so they run through the same
+# walk-forward folds and under the same seam-free metric rules as the primary
+# model, and the lift reported by :class:`BaselineComparison` is an apples-to-
+# apples comparison rather than a claim.
+class PersistenceBaseline:
+    """Random-walk baseline: repeat the last value seen during training."""
+
+    def __init__(self) -> None:
+        self.last_value: float = 0.0
+        self.fit_calls: int = 0
+
+    def fit(self, X: ArrayLike, y: ArrayLike) -> "PersistenceBaseline":
+        target = _as_1d(y)
+        self.last_value = float(target[-1]) if target.size else 0.0
+        self.fit_calls += 1
+        return self
+
+    def predict(self, X: ArrayLike) -> np.ndarray:
+        rows = _as_2d(X).shape[0]
+        return np.full(rows, self.last_value, dtype=float)
+
+
+class LinearBaseline:
+    """Least-squares baseline with an intercept, solved in closed form by numpy."""
+
+    def __init__(self) -> None:
+        self.coef_: Optional[np.ndarray] = None
+        self.intercept_: float = 0.0
+
+    def fit(self, X: ArrayLike, y: ArrayLike) -> "LinearBaseline":
+        features = _as_2d(X)
+        target = _as_1d(y)
+        if features.shape[0] != target.size:
+            raise ValueError(
+                f"X and y have mismatched lengths: X has {features.shape[0]} rows, "
+                f"y has {target.size}"
+            )
+        design = np.column_stack([features, np.ones(features.shape[0])])
+        solution, *_ = np.linalg.lstsq(design, target, rcond=None)
+        self.coef_ = np.asarray(solution[:-1], dtype=float)
+        self.intercept_ = float(solution[-1])
+        return self
+
+    def predict(self, X: ArrayLike) -> np.ndarray:
+        if self.coef_ is None:
+            raise RuntimeError("LinearBaseline.predict called before fit")
+        return _as_2d(X) @ self.coef_ + self.intercept_
+
+
+class AR1Baseline:
+    """AR(1) baseline -- the ARIMA(1, 0, 0) case -- fitted by OLS on lagged levels.
+
+    Forecasts are produced recursively from the final training observation, which
+    is the standard one-step-then-multi-step AR(1) path. ``X`` is accepted for
+    duck-type compatibility with the harness and is otherwise unused.
+
+    The fitted slope is clamped to ``[-1, 1]``. That is the stationary form of
+    AR(1); without the clamp an explosive coefficient would produce a benchmark
+    so bad that any model looks good against it, which is the opposite of what a
+    baseline is for.
+    """
+
+    def __init__(self, min_points: int = 3) -> None:
+        self.min_points = max(int(min_points), 2)
+        self.slope: float = 0.0
+        self.intercept: float = 0.0
+        self.last_value: float = 0.0
+        self.n_observations: int = 0
+
+    def fit(self, X: ArrayLike, y: ArrayLike) -> "AR1Baseline":
+        target = _as_1d(y)
+        self.n_observations = int(target.size)
+        if target.size == 0:
+            self.slope, self.intercept, self.last_value = 0.0, 0.0, 0.0
+            return self
+
+        self.last_value = float(target[-1])
+        if target.size < self.min_points:
+            self.slope, self.intercept = 0.0, self.last_value
+            return self
+
+        lagged = target[:-1]
+        current = target[1:]
+        lag_mean = float(np.mean(lagged))
+        current_mean = float(np.mean(current))
+        variance = float(np.sum((lagged - lag_mean) ** 2))
+        if not math.isfinite(variance) or variance == 0.0:
+            self.slope = 0.0
+        else:
+            covariance = float(np.sum((lagged - lag_mean) * (current - current_mean)))
+            self.slope = covariance / variance
+        if not math.isfinite(self.slope):
+            self.slope = 0.0
+        self.slope = float(min(max(self.slope, -1.0), 1.0))
+        self.intercept = current_mean - self.slope * lag_mean
+        return self
+
+    def predict(self, X: ArrayLike) -> np.ndarray:
+        rows = _as_2d(X).shape[0]
+        forecasts = np.empty(rows, dtype=float)
+        previous = self.last_value
+        for index in range(rows):
+            previous = self.slope * previous + self.intercept
+            forecasts[index] = previous
+        return forecasts
+
+
+_BASELINE_ALIASES: Dict[str, type] = {
+    "persistence": PersistenceBaseline,
+    "random_walk": PersistenceBaseline,
+    "last_value": PersistenceBaseline,
+    "ar1": AR1Baseline,
+    "arima": AR1Baseline,
+    "linear": LinearBaseline,
+    "ols": LinearBaseline,
+}
+
+#: Canonical baseline names accepted by :func:`baseline_factory`.
+BASELINE_NAMES: Tuple[str, ...] = ("persistence", "ar1", "linear")
+
+#: Metrics where a smaller value is the better outcome.
+LOWER_IS_BETTER: Tuple[str, ...] = (
+    "mse",
+    "mae",
+    "rmse",
+    "max_drawdown",
+    "annualized_volatility",
+    "var_95",
+    "cvar_95",
+)
+
+
+def baseline_factory(kind: str = "persistence") -> Callable[[], Any]:
+    """Return a zero-argument factory for a named baseline model."""
+    key = str(kind).strip().lower()
+    try:
+        model_class = _BASELINE_ALIASES[key]
+    except KeyError:
+        raise ValueError(
+            f"Unknown baseline {kind!r}; available: {list(BASELINE_NAMES)} "
+            f"(aliases: {sorted(_BASELINE_ALIASES)})"
+        ) from None
+    return model_class
+
+
+# ---------------------------------------------------------------------------
 # Aggregate metric bundle
 # ---------------------------------------------------------------------------
 def compute_metrics(
     actual: Optional[ArrayLike] = None,
     predicted: Optional[ArrayLike] = None,
     returns: Optional[ArrayLike] = None,
+    boundaries: Optional[Sequence[int]] = None,
     risk_free: float = 0.0,
     periods_per_year: int = 252,
     var_level: float = 0.95,
@@ -361,14 +603,23 @@ def compute_metrics(
     module convention) or an explicit ``returns`` series is required. ``actual``
     is optional; without it the supervised ML metrics are ``nan`` but the
     return-based metrics are still reported.
+
+    ``boundaries`` names interior segment starts in ``predicted``/``actual``
+    (see :func:`risk_signal_to_returns`). It makes both the derived return
+    series and the directional score seam-free, which is what a caller that
+    concatenates out-of-sample blocks wants. Combining it with an explicit
+    ``returns`` series is rejected: those returns are already final, so the
+    combination would be ambiguous.
     """
     if predicted is None and returns is None:
         raise ValueError("Either 'predicted' or 'returns' must be provided")
     if actual is not None and predicted is None:
         raise ValueError("'predicted' is required when 'actual' is provided")
+    if returns is not None and boundaries is not None:
+        raise ValueError("Pass either an explicit 'returns' series or 'boundaries', not both")
 
     if returns is None:
-        returns = risk_signal_to_returns(predicted)
+        returns = risk_signal_to_returns(predicted, boundaries=boundaries)
     return_series = _as_1d(returns)
     equity = equity_curve_from_returns(return_series)
 
@@ -389,8 +640,8 @@ def compute_metrics(
                 "mae": mae(actual_series, predicted),
                 "rmse": rmse(actual_series, predicted),
                 "r2": r2_score_(actual_series, predicted),
-                "directional_accuracy": directional_accuracy(actual_series, predicted),
-                "hit_rate": hit_rate(actual_series, predicted),
+                "directional_accuracy": directional_accuracy(actual_series, predicted, boundaries),
+                "hit_rate": hit_rate(actual_series, predicted, boundaries),
             }
     else:
         ml_metrics = {
@@ -605,9 +856,12 @@ class BacktestMetrics:
 class BacktestResult:
     """Full walk-forward backtest output.
 
-    ``predictions``/``actuals`` are the concatenated out-of-sample series,
+    ``predictions``/``actuals`` are the concatenated out-of-sample series.
     ``returns`` is the sign-flipped risk-change series derived from
-    ``predictions``, and ``equity_curve`` is its compounded curve.
+    ``predictions`` *within each fold* (never across a fold seam), and
+    ``equity_curve`` is its compounded curve. ``boundaries`` records the
+    interior fold seams in concatenated index space so the aggregation can be
+    audited and reproduced.
     """
 
     config: WalkForwardConfig
@@ -617,10 +871,17 @@ class BacktestResult:
     returns: np.ndarray
     equity_curve: np.ndarray
     metrics: BacktestMetrics
+    boundaries: np.ndarray = field(default_factory=lambda: np.array([], dtype=int))
 
     @property
     def n_oos(self) -> int:
         return int(np.asarray(self.predictions).size)
+
+    @property
+    def n_boundary_transitions_removed(self) -> int:
+        """Across-fold transitions that per-fold aggregation suppressed."""
+        boundary_count = int(np.asarray(self.boundaries).size)
+        return boundary_count
 
     def to_dict(self) -> Dict[str, Any]:
         fold_dicts = [fold.to_dict() for fold in self.folds]
@@ -631,10 +892,56 @@ class BacktestResult:
             "metrics": self.metrics.to_dict(),
             "folds": fold_dicts,
             "walk_forward": {"config": config_dict, "folds": fold_dicts},
+            "aggregation": {
+                "returns": "per_fold",
+                "boundaries": [int(value) for value in np.asarray(self.boundaries).ravel()],
+                "n_boundary_transitions_removed": self.n_boundary_transitions_removed,
+            },
             "predictions": [_json_safe(value) for value in np.asarray(self.predictions).ravel()],
             "actuals": [_json_safe(value) for value in np.asarray(self.actuals).ravel()],
             "returns": [_json_safe(value) for value in np.asarray(self.returns).ravel()],
             "equity_curve": [_json_safe(value) for value in np.asarray(self.equity_curve).ravel()],
+        }
+
+
+@dataclass
+class BaselineComparison:
+    """A primary model's walk-forward result next to named baselines, with lift.
+
+    ``lift()[baseline][metric]`` is ``primary - baseline`` for metrics where a
+    larger value is better and ``baseline - primary`` for the metrics in
+    :data:`LOWER_IS_BETTER`. A positive number therefore always means "the
+    primary model is better"; ``None`` means the metric was undefined (``nan``)
+    on one side.
+    """
+
+    primary: BacktestResult
+    baselines: Dict[str, BacktestResult]
+
+    def lift(self) -> Dict[str, Dict[str, Optional[float]]]:
+        primary_metrics = self.primary.metrics.to_dict()
+        lift: Dict[str, Dict[str, Optional[float]]] = {}
+        for name, result in self.baselines.items():
+            baseline_metrics = result.metrics.to_dict()
+            per_metric: Dict[str, Optional[float]] = {}
+            for key, primary_value in primary_metrics.items():
+                baseline_value = baseline_metrics.get(key)
+                if primary_value is None or baseline_value is None:
+                    per_metric[key] = None
+                elif key in LOWER_IS_BETTER:
+                    per_metric[key] = _json_safe(baseline_value - primary_value)
+                else:
+                    per_metric[key] = _json_safe(primary_value - baseline_value)
+            lift[name] = per_metric
+        return lift
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "primary": self.primary.to_dict(),
+            "baselines": {name: result.to_dict() for name, result in self.baselines.items()},
+            "lift": self.lift(),
+            "lift_convention": "positive means the primary model is better",
+            "lower_is_better": list(LOWER_IS_BETTER),
         }
 
 
@@ -716,11 +1023,21 @@ class WalkForwardBacktester:
             np.concatenate(predictions) if predictions else np.array([], dtype=float)
         )
         oos_actuals = np.concatenate(actuals) if actuals else np.array([], dtype=float)
-        returns = risk_signal_to_returns(oos_predictions)
+
+        # Fold seams are not observations. Returns, the equity curve, and the
+        # directional score are all computed segment-by-segment so no metric ever
+        # sees a transition that did not happen in the underlying series.
+        boundaries = (
+            np.cumsum([chunk.size for chunk in predictions])[:-1]
+            if predictions
+            else np.array([], dtype=int)
+        )
+        returns = risk_signal_to_returns(oos_predictions, boundaries=boundaries)
         equity_curve = equity_curve_from_returns(returns)
         metrics = compute_metrics(
             actual=oos_actuals,
             predicted=oos_predictions,
+            boundaries=boundaries,
             risk_free=self.risk_free,
             periods_per_year=self.periods_per_year,
         )
@@ -733,4 +1050,29 @@ class WalkForwardBacktester:
             returns=returns,
             equity_curve=equity_curve,
             metrics=BacktestMetrics.from_dict(metrics),
+            boundaries=np.asarray(boundaries, dtype=int),
         )
+
+    def compare(
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        baselines: Sequence[str] = ("persistence", "ar1"),
+    ) -> BaselineComparison:
+        """Run the primary model and each named baseline through the same folds.
+
+        The baselines see the identical fold boundaries and the identical
+        seam-free metric rules, so the returned lift is a like-for-like
+        comparison. Without it, model complexity is unjustified.
+        """
+        primary = self.run(X, y)
+        named_results: Dict[str, BacktestResult] = {}
+        for name in baselines:
+            runner = WalkForwardBacktester(
+                model_factory=baseline_factory(name),
+                config=self.config,
+                periods_per_year=self.periods_per_year,
+                risk_free=self.risk_free,
+            )
+            named_results[str(name)] = runner.run(X, y)
+        return BaselineComparison(primary=primary, baselines=named_results)

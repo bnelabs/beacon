@@ -275,19 +275,23 @@ async def simulate_model(
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         source_data_job = db.query(Job).filter(Job.id == data_job_id).first()
+        attestation = DataQualityGate.attestation_from_job_result(
+            source_data_job.result
+            if source_data_job and isinstance(source_data_job.result, dict)
+            else {},
+            job_id=str(data_job_id),
+        )
         engine = RealPredictionEngine(
             model_path=model_path,
             device=device,
             config=result.get("config", {}),
-            quality_attestation=DataQualityGate.attestation_from_job_result(
-                source_data_job.result
-                if source_data_job and isinstance(source_data_job.result, dict)
-                else {},
-                job_id=str(data_job_id),
-            ),
+            quality_attestation=attestation,
         )
 
-        prediction_result = engine.predict(adjusted_df)
+        # The scenario adjustments transform the frame, so the attestation is
+        # passed explicitly rather than relying on frame metadata surviving the
+        # reshape. It attests the source dataset the scenario is applied to.
+        prediction_result = engine.predict(adjusted_df, attestation=attestation)
         predictions_df = prediction_result.predictions_df.copy()
 
         raw_feature_importances = prediction_result.feature_importances or {}

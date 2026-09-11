@@ -9,7 +9,9 @@ from enum import Enum
 import torch
 import torch.nn as nn
 
+from backend.exceptions import DataQualityError, PredictionBlockedError
 from backend.modules.data.orchestrator import DataPackage
+from backend.modules.data.quality_gate import DataQualityGate, QualityAttestation
 from backend.modules.engine.model_io import safe_torch_load
 
 logger = logging.getLogger(__name__)
@@ -116,9 +118,37 @@ class EngineOrchestrator:
             self.start_time = datetime.now(timezone.utc)
             logger.info(f"[{self.job_id}] Starting ENGINE processing")
             
-            # Validate data package
+            # Validate data package. Certification is not a boolean flag to be
+            # trusted from anywhere: the payload must also carry a DATA-stage
+            # quality attestation, and that attestation must be verified.
             if not data_package.quality_report.fit_for_engine:
-                raise ValueError("Data not certified for ENGINE processing")
+                raise DataQualityError(
+                    "Data not certified for ENGINE processing",
+                    context={
+                        "job_id": self.job_id,
+                        "data_job_id": getattr(data_package, "job_id", None),
+                        "quality_score": getattr(
+                            data_package.quality_report, "quality_score", None
+                        ),
+                    },
+                )
+            attestation = DataQualityGate.attestation_from_job_result(
+                data_package.metadata or {},
+                job_id=str(getattr(data_package, "job_id", self.job_id)),
+            )
+            if attestation is None:
+                # Packages written before attestations existed carry only the
+                # scalar fields; reconstruct an explicit legacy verdict instead of
+                # trusting the fit_for_engine flag on its own.
+                attestation = QualityAttestation.from_legacy_result(
+                    {
+                        "fit_for_engine": bool(data_package.quality_report.fit_for_engine),
+                        "quality_score": data_package.quality_report.quality_score,
+                        "completeness": data_package.quality_report.completeness,
+                    },
+                    job_id=str(getattr(data_package, "job_id", self.job_id)),
+                )
+            DataQualityGate.require(attestation)
             
             # Step 1: Preprocessing
             self.status = EngineStatus.PREPROCESSING
@@ -377,8 +407,16 @@ class EngineOrchestrator:
             "max_risk": float(np.max(systemic_scores))
         }
 
-        # Operational risk based on data quality and model performance
-        data_quality = data.get("metadata", {}).get("quality_score", 80.0)
+        # Operational risk based on data quality and model performance. The score
+        # must come from the gate's attestation; defaulting it to a comfortable
+        # 80 silently manufactured a risk number out of nothing.
+        data_quality = (data.get("metadata") or {}).get("quality_score")
+        if data_quality is None:
+            raise PredictionBlockedError(
+                "Risk scoring requires the DATA-stage quality score, but the payload "
+                "metadata carries none",
+                context={"job_id": self.job_id, "metadata_keys": sorted((data.get("metadata") or {}))},
+            )
         operational = {
             "process_risk": float(100 - data_quality),
             "data_quality_score": float(data_quality)

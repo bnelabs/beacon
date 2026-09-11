@@ -9,7 +9,11 @@ import logging
 from pathlib import Path
 import json
 
-from backend.modules.data.quality_gate import DataQualityGate, QualityAttestation
+from backend.modules.data.quality_gate import (
+    UNVERIFIED_OVERRIDE_ENV,
+    AttestationResolver,
+    QualityAttestation,
+)
 from backend.modules.engine.model_io import safe_torch_load
 from backend.modules.explainability.shap_explainer import ModelExplainer
 from backend.modules.risk.bank_analyzer import BankRiskAnalyzer, MultiBankAnalysis, generate_executive_summary
@@ -67,11 +71,22 @@ class RealPredictionEngine:
         self.sequence_length = self.config.get('sequence_length', 30)
 
         # Predictions are refused unless the payload was quality-attested by the
-        # DATA stage. `allow_unverified_data` is an explicit, logged override for
-        # exploratory runs; it is never a silent default.
-        self.quality_attestation = quality_attestation
-        self.require_quality_attestation = bool(self.config.get('require_quality_attestation', True))
-        self.allow_unverified_data = bool(self.config.get('allow_unverified_data', False))
+        # DATA stage. The verdict is resolved from an explicit argument (or this
+        # engine's configured default) and never from `DataFrame.attrs`: pandas
+        # does not preserve attrs through groupby/merge/concat, so frame metadata
+        # cannot carry a governance-critical check. The only override is the
+        # environment-gated BEACON_ALLOW_UNVERIFIED_DATA, which production
+        # refuses outright.
+        if (
+            self.config.get('allow_unverified_data')
+            or self.config.get('require_quality_attestation') is False
+        ):
+            logger.warning(
+                "Ignoring allow_unverified_data/require_quality_attestation from engine config: "
+                "the attestation override is controlled solely by the %s environment variable",
+                UNVERIFIED_OVERRIDE_ENV,
+            )
+        self._attestations = AttestationResolver(quality_attestation)
 
         self.model_config = {}
         self.source_stats: Dict[str, Dict[str, float]] = {}
@@ -300,33 +315,38 @@ class RealPredictionEngine:
 
         return model
 
+    @property
+    def quality_attestation(self) -> Optional[QualityAttestation]:
+        """The attestation this engine falls back to when none is passed in."""
+        return self._attestations.default_attestation
+
+    @quality_attestation.setter
+    def quality_attestation(self, attestation: Optional[QualityAttestation]) -> None:
+        self._attestations.set_default(attestation)
+
     def set_quality_attestation(self, attestation: Optional[QualityAttestation]) -> None:
         """Attach the DATA-stage quality verdict to this engine instance."""
-        self.quality_attestation = attestation
+        self._attestations.set_default(attestation)
 
-    def _enforce_data_quality(self, input_data: pd.DataFrame) -> None:
+    def _enforce_data_quality(
+        self, attestation: Optional[QualityAttestation] = None
+    ) -> Optional[QualityAttestation]:
         """Refuse to predict on data that was not attested by the DATA stage.
+
+        The attestation is an explicit value threaded through the pipeline, not a
+        DataFrame attribute, so no reshaping step can silently drop it.
 
         Raises:
             PredictionBlockedError: No verified attestation is available.
         """
-        if not self.require_quality_attestation:
-            return
-
-        attestation = self.quality_attestation or input_data.attrs.get("quality_attestation")
-        if attestation is None and self.allow_unverified_data:
-            logger.warning(
-                "Predicting without a data-quality attestation because "
-                "allow_unverified_data is enabled for this engine"
-            )
-            return
-
-        DataQualityGate.require(attestation)
+        return self._attestations.resolve(attestation)
 
     def predict(
         self,
         input_data: pd.DataFrame,
-        bank_exposures: Optional[Dict[tuple, float]] = None
+        bank_exposures: Optional[Dict[tuple, float]] = None,
+        *,
+        attestation: Optional[QualityAttestation] = None,
     ) -> PredictionResult:
         """
         Make predictions with full explainability.
@@ -334,13 +354,16 @@ class RealPredictionEngine:
         Args:
             input_data: DataFrame with Date, Value, source_code (and optionally bank_id)
             bank_exposures: Inter-bank exposures for contagion analysis
+            attestation: DATA-stage quality verdict for this payload. Overrides the
+                engine-level default; pass it explicitly when the frame has been
+                transformed since the gate ran.
 
         Returns:
             PredictionResult with predictions and explanations
         """
         logger.info("Starting prediction with explainability")
 
-        self._enforce_data_quality(input_data)
+        self._enforce_data_quality(attestation)
 
         # Check if multi-bank scenario
         has_bank_id = 'bank_id' in input_data.columns

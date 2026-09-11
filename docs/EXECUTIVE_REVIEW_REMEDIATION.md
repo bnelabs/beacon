@@ -41,7 +41,7 @@ alert, not train or predict on synthetic data.
    `SchemaValidationError`, since this source has no price series) and the plugin
    is now registered in the plugin loader.
 
-**Tests:** `backend/tests/test_data_governance.py` (30 tests).
+**Tests:** `backend/tests/test_data_governance.py` (45 tests).
 
 ---
 
@@ -122,7 +122,8 @@ A rising predicted risk is treated as a negative return
 Backtest jobs now emit `quant_metrics` and a per-fold `walk_forward` section;
 `BacktestReport` and `GET /api/v2/reports/backtest/{job_id}` expose them.
 
-**Tests:** `backend/tests/test_backtesting.py` (33 passed, 1 skipped without pandas).
+**Tests:** `backend/tests/test_backtesting.py` (50 passed). See the second-round
+section for the fold-boundary invariant tests and the baseline comparison.
 
 ### CI/CD and automated testing — *Done*
 
@@ -272,15 +273,277 @@ All three are now declared explicitly with pins.
 
 | Suite | Result |
 |---|---|
-| `backend/tests/test_data_governance.py` | 30 passed |
+| `backend/tests/test_data_governance.py` | 45 passed |
+| `backend/tests/test_backtesting.py` | 50 passed |
+| `backend/tests/test_snapshots.py` | 12 passed |
+| `backend/tests/test_reproducibility.py` | 14 passed |
+| `backend/tests/test_baselines.py` | 7 passed (torch-gated) |
 | `backend/tests/test_timeseries_store.py` | 16 passed |
-| `backend/tests/test_backtesting.py` | 33 passed, 1 skipped (needs pandas) |
-| `backend/tests/test_model_io.py` | 9 passed, 5 skipped (need torch) |
+| `backend/tests/test_model_io.py` | 14 passed |
 | `python -m compileall -q backend` | clean |
+| `ruff check backend --select E9,F63,F7,F82` | clean |
+| **entire backend suite** (pinned dependency set: FastAPI, torch, Celery) | **215 passed, 1 skipped** |
 | `frontend`: `npm run build` | passed |
 | `frontend`: Playwright e2e | 1 passed |
 
-The remaining suites (`test_api_smoke.py`, `test_pipeline_integration.py`,
-`test_country_scope.py`) require the full dependency set (FastAPI, torch,
-Celery) and are exercised by
-`.github/workflows/backend-ci.yml`.
+The single skip is `test_country_scope.py`, which needs the Docker CLI and a
+PostgreSQL service. Earlier rounds reported a reduced local subset because torch
+and FastAPI were not installed in the throwaway environment; the counts above are
+from the full pinned environment (`backend/requirements.txt` +
+`backend/requirements-dev.txt`), which is what CI installs.
+
+---
+
+# Core Review Remediation (Second Round)
+
+Scope: BEACON core only. API authentication and the Grafana/Prometheus stack are
+explicitly out of scope for this round and no change was made to them.
+
+Verdict accepted from the review: the data-governance model, `safe_torch_load`
+with `weights_only=True`, the typed error codes, and the signal-to-return
+convention are sound. Two things blocked credibility — a fold-boundary artefact
+in aggregate backtest metrics and fragile attestation propagation through
+`DataFrame.attrs` — and both are now fixed, with tests that fail if either
+regresses.
+
+## Must-fix findings
+
+### 1. Fold-boundary artefact in aggregate backtest metrics — *Fixed*
+
+**Finding.** Concatenating out-of-sample predictions across folds and then
+differencing the concatenation creates one artificial transition per fold
+boundary. Those transitions never existed in the underlying series, so aggregate
+Sharpe, Sortino, drawdown, Calmar, volatility, and VaR/CVaR were biased.
+
+**What changed** (`backend/modules/engine/backtesting.py`)
+
+| Item | Detail |
+|---|---|
+| Boundary-aware returns | `risk_signal_to_returns(signal, boundaries=...)` differences *within* each segment and concatenates the per-segment return series. New helpers `segment_slices`, `count_segment_transitions`. |
+| Boundary-aware directional score | `hit_rate(actual, predicted, boundaries=...)` measures agreement inside each segment and pools with the comparison count as the weight. A segment with no signal is excluded rather than counted as a run of mismatches. |
+| `compute_metrics(..., boundaries=...)` | Threads the boundaries through both the derived return series and the directional metrics. Passing an explicit `returns` series *and* `boundaries` is rejected as ambiguous. |
+| Backtester | `WalkForwardBacktester.run()` derives the interior fold seams from the fold test-block sizes and applies them. `BacktestResult` now carries `boundaries` and `n_boundary_transitions_removed`, and `to_dict()["aggregation"]` records `returns: "per_fold"`. |
+| Doc caveat removed | The paragraph telling readers to "read the aggregate metrics with the boundary transition in mind" is gone, replaced by the actual fix. |
+
+**Invariant test.** With a model whose predictions are constant inside each fold
+but differ across folds, the aggregate return series must be *exactly* flat —
+zero return at every position, zero drawdown, zero Sharpe. Before the fix that
+series contained three spurious spikes. Also covered: aggregate returns equal the
+concatenation of the per-fold returns (so the correction is provably per-fold,
+not a hand-applied mask), and the naive series is shorter by exactly
+`n_splits - 1`.
+
+### 2. Attestation propagation through `input_data.attrs` — *Fixed*
+
+**Finding.** Pandas does not reliably preserve `attrs` through `groupby`,
+`merge`, `concat`, or most reshaping. Any pipeline that transformed the frame
+before prediction could silently lose the attestation.
+
+**What changed**
+
+- `RealPredictionEngine._enforce_data_quality()` no longer reads
+  `input_data.attrs`. The verdict is an explicit value:
+  `engine.predict(frame, attestation=...)`, with the engine-level attestation as
+  the fallback. Both the 2-D and multi-bank paths resolve it the same way.
+- Resolution moved into `AttestationResolver` in `quality_gate.py`, which is the
+  single, torch-free place where a prediction is allowed to proceed. It returns
+  the verified attestation so callers can thread its `attestation_id` onward.
+- All in-repo call sites pass the attestation explicitly:
+  `job_tasks.py` (prediction job, backtest job), `models_v1.py` (scenario
+  prediction — where the frame *is* transformed by `_apply_adjustments`).
+- Regression guards: an AST-level test asserts that neither `quality_gate.py` nor
+  `prediction_engine.py` contains any `.attrs` attribute access, and a pandas
+  test documents that `groupby`/`concat` drop attrs while `sort_values` keeps
+  them — exactly the inconsistency that made the old path unsafe.
+
+### 3. The gate accepted an externally computed composite score — *Fixed*
+
+**Finding.** The gate re-derived its own verdict, but still accepted
+`quality_score: Optional[float]` from the caller, so it inherited the weighting
+flaw of whatever produced that number.
+
+**What changed**
+
+- `quality_score` was **removed** from `DataQualityGate.evaluate`/`enforce`. A
+  test asserts the parameter does not exist, so it cannot be reintroduced
+  quietly.
+- The pipeline now hands over `QualityComponents` (completeness, consistency,
+  timeliness, accuracy) and the gate computes the weighted composite itself.
+- `DEFAULT_COMPONENT_WEIGHTS` lives in the gate; `QualityPolicy.score_weights`
+  can override it. The weights are identical to the previous analyzer weights, so
+  historic scores remain comparable.
+- Unmeasured components are `None` and are excluded with weights renormalised,
+  rather than being zero-filled.
+- Out-of-range or non-finite components raise `ValueError` instead of being
+  clamped.
+- **Duplicated scoring removed:** `DataOrchestrator._generate_quality_report()`
+  no longer computes a weighted average at all — it produces sub-scores only.
+  `run()` sets `quality_report.quality_score` from the attestation and
+  `fit_for_engine` from `attestation.verified`, so the flag is now literally the
+  gate's verdict rather than a parallel computation.
+- **A payload with no non-empty dataset scores exactly 0.0.** Previously the
+  missing-value and consistency terms were vacuously perfect (the 70/100 empty
+  payload). `measure_components()` now short-circuits to
+  `completeness=0.0, consistency=0.0`.
+
+### 4. `fail_on_any_error` defaulted to permissive — *Fixed*
+
+**Finding.** Strict mode was opt-in. For a risk engine, partial data flowing
+downstream with only a log entry is not acceptable.
+
+**What changed** (`backend/modules/data/collector.py`)
+
+- `fail_on_any_error` now defaults to `True`. The first failing source aborts the
+  collection with `DataQualityError`, and the error context names what *was*
+  collected, the success ratio, and the explicit opt-out wording.
+- `DataOrchestrator` calls `collector.collect(...)` without overriding it, so the
+  DATA pipeline is strict by default.
+- The old test that asserted silent partial success was rewritten as an explicit
+  opt-out test, and a new test pins the strict default.
+
+### 5. `allow_unverified_data` override — *Fixed (environment-gated)*
+
+**Finding.** An override that lets the engine predict with no quality
+attestation is a footgun, even when logged.
+
+**What changed**
+
+- The `allow_unverified_data` **config flag is gone**; setting it (or
+  `require_quality_attestation: false`) now logs that it is ignored. There is no
+  config path to skip the gate.
+- The only override is the `BEACON_ALLOW_UNVERIFIED_DATA` environment variable,
+  and only outside production.
+- Requesting it in `production`/`prod` (read from `BEACON_ENV`, `ENVIRONMENT`, or
+  `APP_ENV`) raises `PredictionBlockedError` at resolver construction, so the
+  process fails to start rather than silently weakening the gate.
+- Outside production it is still loud: a warning at construction and a warning on
+  every prediction that runs unattested.
+- The engine orchestrator also verifies the attestation embedded in the data
+  package (`DataQualityGate.require`), and no longer substitutes a default
+  quality score of `80.0` when the metadata carries none — that silently
+  manufactured an operational-risk number out of nothing.
+
+## Additions
+
+### Baseline comparison with reported lift — *Done*
+
+`backend/modules/engine/backtesting.py` gains three numpy-only baselines —
+`PersistenceBaseline` (random walk), `AR1Baseline` (the ARIMA(1,0,0) case, fitted
+by OLS on lagged levels and clamped to the stationary range), and
+`LinearBaseline` — plus `baseline_factory()` and
+`WalkForwardBacktester.compare(X, y, baselines=(...))`, returning a
+`BaselineComparison` whose `lift()` maps each baseline to per-metric
+improvements.
+
+**Lift convention:** `primary - baseline` for metrics where larger is better,
+`baseline - primary` for the metrics in `LOWER_IS_BETTER` (mse, mae, rmse,
+max_drawdown, annualized_volatility, var_95, cvar_95). Positive always means the
+primary model is better, and `lift_convention` is recorded in the payload so the
+sign cannot be misread.
+
+**Wired in:** `ModelTrainer` runs the comparison after test evaluation
+(`_baseline_comparison`), using a `_FrozenSequenceModelAdapter` so the trained
+artefact is evaluated frozen while the baselines refit on every fold — the
+conservative direction for a credibility claim. The result lands in
+`TrainingMetrics.baseline_comparison`, the training job result, and the model
+manifest.
+
+The adapter/harness integration is covered by `backend/tests/test_baselines.py`
+(torch-gated). Writing that test immediately caught a real defect in the wiring —
+the adapter was passed to the harness as a value rather than as a zero-argument
+factory, so every baseline comparison silently degraded to "skipped". The test
+fails if the primary model never actually runs.
+
+**Known gap:** the multi-scale trainer does not report a comparison yet. Its model
+consumes several heterogeneous inputs, so the flat design matrix the harness
+needs does not describe it; `baseline_comparison` is therefore `null` for
+multi-source training, which the job result and manifest both record as "not
+measured" rather than "no lift".
+
+### Model registry / reproducibility manifest — *Done*
+
+New `backend/modules/engine/reproducibility.py`:
+
+| Field | Meaning |
+|---|---|
+| `git_sha` | Revision of the training code (env vars first, then `.git/HEAD`, including packed-refs and worktree `gitdir:` files) |
+| `config_hash` | sha256 of the canonicalised training configuration |
+| `attestation_id` | Content address of the DATA quality verdict |
+| `snapshot_id` | Content address of the exact rows that were verified |
+| `model_artifact_hash` | sha256 of the model file |
+| `dataset_row_counts`, `training_metrics`, `backtest`, `extra` | Supporting context |
+
+`ModelManifest.write()` writes `reproducibility.json` next to the artefact;
+`load()` accepts the model path, the directory, or the manifest path;
+`verify()` re-hashes the artefact, so a swapped or corrupted checkpoint is
+detected rather than assumed away. The training job writes the manifest and
+includes `manifest.describe()` in the job log.
+
+### Dataset lineage / content-addressed snapshots — *Done*
+
+New `backend/modules/data/snapshots.py`. A `DatasetSnapshot` fingerprints the
+payload — per-dataset content hash (via `pd.util.hash_pandas_object`), row and
+column counts, column names, and date span — and derives its `snapshot_id` from
+that fingerprint, so the id is a *content address*: any changed cell changes it.
+`DatasetSnapshotter` persists a copy plus `snapshot.json` and can verify both the
+live frames and the bytes on disk.
+
+The attestation now carries `snapshot_id`, so a verdict names the exact data it
+was issued against. `DataOrchestrator.run()` snapshots `clean_data` before the
+gate runs and passes the id into `enforce(...)`; the DATA job result exposes both
+`snapshot_id` and `dataset_snapshot`.
+
+### Core tests for the two blockers — *Done*
+
+| Test | Guards |
+|---|---|
+| `test_piecewise_constant_predictions_produce_a_flat_return_series` | No seam contributes a non-zero return |
+| `test_aggregate_returns_equal_concatenated_per_fold_returns` | The correction is per-fold, not a mask |
+| `test_naive_aggregation_would_have_been_biased` | The artefact really existed (`n_splits - 1` extra transitions) |
+| `test_hit_rate_pools_within_segments` | A seam is never scored |
+| `test_hit_rate_skips_segments_without_signal` | Signal-less segments do not dilute the pool |
+| `test_dataframe_attrs_are_not_a_reliable_attestation_carrier` | `groupby`/`concat` drop attrs, which is why they cannot carry a verdict |
+| `test_governance_modules_never_read_dataframe_attrs` | AST guard against reintroducing `.attrs` |
+| `test_resolver_prefers_the_explicit_argument_over_its_default` | The argument, not frame metadata, decides |
+| `test_unverified_override_is_environment_gated` | Production refuses the override |
+| `test_baselines.py::test_reports_lift_over_the_baselines` | The primary model actually runs through the harness, and its lift is reported |
+
+## Removals
+
+- `allow_unverified_data` as a config flag — replaced by the environment-gated
+  override described above.
+- The external `quality_score` parameter on the gate.
+- The duplicated composite scoring in the DATA orchestrator.
+- The `DataFrame.attrs` attestation read.
+- The documentation caveat about fold-boundary transitions — replaced by the fix.
+- The silent `quality_score` default of `80.0` in the engine orchestrator.
+
+## Additional finding, not in the review
+
+While fixing the aggregate-metric path, the backtest job's per-observation
+metrics turned out to be comparing two different things: `RealPredictionEngine`
+returns **one risk score per data source**, while the target column is **per
+row**. The old code truncated the longer series with `min(len(...))` and computed
+MSE, R², directional accuracy, Sharpe, and friends across the misaligned pair —
+differencing a concatenation of *unrelated entities*, which is the same class of
+error as the fold-seam artefact but larger.
+
+`job_tasks.py` now checks that the prediction series and the target series
+describe the same observations. When they do, every metric is computed as before.
+When they do not, the metrics are reported as skipped with an explicit
+`quant_metrics_skipped` reason instead of being published. This removes numbers
+from existing job payloads, which is the intended outcome: they were not
+measuring what their names claimed.
+
+## Trajectory
+
+Confirmed sound and left alone: the signal-to-return convention
+(`return_t = -(risk_t - risk_{t-1})`), `safe_torch_load` with `weights_only=True`,
+the typed error codes with stable `code` values, the gate's independent
+re-derivation of its own verdict, and the leakage-free fold generation (the
+embargo/gap logic is untouched and still tested).
+
+With the two blockers fixed, a baseline reported as lift, and every artefact
+carrying a verifiable provenance manifest and a content-addressed data snapshot,
+the core is defensible for regulated use. API auth and the Grafana/Prometheus
+stack were out of scope and are unchanged.

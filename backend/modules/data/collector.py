@@ -101,17 +101,22 @@ class DataCollector:
         end_date: str,
         country_filters: Optional[List[str]] = None,
         region_filters: Optional[List[str]] = None,
-        fail_on_any_error: bool = False,
+        fail_on_any_error: bool = True,
     ) -> Dict[str, pd.DataFrame]:
         """Collect every selected catalogue item.
 
         Individual source failures are recorded in :attr:`last_report` rather
         than being flattened into empty frames. The run aborts when *nothing*
-        could be collected, and additionally when ``fail_on_any_error`` is set.
+        could be collected, and -- by default -- when *any* selected item failed.
+
+        Strict is the default on purpose: this is a risk engine, and a systemic
+        risk score computed over a silently partial panel is worse than no score
+        at all. Partial collection is available, but only as an explicit
+        ``fail_on_any_error=False`` opt-out at the call site.
 
         Raises:
             DataIngestionError: No catalogue item produced usable data.
-            DataQualityError: ``fail_on_any_error`` was set and some items failed.
+            DataQualityError: Some items failed and strict mode is in force.
             ValueError: Active country filters matched no catalogue item.
         """
         logger.info("[%s] Collecting %d datasets", self.job_id, len(catalogue_items))
@@ -195,9 +200,17 @@ class DataCollector:
             )
 
         if fail_on_any_error and report.failures:
+            first_failure = report.failures[0]
             raise DataQualityError(
-                "Strict collection mode is enabled and some data sources failed",
-                context={"job_id": self.job_id, "failures": [f.to_dict() for f in report.failures]},
+                "Strict collection is the default and some data sources failed: "
+                f"{first_failure.code} ({first_failure.error_code})",
+                context={
+                    "job_id": self.job_id,
+                    "collected": list(report.collected),
+                    "success_ratio": report.success_ratio,
+                    "failures": [f.to_dict() for f in report.failures],
+                    "opt_out": "pass fail_on_any_error=False to accept a partial panel",
+                },
             )
 
         if report.failures:

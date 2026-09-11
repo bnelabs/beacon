@@ -340,3 +340,217 @@ class TestWalkForwardBacktester:
         assert [fold.n_test for fold in result.folds] == [15, 15]
         for fold in result.folds:
             assert fold.to_dict()["n_test"] == 15
+
+
+class FoldConstantModel:
+    """Predicts the training mean: constant within a fold, different across folds."""
+
+    def __init__(self) -> None:
+        self.value = 0.0
+
+    def fit(self, X, y):
+        self.value = float(np.mean(np.asarray(y, dtype=float)))
+        return self
+
+    def predict(self, X):
+        rows = np.asarray(X).shape[0]
+        return np.full(rows, self.value, dtype=float)
+
+
+# ---------------------------------------------------------------------------
+# Fold-boundary invariants
+#
+# Concatenating out-of-sample folds and differencing the result invents one
+# transition per seam. These tests pin the correction down: per-fold returns are
+# concatenated, directional agreement is pooled within segments, and the result
+# records what was suppressed.
+# ---------------------------------------------------------------------------
+class TestFoldBoundaryInvariants:
+    def test_segment_slices_split_on_the_named_offsets(self):
+        assert bt.segment_slices(None, 10) == [slice(0, 10)]
+        assert bt.segment_slices([5], 10) == [slice(0, 5), slice(5, 10)]
+        assert bt.segment_slices([7, 3], 10) == [slice(0, 3), slice(3, 7), slice(7, 10)]
+        assert bt.count_segment_transitions(None, 10) == 0
+        assert bt.count_segment_transitions([5], 10) == 1
+
+        with pytest.raises(ValueError):
+            bt.segment_slices([10], 10)
+        with pytest.raises(ValueError):
+            bt.segment_slices([0], 10)
+        with pytest.raises(ValueError):
+            bt.segment_slices(["3"], 10)
+
+    def test_returns_never_span_a_boundary(self):
+        signal = np.array([0.0, 1.0, 2.0, 5.0, 6.0, 7.0])
+
+        naive = bt.risk_signal_to_returns(signal)
+        segmented = bt.risk_signal_to_returns(signal, boundaries=[3])
+
+        np.testing.assert_allclose(segmented, [-1.0, -1.0, -1.0, -1.0])
+        assert naive.size == segmented.size + 1
+        assert naive[2] == pytest.approx(-3.0), "the artefactual seam transition"
+        assert -3.0 not in segmented
+
+    def test_piecewise_constant_predictions_produce_a_flat_return_series(self):
+        """The crisp invariant: no seam may contribute a non-zero return."""
+        n_samples = 120
+        X = np.arange(n_samples, dtype=float).reshape(-1, 1)
+        y = np.sin(np.arange(n_samples) / 5.0)
+        config = bt.WalkForwardConfig(n_splits=4, test_size=20, gap=0)
+
+        result = bt.WalkForwardBacktester(lambda: FoldConstantModel(), config).run(X, y)
+
+        assert result.boundaries.tolist() == [20, 40, 60]
+        assert result.n_boundary_transitions_removed == 3
+        assert result.returns.size == result.n_oos - config.n_splits
+        np.testing.assert_allclose(result.returns, 0.0, atol=1e-12)
+        assert result.metrics.max_drawdown == 0.0
+        assert result.metrics.sharpe_ratio == 0.0
+        assert result.metrics.sortino_ratio == 0.0
+
+    def test_aggregate_returns_equal_concatenated_per_fold_returns(self):
+        n_samples = 100
+        X = np.linspace(0.0, 1.0, n_samples).reshape(-1, 1)
+        y = np.cos(X.ravel())
+        config = bt.WalkForwardConfig(n_splits=3, test_size=20, gap=0)
+        result = bt.WalkForwardBacktester(lambda: LinearStubModel(), config).run(X, y)
+
+        seam = np.concatenate(([0], result.boundaries, [result.n_oos]))
+        per_fold = [
+            bt.risk_signal_to_returns(result.predictions[start:stop])
+            for start, stop in zip(seam[:-1], seam[1:])
+        ]
+        np.testing.assert_allclose(result.returns, np.concatenate(per_fold))
+        np.testing.assert_allclose(
+            result.equity_curve, bt.equity_curve_from_returns(result.returns)
+        )
+
+    def test_naive_aggregation_would_have_been_biased(self):
+        n_samples = 100
+        X = np.linspace(0.0, 1.0, n_samples).reshape(-1, 1)
+        y = np.cos(X.ravel())
+        config = bt.WalkForwardConfig(n_splits=3, test_size=20, gap=0)
+        result = bt.WalkForwardBacktester(lambda: LinearStubModel(), config).run(X, y)
+
+        naive = bt.risk_signal_to_returns(result.predictions)
+        assert naive.size == result.returns.size + config.n_splits - 1
+        assert result.boundaries.size == config.n_splits - 1
+
+    def test_hit_rate_pools_within_segments(self):
+        # The only disagreement in the naive series is the zero change at the
+        # seam, which is not a transition in either underlying series.
+        actual = np.array([1.0, 2.0, 3.0, 3.0, 2.0, 1.0])
+        predicted = np.array([1.0, 2.0, 3.0, 4.0, 3.0, 2.0])
+
+        assert bt.hit_rate(actual, predicted) == pytest.approx(0.8)
+        assert bt.hit_rate(actual, predicted, boundaries=[3]) == pytest.approx(1.0)
+
+    def test_hit_rate_skips_segments_without_signal(self):
+        actual = np.array([1.0, 2.0, 3.0, 3.0, 4.0, 5.0])
+        predicted = np.array([1.0, 2.0, 4.0, 4.0, 4.0, 4.0])
+
+        # The second segment has no predicted movement at all, so it carries no
+        # directional signal. It is skipped instead of being counted as a run of
+        # mismatches, which is what the naive whole-series score does.
+        assert bt.hit_rate(actual, predicted, boundaries=[3]) == pytest.approx(1.0)
+        assert bt.hit_rate(actual, predicted) == pytest.approx(0.6)
+
+    def test_compute_metrics_rejects_returns_and_boundaries_together(self):
+        with pytest.raises(ValueError):
+            bt.compute_metrics(
+                returns=np.array([0.1, 0.2]), boundaries=[1], predicted=np.array([1.0, 2.0, 3.0])
+            )
+
+    def test_to_dict_reports_seam_free_aggregation(self):
+        X = np.linspace(0.0, 1.0, 80).reshape(-1, 1)
+        y = np.sin(X.ravel())
+        config = bt.WalkForwardConfig(n_splits=2, test_size=20, gap=0)
+        payload = bt.WalkForwardBacktester(lambda: LinearStubModel(), config).run(X, y).to_dict()
+
+        aggregation = payload["aggregation"]
+        assert aggregation["returns"] == "per_fold"
+        assert aggregation["boundaries"] == [20]
+        assert aggregation["n_boundary_transitions_removed"] == 1
+        assert json.dumps(payload, allow_nan=False)
+
+
+# ---------------------------------------------------------------------------
+# Baselines and lift
+# ---------------------------------------------------------------------------
+class TestBaselines:
+    def test_factory_exposes_canonical_names_and_aliases(self):
+        for name in bt.BASELINE_NAMES:
+            assert callable(bt.baseline_factory(name))
+        assert isinstance(bt.baseline_factory("random_walk")(), bt.PersistenceBaseline)
+        assert isinstance(bt.baseline_factory("arima")(), bt.AR1Baseline)
+        assert isinstance(bt.baseline_factory("ols")(), bt.LinearBaseline)
+
+        with pytest.raises(ValueError):
+            bt.baseline_factory("transformer")
+
+    def test_persistence_repeats_the_last_training_value(self):
+        model = bt.PersistenceBaseline().fit(
+            np.zeros((5, 1)), np.array([1.0, 2.0, 3.0, 4.0, 9.0])
+        )
+        np.testing.assert_allclose(model.predict(np.zeros((3, 1))), [9.0, 9.0, 9.0])
+
+    def test_ar1_recovers_a_known_process(self):
+        series = [0.0]
+        for _ in range(4000):
+            series.append(0.5 * series[-1] + 0.25)
+        series = np.asarray(series[20:], dtype=float)  # drop the startup transient
+
+        model = bt.AR1Baseline().fit(np.zeros((series.size, 1)), series)
+
+        assert model.slope == pytest.approx(0.5, abs=1e-6)
+        assert model.intercept == pytest.approx(0.25, abs=1e-6)
+        forecast = model.predict(np.zeros((3, 1)))
+        assert forecast[0] == pytest.approx(0.5 * series[-1] + 0.25, rel=1e-6)
+        assert forecast[1] == pytest.approx(0.5 * forecast[0] + 0.25, rel=1e-6)
+
+    def test_ar1_slope_is_clamped_to_the_stationary_range(self):
+        explosive = np.array([1.0, 2.0, 4.0, 8.0, 16.0, 32.0])
+        model = bt.AR1Baseline().fit(np.zeros((explosive.size, 1)), explosive)
+        assert -1.0 <= model.slope <= 1.0
+
+    def test_linear_baseline_recovers_a_linear_series(self):
+        X = np.linspace(0.0, 1.0, 50).reshape(-1, 1)
+        y = 3.0 * X.ravel() - 2.0
+        model = bt.LinearBaseline().fit(X, y)
+        np.testing.assert_allclose(model.predict(X), y, atol=1e-8)
+
+        with pytest.raises(RuntimeError):
+            bt.LinearBaseline().predict(X)
+
+    def test_compare_reports_lift_over_baselines(self):
+        n_samples = 200
+        X = np.linspace(0.0, 4.0, n_samples).reshape(-1, 1)
+        y = np.sin(X.ravel())
+        config = bt.WalkForwardConfig(n_splits=3, test_size=30, gap=0)
+
+        comparison = bt.WalkForwardBacktester(lambda: LinearStubModel(), config).compare(
+            X, y, baselines=("persistence", "ar1")
+        )
+        payload = comparison.to_dict()
+
+        assert set(payload["baselines"]) == {"persistence", "ar1"}
+        assert payload["lift_convention"].startswith("positive")
+        assert "rmse" in payload["lower_is_better"]
+
+        # Lower-is-better metrics are sign-flipped, so positive always means the
+        # primary model is better.
+        assert payload["lift"]["persistence"]["rmse"] == pytest.approx(
+            payload["baselines"]["persistence"]["metrics"]["rmse"]
+            - payload["primary"]["metrics"]["rmse"]
+        )
+        # Every series ran under the same seam-free aggregation.
+        for name in ("persistence", "ar1"):
+            assert payload["baselines"][name]["aggregation"]["returns"] == "per_fold"
+        assert payload["primary"]["aggregation"]["n_boundary_transitions_removed"] == 2
+        assert json.dumps(payload, allow_nan=False)
+
+    def test_compare_rejects_an_unknown_baseline(self):
+        with pytest.raises(ValueError):
+            bt.WalkForwardBacktester(lambda: LinearStubModel()).compare(
+                np.zeros((60, 1)), np.zeros(60), baselines=("nope",)
+            )

@@ -28,7 +28,15 @@ from backend.exceptions import (
     PredictionBlockedError,
     SchemaValidationError,
 )
-from backend.modules.data.quality_gate import DataQualityGate, QualityAttestation, QualityPolicy
+from backend.modules.data.quality_gate import (
+    AttestationResolver,
+    DataQualityGate,
+    QualityAttestation,
+    QualityComponents,
+    QualityPolicy,
+    resolve_environment,
+    unverified_override_requested,
+)
 from backend.plugins.base import DataSourcePlugin, register_plugin
 
 
@@ -253,12 +261,15 @@ def test_gate_rejects_empty_payload_despite_composite_score():
     """The empty payload is exactly the case the composite score green-lights."""
     gate = DataQualityGate(QualityPolicy())
 
-    # What the legacy scoring produces for an empty payload:
-    empty_score = 100 * 0.25 + 100 * 0.25 + 100 * 0.20 + 0.0 * 0.30
-    assert empty_score >= 70.0, "precondition: the composite score would have passed"
+    # What the legacy scoring produced for an empty payload: the missing-value
+    # and consistency terms were vacuously perfect, so it cleared 70/100.
+    legacy_components = QualityComponents(
+        completeness=100.0, consistency=100.0, timeliness=100.0, accuracy=0.0
+    )
+    assert legacy_components.composite() >= 70.0, "precondition: the composite would have passed"
 
     with pytest.raises(EmptyDatasetError) as excinfo:
-        gate.enforce({"A": pd.DataFrame()}, job_id="job-empty", quality_score=empty_score, completeness=100.0)
+        gate.enforce({"A": pd.DataFrame()}, job_id="job-empty", components=legacy_components)
 
     assert excinfo.value.code == "EMPTY_DATASET"
 
@@ -334,12 +345,19 @@ def test_require_attestation_blocks_prediction():
 
 def test_attestation_round_trips_to_dict():
     gate = DataQualityGate(QualityPolicy(min_total_rows=5))
-    attestation = gate.enforce({"A": _frame(40)}, job_id="job-rt", quality_score=88.0, completeness=97.5)
+    components = QualityComponents(
+        completeness=97.5, consistency=95.0, timeliness=90.0, accuracy=88.0
+    )
+    attestation = gate.enforce({"A": _frame(40)}, job_id="job-rt", components=components)
     payload = attestation.to_dict()
 
     assert payload["verified"] is True
-    assert payload["quality_score"] == 88.0
+    # The gate computed the composite itself from the supplied sub-scores.
+    assert payload["quality_score"] == pytest.approx(components.composite())
+    assert payload["score_source"] == "components"
+    assert payload["components"]["accuracy"] == 88.0
     assert payload["dataset_row_counts"] == {"A": 40}
+    assert payload["attestation_id"].startswith("sha256:")
     assert isinstance(payload["checks"], list) and payload["checks"]
 
 
@@ -356,12 +374,16 @@ def test_policy_serialises_sequences_as_lists():
 
 def test_attestation_survives_a_job_result_round_trip():
     gate = DataQualityGate(QualityPolicy(min_total_rows=5))
-    original = gate.enforce({"A": _frame(40)}, job_id="job-1", quality_score=91.0)
+    components = QualityComponents(completeness=93.0, consistency=90.0, timeliness=88.0, accuracy=92.0)
+    original = gate.enforce({"A": _frame(40)}, job_id="job-1", components=components)
 
     restored = QualityAttestation.from_dict(original.to_dict())
     assert restored.verified is True
     assert restored.job_id == "job-1"
-    assert restored.quality_score == 91.0
+    assert restored.quality_score == pytest.approx(original.quality_score)
+    assert restored.components == original.components
+    assert restored.score_source == "components"
+    assert restored.attestation_id == original.attestation_id
     assert len(restored.checks) == len(original.checks)
 
 
@@ -429,17 +451,34 @@ def test_collector_raises_when_every_source_fails():
     assert all(f.error_code == "DATA_SOURCE_UNAVAILABLE" for f in collector.last_report.failures)
 
 
-def test_collector_returns_partial_success_and_records_failure():
+def test_collector_partial_success_requires_an_explicit_opt_out():
+    """Strict is the default; accepting a partial panel is a deliberate choice."""
     from backend.modules.data.collector import DataCollector
 
     db = _FakeDB([_FakeItem("GOOD", "test_good"), _FakeItem("BAD", "test_failing")])
     collector = DataCollector(db, "job-partial", output_dir="/tmp")
 
-    collected = collector.collect([1, 2], "2023-01-01", "2023-02-01")
+    collected = collector.collect(
+        [1, 2], "2023-01-01", "2023-02-01", fail_on_any_error=False
+    )
 
     assert set(collected) == {"GOOD"}
     assert collector.last_report.failed == ["BAD"]
     assert collector.last_report.success_ratio == pytest.approx(0.5)
+
+
+def test_collector_defaults_to_strict_mode():
+    """A risk engine must not silently score a partial panel."""
+    from backend.modules.data.collector import DataCollector
+
+    db = _FakeDB([_FakeItem("GOOD", "test_good"), _FakeItem("BAD", "test_failing")])
+    collector = DataCollector(db, "job-strict-default", output_dir="/tmp")
+
+    with pytest.raises(DataQualityError) as excinfo:
+        collector.collect([1, 2], "2023-01-01", "2023-02-01")
+
+    assert excinfo.value.context["collected"] == ["GOOD"]
+    assert "fail_on_any_error=False" in excinfo.value.context["opt_out"]
 
 
 def test_collector_treats_empty_frame_as_failure():
@@ -498,3 +537,203 @@ def test_collector_rejects_an_empty_request():
     with pytest.raises(DataIngestionError) as excinfo:
         collector.collect([], "2023-01-01", "2023-02-01")
     assert "No catalogue items were requested" in str(excinfo.value)
+
+
+# --------------------------------------------------------------------------
+# The gate owns the composite score
+# --------------------------------------------------------------------------
+
+def test_gate_has_no_parameter_for_a_precomputed_score():
+    """A caller must not be able to hand the gate a verdict it then inherits."""
+    import inspect
+
+    for method in (DataQualityGate.evaluate, DataQualityGate.enforce):
+        parameters = inspect.signature(method).parameters
+        assert "quality_score" not in parameters
+        assert "components" in parameters
+
+
+def test_gate_computes_the_composite_from_sub_scores():
+    gate = DataQualityGate(QualityPolicy(min_total_rows=5, min_quality_score=70.0))
+    components = QualityComponents(
+        completeness=60.0, consistency=60.0, timeliness=60.0, accuracy=60.0
+    )
+
+    attestation = gate.evaluate({"A": _frame(40)}, job_id="job-score", components=components)
+
+    assert attestation.quality_score == pytest.approx(60.0)
+    assert "quality_score" in [check.name for check in attestation.failures]
+    with pytest.raises(DataQualityError):
+        gate.enforce({"A": _frame(40)}, job_id="job-score-2", components=components)
+
+
+def test_gate_recomputes_rather_than_trusts_a_high_upstream_score():
+    """A payload whose own sub-scores are poor cannot be rescued upstream."""
+    gate = DataQualityGate(QualityPolicy(min_total_rows=5, min_quality_score=70.0))
+    sparse = _frame(40)
+    sparse.loc[0:35, "Value"] = None  # completeness is ~10%
+
+    attestation = gate.evaluate(
+        {"A": sparse},
+        job_id="job-low",
+        components=QualityComponents(
+            completeness=10.0, consistency=10.0, timeliness=10.0, accuracy=10.0
+        ),
+    )
+
+    assert attestation.verified is False
+    assert attestation.quality_score == pytest.approx(10.0)
+
+
+def test_gate_measures_its_own_components_when_none_are_supplied():
+    gate = DataQualityGate(QualityPolicy(min_total_rows=5))
+
+    measured = gate.measure_components({"A": _frame(40)})
+    assert measured.completeness == pytest.approx(100.0)
+    assert measured.consistency == pytest.approx(100.0)
+    assert measured.accuracy is None, "accuracy is not measurable from a bare payload"
+    assert gate.composite_score(measured) == pytest.approx(100.0)
+
+    empty = gate.measure_components({"A": pd.DataFrame()})
+    assert empty.completeness == 0.0 and empty.consistency == 0.0
+    assert gate.composite_score(empty) == 0.0, "an empty payload has no measurable quality"
+
+
+def test_gate_rejects_out_of_range_components():
+    gate = DataQualityGate(QualityPolicy())
+    with pytest.raises(ValueError):
+        gate.enforce(
+            {"A": _frame(40)}, job_id="job-bad", components=QualityComponents(completeness=140.0)
+        )
+    with pytest.raises(ValueError):
+        gate.enforce(
+            {"A": _frame(40)}, job_id="job-bad", components=QualityComponents(accuracy=float("nan"))
+        )
+
+
+def test_policy_can_override_component_weights():
+    gate = DataQualityGate(
+        QualityPolicy(
+            min_total_rows=5,
+            min_quality_score=70.0,
+            score_weights={
+                "completeness": 1.0,
+                "consistency": 0.0,
+                "timeliness": 0.0,
+                "accuracy": 0.0,
+            },
+        )
+    )
+    components = QualityComponents(
+        completeness=100.0, consistency=0.0, timeliness=0.0, accuracy=0.0
+    )
+    assert gate.evaluate(
+        {"A": _frame(40)}, job_id="job-weights", components=components
+    ).quality_score == pytest.approx(100.0)
+    assert gate.policy.to_dict()["score_weights"]["completeness"] == 1.0
+
+
+def test_attestation_id_is_content_addressed():
+    gate = DataQualityGate(QualityPolicy(min_total_rows=5))
+    first = gate.enforce({"A": _frame(40)}, job_id="job-a")
+    second = gate.enforce({"A": _frame(40)}, job_id="job-b")
+    assert first.attestation_id != second.attestation_id
+
+    with_snapshot = gate.enforce({"A": _frame(40)}, job_id="job-a", snapshot_id="sha256:abc")
+    assert with_snapshot.attestation_id != first.attestation_id
+    assert with_snapshot.to_dict()["snapshot_id"] == "sha256:abc"
+
+
+# --------------------------------------------------------------------------
+# Attestation propagation: an explicit argument, never DataFrame.attrs
+# --------------------------------------------------------------------------
+
+def test_dataframe_attrs_are_not_a_reliable_attestation_carrier():
+    """Documents why the verdict travels as an argument through the pipeline."""
+    frame = _frame(6)
+    frame.attrs["quality_attestation"] = QualityAttestation(
+        job_id="job-attrs", verified=True, checked_at="now"
+    )
+
+    grouped = frame.groupby("Value").count()
+    assert "quality_attestation" not in grouped.attrs
+
+    other = _frame(6)
+    other.attrs["quality_attestation"] = "a different verdict"
+    assert "quality_attestation" not in pd.concat([frame, other]).attrs
+
+    # Some operations *do* preserve attrs, which is precisely the trap: relying
+    # on them works until the day a pipeline step reshapes the frame.
+    assert "quality_attestation" in frame.sort_values("Value").attrs
+
+
+def test_governance_modules_never_read_dataframe_attrs():
+    """AST-level guard: no attribute access to ``.attrs``, comments aside."""
+    import ast
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    for relative in (
+        "backend/modules/data/quality_gate.py",
+        "backend/modules/engine/prediction_engine.py",
+    ):
+        tree = ast.parse((repo_root / relative).read_text(encoding="utf-8"))
+        offenders = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute) and node.attr == "attrs"
+        ]
+        assert not offenders, f"{relative} reads DataFrame.attrs at line(s) {offenders}"
+
+
+def _verified_attestation(job_id: str = "job-verified") -> QualityAttestation:
+    return DataQualityGate(QualityPolicy(min_total_rows=5)).enforce(
+        {"A": _frame(40)}, job_id=job_id
+    )
+
+
+def test_resolver_requires_an_attestation_when_none_is_available():
+    with pytest.raises(PredictionBlockedError):
+        AttestationResolver(environ={}).resolve(None)
+
+
+def test_resolver_prefers_the_explicit_argument_over_its_default():
+    default = _verified_attestation("job-default")
+    explicit = _verified_attestation("job-explicit")
+    resolver = AttestationResolver(default, environ={})
+
+    assert resolver.resolve() is default
+    assert resolver.resolve(explicit) is explicit
+    assert resolver.default_attestation is default
+
+
+def test_resolver_rejects_a_failed_attestation():
+    failed = DataQualityGate(QualityPolicy(min_total_rows=1000)).evaluate(
+        {"A": _frame(1)}, job_id="job-failed"
+    )
+    with pytest.raises(PredictionBlockedError):
+        AttestationResolver(failed, environ={}).resolve(None)
+
+
+def test_unverified_override_is_environment_gated():
+    assert unverified_override_requested({}) is False
+    assert unverified_override_requested({"BEACON_ALLOW_UNVERIFIED_DATA": "1"}) is True
+    assert unverified_override_requested({"BEACON_ALLOW_UNVERIFIED_DATA": "0"}) is False
+    assert resolve_environment({"BEACON_ENV": "Production"}) == "production"
+    assert resolve_environment({}) == "development"
+
+    staged = AttestationResolver(
+        environ={"BEACON_ALLOW_UNVERIFIED_DATA": "yes", "BEACON_ENV": "staging"}
+    )
+    assert staged.allow_unverified is True
+    assert staged.resolve(None) is None
+
+    # Production refuses the override outright, so it cannot be reached by config.
+    with pytest.raises(PredictionBlockedError):
+        AttestationResolver(
+            environ={"BEACON_ALLOW_UNVERIFIED_DATA": "1", "BEACON_ENV": "production"}
+        )
+    with pytest.raises(PredictionBlockedError):
+        AttestationResolver(
+            environ={"BEACON_ALLOW_UNVERIFIED_DATA": "true", "ENVIRONMENT": "prod"}
+        )

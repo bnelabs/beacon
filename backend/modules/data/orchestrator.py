@@ -19,7 +19,8 @@ from .cleaner import DataCleaner
 from .formatter import DataFormatter
 from .analyzer import DataAnalyzer
 from .monitor import DataMonitor
-from .quality_gate import DataQualityGate, QualityAttestation, QualityPolicy
+from .quality_gate import DataQualityGate, QualityAttestation, QualityComponents, QualityPolicy
+from .snapshots import DatasetSnapshot, DatasetSnapshotter, snapshot_root_for
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,12 @@ class DataStatus(str, Enum):
 
 @dataclass
 class DataQualityReport:
-    """Data quality assessment report."""
+    """Data quality assessment report.
+
+    ``quality_score`` and ``fit_for_engine`` are filled in from the gate's
+    attestation once the payload has been verified; the component sub-scores are
+    the only numbers this report computes itself.
+    """
     job_id: str
     quality_score: float  # 0-100
     completeness: float  # % non-null
@@ -54,6 +60,8 @@ class DataQualityReport:
 
     fit_for_engine: bool
     recommendation: str
+
+    components: QualityComponents
 
     timestamp: datetime
 
@@ -75,6 +83,7 @@ class DataPackage:
 
     certified_at: datetime
     certified_by: str
+    snapshot_id: Optional[str] = None
 
 
 class DataOrchestrator:
@@ -103,6 +112,10 @@ class DataOrchestrator:
             alert_sink=self._emit_data_quality_alert,
         )
         self.attestation: Optional[QualityAttestation] = None
+        # Content-addressed copy of the exact rows the gate verified, so the
+        # verdict can be re-checked (or proven irreproducible) later.
+        self.snapshotter = DatasetSnapshotter(snapshot_root_for(output_dir))
+        self.snapshot: Optional[DatasetSnapshot] = None
 
         self.status = DataStatus.PENDING
         self.current_step = None
@@ -216,26 +229,38 @@ class DataOrchestrator:
                 cleaning_report
             )
 
-            # Generate quality report
+            # Generate quality report (sub-scores only; the gate owns the score)
             quality_report = self._generate_quality_report(
                 validation_report,
                 cleaning_report,
                 analysis_report
             )
 
-            self._update_progress(90.0, f"Analysis complete: Quality score {quality_report.quality_score:.1f}/100")
+            # Snapshot the exact rows the gate is about to verify.
+            self.snapshot = self.snapshotter.capture(clean_data, job_id=self.job_id)
 
             # Nothing is certified — and therefore nothing reaches the model —
             # until the payload independently passes the quality gate. The gate
-            # re-derives its verdict because the composite score alone accepts
-            # an entirely empty payload at exactly the 70/100 threshold.
+            # computes the composite from the raw sub-scores (there is no
+            # parameter for a pre-computed score, so a flawed weighting upstream
+            # cannot decide the verdict) and re-derives its own structural
+            # checks, because the composite alone accepts an entirely empty
+            # payload at exactly the 70/100 threshold.
             self.attestation = self.quality_gate.enforce(
                 clean_data,
                 job_id=self.job_id,
-                quality_score=quality_report.quality_score,
-                completeness=quality_report.completeness,
+                components=quality_report.components,
+                snapshot_id=self.snapshot.snapshot_id,
             )
-            quality_report.fit_for_engine = True
+            quality_report.quality_score = float(self.attestation.quality_score or 0.0)
+            quality_report.fit_for_engine = self.attestation.verified
+            quality_report.recommendation = self._recommendation_for(quality_report)
+
+            self._update_progress(
+                90.0,
+                f"Analysis complete: gate-verified quality score "
+                f"{quality_report.quality_score:.1f}/100",
+            )
 
             # Step 6: Save and certify
             self.status = DataStatus.CERTIFIED
@@ -267,52 +292,48 @@ class DataOrchestrator:
                                 validation_report,
                                 cleaning_report,
                                 analysis_report) -> DataQualityReport:
-        """Generate comprehensive quality report."""
+        """Decompose quality into sub-scores without computing the composite.
 
-        # Calculate component scores
-        completeness = (1 - validation_report.missing_ratio) * 100
-        consistency = (1 - validation_report.inconsistency_ratio) * 100
-        timeliness = validation_report.timeliness_score * 100
-        accuracy = analysis_report.accuracy_score * 100
+        The weighted average lives in the quality gate, which is the single owner
+        of the verdict. Duplicating the weighting here is exactly how a flawed
+        composite used to be able to decide whether data reached the model.
+        """
 
-        # Overall quality score (weighted average)
-        quality_score = (
-            completeness * 0.25 +
-            consistency * 0.25 +
-            timeliness * 0.20 +
-            accuracy * 0.30
+        # Component sub-scores, measured from the validation/cleaning/analysis
+        # stages. None are zero-filled: the gate excludes unmeasured components
+        # from the composite instead of letting an absent measurement drag it down.
+        components = QualityComponents(
+            completeness=(1 - validation_report.missing_ratio) * 100,
+            consistency=(1 - validation_report.inconsistency_ratio) * 100,
+            timeliness=validation_report.timeliness_score * 100,
+            accuracy=analysis_report.accuracy_score * 100,
         )
-
-        # Determine if fit for engine
-        fit_for_engine = (
-            quality_score >= 70.0 and
-            validation_report.critical_errors == 0 and
-            completeness >= 80.0
-        )
-
-        # Generate recommendation
-        if fit_for_engine:
-            recommendation = "✅ Data quality excellent. Ready for ENGINE processing."
-        elif quality_score >= 60.0:
-            recommendation = "⚠️ Data quality acceptable but has issues. Review warnings before proceeding."
-        else:
-            recommendation = "❌ Data quality insufficient. Re-collection or additional cleaning recommended."
 
         return DataQualityReport(
             job_id=self.job_id,
-            quality_score=quality_score,
-            completeness=completeness,
-            consistency=consistency,
-            timeliness=timeliness,
-            accuracy=accuracy,
+            quality_score=0.0,  # replaced by the gate's score in run()
+            completeness=float(components.completeness if components.completeness is not None else 0.0),
+            consistency=float(components.consistency if components.consistency is not None else 0.0),
+            timeliness=float(components.timeliness if components.timeliness is not None else 0.0),
+            accuracy=float(components.accuracy if components.accuracy is not None else 0.0),
             anomalies_detected=validation_report.anomalies_count + cleaning_report.anomalies_detected,
             anomalies_fixed=cleaning_report.fixed_issues,
             warnings=validation_report.warnings + cleaning_report.warnings,
             errors=validation_report.errors,
-            fit_for_engine=fit_for_engine,
-            recommendation=recommendation,
+            fit_for_engine=False,  # only the gate may certify a payload
+            recommendation="",
+            components=components,
             timestamp=datetime.now(timezone.utc)
         )
+
+    @staticmethod
+    def _recommendation_for(quality_report: DataQualityReport) -> str:
+        """Operator wording derived from the gate's verdict, not a local score."""
+        if not quality_report.fit_for_engine:
+            return "❌ Data quality insufficient. Re-collection or additional cleaning recommended."
+        if quality_report.quality_score >= 85.0:
+            return "✅ Data quality excellent. Ready for ENGINE processing."
+        return "⚠️ Data quality acceptable. Review warnings before proceeding."
 
     def _save_data_package(self,
                           data: pd.DataFrame,
@@ -361,6 +382,8 @@ class DataOrchestrator:
                 "countries": countries or [],
                 "quality_score": quality_report.quality_score,
                 "quality_attestation": self.attestation.to_dict() if self.attestation else None,
+                "dataset_snapshot": self.snapshot.to_dict() if self.snapshot else None,
+                "snapshot_id": self.snapshot.snapshot_id if self.snapshot else None,
                 "collection_report": (
                     self.collector.last_report.to_dict() if self.collector.last_report else None
                 ),
@@ -370,5 +393,6 @@ class DataOrchestrator:
             num_assets=len(data['asset'].unique()) if 'asset' in data.columns else 0,
             num_observations=len(data),
             certified_at=datetime.now(timezone.utc),
-            certified_by=user_id
+            certified_by=user_id,
+            snapshot_id=self.snapshot.snapshot_id if self.snapshot else None,
         )
