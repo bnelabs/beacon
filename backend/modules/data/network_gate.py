@@ -64,6 +64,7 @@ __all__ = [
     "TopologyAssessment",
     "RegimeAssessment",
     "IntervalWidthReference",
+    "FragmentationReference",
     "NetworkAttestation",
     "NetworkQualityGate",
 ]
@@ -527,6 +528,62 @@ class IntervalWidthReference:
 # Attestation
 # ---------------------------------------------------------------------------
 
+class FragmentationReference:
+    """Calibrated ceiling on topological fragmentation.
+
+    The gate's topology test compares summary *distributions* against the training
+    snapshots, which detects drift but says nothing about whether the network has
+    broken into pieces. That is a different failure: a network can drift very little
+    while splitting into two components that cannot pass stress to each other at
+    all. Persistent homology measures exactly that, through beta-0 (the number of
+    components) and the share of nodes outside the largest one.
+
+    Built from the fragmentation values observed during training, so "fragmented"
+    means "more fragmented than this network ever was on data it trained on" rather
+    than a hand-picked number -- the same derived-threshold discipline as the
+    interval-width ceiling.
+
+    Args:
+        values: Fragmentation observed per training snapshot, each in ``[0, 1]``.
+        level: Quantile used as the ceiling.
+    """
+
+    def __init__(self, values: Sequence[float], level: float = 0.99) -> None:
+        array = np.asarray(values, dtype=float).reshape(-1)
+        if array.size == 0:
+            raise ValueError("fragmentation reference needs at least one value")
+        if not np.all(np.isfinite(array)):
+            raise ValueError("fragmentation reference contains non-finite values")
+        if np.any(array < 0) or np.any(array > 1):
+            raise ValueError(
+                "fragmentation is a share of nodes outside the largest component and "
+                f"must lie in [0, 1]; got range [{array.min()}, {array.max()}]"
+            )
+        if not 0.0 < level < 1.0:
+            raise ValueError(f"level must be in (0, 1), got {level}")
+
+        self.values = array
+        self.level = float(level)
+
+    @property
+    def threshold(self) -> float:
+        return float(np.quantile(self.values, self.level, method="higher"))
+
+    def assess(self, fragmentation: float) -> Dict[str, object]:
+        if not np.isfinite(fragmentation) or not 0.0 <= fragmentation <= 1.0:
+            raise ValueError(
+                f"fragmentation must be a share in [0, 1], got {fragmentation}"
+            )
+        threshold = self.threshold
+        return {
+            "fragmentation": float(fragmentation),
+            "threshold": threshold,
+            "level": self.level,
+            "n_reference": int(self.values.size),
+            "exceeded": bool(fragmentation > threshold),
+        }
+
+
 @dataclass
 class NetworkAttestation:
     """Verdict on the network conditions under which a prediction is requested."""
@@ -538,6 +595,7 @@ class NetworkAttestation:
     topology: Dict[str, object] = field(default_factory=dict)
     regime: Dict[str, object] = field(default_factory=dict)
     interval_width: Dict[str, object] = field(default_factory=dict)
+    fragmentation: Dict[str, object] = field(default_factory=dict)
 
     @property
     def failures(self) -> List[QualityCheck]:
@@ -574,6 +632,7 @@ class NetworkAttestation:
             "topology": dict(self.topology),
             "regime": dict(self.regime),
             "interval_width": dict(self.interval_width),
+            "fragmentation": dict(self.fragmentation),
         }
 
     @classmethod
@@ -586,6 +645,7 @@ class NetworkAttestation:
             topology=dict(payload.get("topology") or {}),
             regime=dict(payload.get("regime") or {}),
             interval_width=dict(payload.get("interval_width") or {}),
+            fragmentation=dict(payload.get("fragmentation") or {}),
         )
 
     def summary(self) -> str:
@@ -618,15 +678,19 @@ class NetworkQualityGate:
         topology_reference: Optional[TopologyReference] = None,
         known_regimes: Optional[Iterable[str]] = None,
         width_reference: Optional[IntervalWidthReference] = None,
+        fragmentation_reference: Optional[FragmentationReference] = None,
         *,
         require_topology: bool = False,
         require_interval_width: bool = False,
+        require_fragmentation: bool = False,
     ) -> None:
         self.topology_reference = topology_reference
         self.known_regimes = tuple(sorted(set(known_regimes or ())))
         self.width_reference = width_reference
+        self.fragmentation_reference = fragmentation_reference
         self.require_topology = bool(require_topology)
         self.require_interval_width = bool(require_interval_width)
+        self.require_fragmentation = bool(require_fragmentation)
 
     def evaluate(
         self,
@@ -636,6 +700,7 @@ class NetworkQualityGate:
         regime_label: Optional[str] = None,
         is_transition: bool = False,
         interval_width: Optional[float] = None,
+        fragmentation: Optional[float] = None,
         checked_at: str = "",
     ) -> NetworkAttestation:
         """Assess the network conditions and return a verdict.
@@ -650,6 +715,7 @@ class NetworkQualityGate:
         topology_payload: Dict[str, object] = {}
         regime_payload: Dict[str, object] = {}
         width_payload: Dict[str, object] = {}
+        fragmentation_payload: Dict[str, object] = {}
 
         # -- 1. topology ----------------------------------------------------
         if self.topology_reference is None:
@@ -823,6 +889,60 @@ class NetworkQualityGate:
                 )
             )
 
+        # -- 4. topological fragmentation -------------------------------------
+        if self.fragmentation_reference is None:
+            checks.append(
+                QualityCheck(
+                    name="fragmentation_reference_missing",
+                    passed=not self.require_fragmentation,
+                    severity=(
+                        SEVERITY_CRITICAL if self.require_fragmentation else SEVERITY_WARNING
+                    ),
+                    detail=(
+                        "no calibrated fragmentation ceiling was supplied, so the "
+                        "network-splitting test could not run"
+                    ),
+                )
+            )
+        elif fragmentation is None:
+            checks.append(
+                QualityCheck(
+                    name="fragmentation_missing",
+                    passed=not self.require_fragmentation,
+                    severity=(
+                        SEVERITY_CRITICAL if self.require_fragmentation else SEVERITY_WARNING
+                    ),
+                    detail=(
+                        "a fragmentation ceiling exists but no fragmentation value was "
+                        "supplied; pass beta-0 share from topological_signature"
+                    ),
+                )
+            )
+        else:
+            fragmentation_payload = self.fragmentation_reference.assess(float(fragmentation))
+            exceeded = bool(fragmentation_payload["exceeded"])
+            checks.append(
+                QualityCheck(
+                    name="fragmentation_exceeded" if exceeded else "fragmentation_ok",
+                    passed=not exceeded,
+                    severity=SEVERITY_CRITICAL if exceeded else SEVERITY_INFO,
+                    detail=(
+                        f"network fragmentation {fragmentation_payload['fragmentation']:.4f} "
+                        f"exceeds the calibrated ceiling "
+                        f"{fragmentation_payload['threshold']:.4f} "
+                        f"(level {fragmentation_payload['level']}): the network has split "
+                        "further than it ever did during training"
+                        if exceeded
+                        else (
+                            f"network fragmentation "
+                            f"{fragmentation_payload['fragmentation']:.4f} is within the "
+                            f"calibrated ceiling "
+                            f"{fragmentation_payload['threshold']:.4f}"
+                        )
+                    ),
+                )
+            )
+
         verified = all(check.passed for check in checks)
         return NetworkAttestation(
             job_id=job_id,
@@ -832,6 +952,7 @@ class NetworkQualityGate:
             topology=topology_payload,
             regime=regime_payload,
             interval_width=width_payload,
+            fragmentation=fragmentation_payload,
         )
 
     def _assess_topology(self, live_layers: Sequence[MultiplexLayer]) -> TopologyAssessment:

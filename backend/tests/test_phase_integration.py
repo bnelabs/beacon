@@ -28,20 +28,18 @@ from backend.modules.data.network_gate import (
 )
 from backend.modules.data.pit import Observation, PITStore
 from backend.modules.data.streaming import (
-    LateDataPolicy,
     MarketEvent,
     TumblingWindowAggregator,
 )
 from backend.modules.engine.conformal import SplitConformalCalibrator
 from backend.modules.engine.foundation_encoders import HashedFallbackEncoder, compose_input
-from backend.modules.engine.hidden_markov import GaussianHMM, label_states
+from backend.modules.engine.hidden_markov import GaussianHMM
 from backend.modules.engine.mixture_of_experts import (
     REGIME_ORDER,
     MixtureOfExperts,
     RegimeSignal,
 )
 from backend.modules.engine.multiplex import (
-    MultiplexLayer,
     RelationKind,
     build_interbank_exposure_layer,
     require_exposure,
@@ -213,21 +211,27 @@ def test_the_whole_stack_composes_on_one_stress_episode():
     assert isinstance(verdict.reliable, bool)
 
     # --- 12. network gate --------------------------------------------------------
-    # NOTE: the gate's TopologyReference takes network_gate.GraphSignature (four
-    # summary components: edge weights, node strengths, degrees, spectrum), NOT
-    # persistent_homology.GraphSignature (Betti numbers and connectivity). The two
-    # types share a name and are unrelated, which this integration test surfaced:
-    # the gate cannot consume the TDA signature. They are complementary topology
-    # tests -- drift between summary distributions on one side, fragmentation and
-    # redundancy on the other -- and remain separate.
+    # Two complementary topology tests meet the gate here.
+    #
+    # TopologyReference compares summary DISTRIBUTIONS against training snapshots
+    # and so detects drift; it takes network_gate.GraphSignature (edge weights, node
+    # strengths, degrees, spectrum). FragmentationReference consumes the TDA output
+    # -- the share of nodes outside the largest component -- and so detects the
+    # network SPLITTING, which is a different failure: a network can drift barely at
+    # all while breaking into pieces that cannot pass stress between them.
+    #
+    # An earlier version of this file claimed these were two classes both named
+    # GraphSignature. That was wrong: persistent_homology exports TopologicalSignature,
+    # not GraphSignature, and there is no name collision. The real gap the test
+    # exposed was that the gate had no fragmentation input at all, which is now closed.
+    from backend.modules.data.network_gate import FragmentationReference
     from backend.modules.data.network_gate import GraphSignature as GateSignature
 
-    reference = TopologyReference(
-        [GateSignature.from_layer(layer)],
-        alpha=0.05,
-    )
+    reference = TopologyReference([GateSignature.from_layer(layer)], alpha=0.05)
+    fragmentation_reference = FragmentationReference([signature.fragmentation], level=0.99)
     gate = NetworkQualityGate(
         topology_reference=reference,
+        fragmentation_reference=fragmentation_reference,
         known_regimes=("calm", "elevated", "stressed", "crisis"),
         width_reference=IntervalWidthReference([interval.width * 2.0], level=0.9),
         # One reference snapshot is far too few to reject novelty, so the gate must
@@ -241,7 +245,11 @@ def test_the_whole_stack_composes_on_one_stress_episode():
         live_layers=[layer],
         regime_label=statistical_regime,
         interval_width=interval.width,
+        fragmentation=signature.fragmentation,
     )
     assert attestation.verified is True
     assert attestation.attestation_id.startswith("sha256:")
     assert "topology_reference_undersized" in {check.name for check in attestation.checks}
+    # The TDA signal reached the gate and was evaluated.
+    assert "fragmentation_ok" in {check.name for check in attestation.checks}
+    assert attestation.fragmentation["fragmentation"] == pytest.approx(signature.fragmentation)

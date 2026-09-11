@@ -22,6 +22,7 @@ import pytest
 
 from backend.exceptions import PredictionBlockedError
 from backend.modules.data.network_gate import (
+    FragmentationReference,
     GraphSignature,
     IntervalWidthReference,
     NetworkAttestation,
@@ -591,3 +592,117 @@ class TestDeterminism:
         assert first.distances == second.distances
         assert first.p_values == second.p_values
         assert first.is_novel == second.is_novel
+
+
+class TestFragmentationGate:
+    """The TDA signal reaching the gate, which the integration test showed was missing.
+
+    The topology test compares summary *distributions* against training snapshots --
+    it detects drift. It says nothing about whether the network has split into
+    components that cannot pass stress to each other, which is a different failure:
+    a network can drift barely at all while breaking in two. These tests cover the
+    fragmentation path that closes that gap.
+    """
+
+    def _reference(self):
+        return FragmentationReference([0.0, 0.0, 0.1, 0.1, 0.2], level=0.9)
+
+    def test_threshold_is_the_empirical_quantile(self):
+        assert self._reference().threshold == pytest.approx(0.2)
+
+    def test_an_intact_network_passes(self):
+        gate = NetworkQualityGate(fragmentation_reference=self._reference())
+        attestation = gate.evaluate(job_id="f1", fragmentation=0.05)
+        assert "fragmentation_ok" in {c.name for c in attestation.checks}
+
+    def test_a_split_network_blocks(self):
+        gate = NetworkQualityGate(fragmentation_reference=self._reference())
+        attestation = gate.evaluate(job_id="f2", fragmentation=0.75)
+        assert attestation.verified is False
+        assert "fragmentation_exceeded" in {c.name for c in attestation.failures}
+
+    def test_the_reason_names_the_split(self):
+        gate = NetworkQualityGate(fragmentation_reference=self._reference())
+        detail = next(
+            c.detail for c in gate.evaluate(job_id="f3", fragmentation=0.9).checks
+            if c.name == "fragmentation_exceeded"
+        )
+        assert "split" in detail
+
+    def test_missing_reference_warns_by_default_and_blocks_when_required(self):
+        permissive = NetworkQualityGate().evaluate(job_id="f4", fragmentation=0.1)
+        assert permissive.verified is True
+        assert "fragmentation_reference_missing" in {c.name for c in permissive.checks}
+
+        strict = NetworkQualityGate(require_fragmentation=True).evaluate(
+            job_id="f5", fragmentation=0.1
+        )
+        assert strict.verified is False
+        assert "fragmentation_reference_missing" in {c.name for c in strict.failures}
+
+    def test_missing_value_warns_by_default_and_blocks_when_required(self):
+        gate = NetworkQualityGate(fragmentation_reference=self._reference())
+        assert gate.evaluate(job_id="f6").verified is True
+        strict = NetworkQualityGate(
+            fragmentation_reference=self._reference(), require_fragmentation=True
+        )
+        assert strict.evaluate(job_id="f7").verified is False
+
+    def test_payload_carries_the_measurement(self):
+        gate = NetworkQualityGate(fragmentation_reference=self._reference())
+        payload = gate.evaluate(job_id="f8", fragmentation=0.15).to_dict()
+        assert payload["fragmentation"]["fragmentation"] == pytest.approx(0.15)
+        json.dumps(payload, allow_nan=False)
+
+    def test_round_trips_through_dict(self):
+        gate = NetworkQualityGate(fragmentation_reference=self._reference())
+        original = gate.evaluate(job_id="f9", fragmentation=0.15, checked_at="2024-01-01T00:00:00Z")
+        rebuilt = NetworkAttestation.from_dict(original.to_dict())
+        assert rebuilt.fragmentation == original.fragmentation
+        assert rebuilt.attestation_id == original.attestation_id
+
+    def test_reference_validation(self):
+        with pytest.raises(ValueError, match="at least one value"):
+            FragmentationReference([])
+        with pytest.raises(ValueError, match="non-finite"):
+            FragmentationReference([0.1, float("nan")])
+        with pytest.raises(ValueError, match=r"\[0, 1\]"):
+            FragmentationReference([1.5])
+        with pytest.raises(ValueError, match="level"):
+            FragmentationReference([0.1], level=1.0)
+
+        reference = FragmentationReference([0.1])
+        with pytest.raises(ValueError, match=r"\[0, 1\]"):
+            reference.assess(1.5)
+        with pytest.raises(ValueError, match=r"\[0, 1\]"):
+            reference.assess(float("nan"))
+
+
+class TestFragmentationFromPersistentHomology:
+    def test_a_real_betti_0_share_drives_the_gate(self):
+        """The composition that was missing: TDA output into the gate.
+
+        ``topological_signature(...).fragmentation`` is the share of nodes outside
+        the largest component, which is exactly what the gate's ceiling wants.
+        """
+        from backend.modules.engine.persistent_homology import topological_signature
+
+        # `ring` here returns a MultiplexLayer, so the TDA takes its adjacency.
+        intact = ring(6).adjacency.copy()
+        broken = intact.copy()
+        broken[0, 1] = broken[1, 0] = 0.0
+        broken[3, 4] = broken[4, 3] = 0.0
+
+        intact_signature = topological_signature(intact, reference="zero")
+        broken_signature = topological_signature(broken, reference="zero")
+        assert broken_signature.fragmentation > intact_signature.fragmentation
+
+        gate = NetworkQualityGate(
+            fragmentation_reference=FragmentationReference(
+                [intact_signature.fragmentation], level=0.99
+            )
+        )
+        assert gate.evaluate(job_id="t1", fragmentation=intact_signature.fragmentation).verified is True
+        split = gate.evaluate(job_id="t2", fragmentation=broken_signature.fragmentation)
+        assert split.verified is False
+        assert "fragmentation_exceeded" in {c.name for c in split.failures}
