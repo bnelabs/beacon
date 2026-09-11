@@ -98,7 +98,13 @@ class DataFormatter:
         if value_col:
             value_series = pd.to_numeric(data[value_col], errors='coerce')
             features['value_mean'] = value_series.rolling(7, min_periods=1).mean()
-            features['value_std'] = value_series.rolling(7, min_periods=1).std().fillna(0)
+            # `min_periods=2` because dispersion is undefined for a single
+            # observation, and the result is deliberately NOT filled afterwards. It
+            # used to be `.fillna(0)`, which wrote "volatility is exactly zero" for
+            # the first row of every series -- a fabricated number of the same kind
+            # the point-in-time store exists to prevent. A missing dispersion stays
+            # missing and the consumer decides what to do about it.
+            features['value_std'] = value_series.rolling(7, min_periods=2).std()
 
         return features
 

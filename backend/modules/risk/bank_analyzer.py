@@ -69,6 +69,7 @@ from .constants import (
     RISK_THRESHOLD_LOW,
     RISK_THRESHOLD_MODERATE,
 )
+from .fire_sale import FireSaleResult, FireSaleScenario, solve_fire_sale
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +234,16 @@ class MultiBankAnalysis:
     compute.
     """
 
+    fire_sale: Optional[FireSaleResult] = None
+    """The coupled fire-sale fixed point, when a scenario was supplied.
+
+    `clearing` above is a single-step answer at *fixed* prices. This is the fixed
+    point once forced liquidation is allowed to move them, which is a different and
+    generally worse number. `None` means the holdings, prices and capital the
+    coupled solver needs were not supplied -- that is missing information, not
+    evidence that the feedback is absent, and the two must not be confused.
+    """
+
     def to_dict(self) -> Dict[str, object]:
         return {
             "analysis_date": self.analysis_date,
@@ -245,6 +256,7 @@ class MultiBankAnalysis:
             "network_density": self.network_density,
             "systemic_risk_score": self.systemic_risk_score,
             "clearing": self.clearing.to_dict() if self.clearing else None,
+            "fire_sale": self.fire_sale.to_dict() if self.fire_sale else None,
             "shock_scenarios": {
                 bank_id: result.to_dict()
                 for bank_id, result in self.shock_scenarios.items()
@@ -283,6 +295,7 @@ class BankRiskAnalyzer:
         bank_exposures: Optional[Dict[Tuple[str, str], float]] = None,
         feature_names: Optional[List[str]] = None,
         bank_endowments: Optional[Dict[str, float]] = None,
+        fire_sale_scenario: Optional[FireSaleScenario] = None,
     ) -> MultiBankAnalysis:
         """Score every institution, then analyse the network if possible.
 
@@ -292,6 +305,11 @@ class BankRiskAnalyzer:
             feature_names: Unused; retained for call-site compatibility.
             bank_endowments: ``bank_id ->`` external assets available to meet
                 obligations. Required for clearing.
+            fire_sale_scenario: Optional coupled fire-sale scenario. When
+                supplied, the clearing above is iterated against the liquidation
+                feedback until a fixed point or divergence. Every quantity comes
+                from the caller; nothing is defaulted, and the scenario must cover
+                exactly the institutions being analysed.
 
         Returns:
             A :class:`MultiBankAnalysis`. ``systemic_risk_score`` is ``None``
@@ -401,6 +419,19 @@ class BankRiskAnalyzer:
         avg_risk = float(np.mean(risks)) if risks else 0.0
         max_risk = float(np.max(risks)) if risks else 0.0
 
+        fire_sale_result: Optional[FireSaleResult] = None
+        if fire_sale_scenario is not None:
+            scenario_ids = set(fire_sale_scenario.institution_ids)
+            analysed_ids = set(bank_ids)
+            if scenario_ids != analysed_ids:
+                raise ValueError(
+                    "fire_sale_scenario covers a different institution set than the "
+                    "analysis: only in the scenario "
+                    f"{sorted(scenario_ids - analysed_ids)}, only in the analysis "
+                    f"{sorted(analysed_ids - scenario_ids)}"
+                )
+            fire_sale_result = solve_fire_sale(fire_sale_scenario)
+
         return MultiBankAnalysis(
             analysis_date=pd.Timestamp.now().isoformat(),
             num_banks=len(bank_ids),
@@ -415,6 +446,7 @@ class BankRiskAnalyzer:
             clearing=clearing,
             shock_scenarios=shock_scenarios,
             systemic_risk_score=systemic_risk_score,
+            fire_sale=fire_sale_result,
         )
 
     def _score_bank(self, bank_id: str, df: pd.DataFrame) -> float:

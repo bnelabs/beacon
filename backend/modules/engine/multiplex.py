@@ -60,6 +60,9 @@ __all__ = [
     "build_co_movement_layer",
     "build_ccp_exposure_layer",
     "build_interbank_exposure_layer",
+    "build_fx_basis_layer",
+    "build_fx_swap_exposure_layer",
+    "cross_currency_funding_exposure",
 ]
 
 
@@ -670,3 +673,355 @@ class RollingMultiplex:
             "n_snapshots": len(self._snapshots),
             "snapshots": [snapshot.to_dict() for snapshot in self._snapshots],
         }
+
+
+# ---------------------------------------------------------------------------
+# Cross-currency (FX swap) funding
+# ---------------------------------------------------------------------------
+#
+# Systemic liquidity crises almost always reach the FX swap market before they
+# reach anything else: a institution that funds itself in one currency and lends
+# or invests in another must obtain the foreign currency, and when it cannot the
+# cross-currency basis widens. That widening is the first observable symptom.
+#
+# Two different things are built here, and keeping them apart is the whole point.
+#
+# ``build_fx_swap_exposure_layer`` builds an EXPOSURE layer, because a currency
+# swap is a contractual obligation: the near leg is drawn, the far leg is owed.
+# It is clearing-eligible like any other obligation.
+#
+# ``build_fx_basis_layer`` builds a CO_MOVEMENT layer, because a basis is a
+# *price*, not a promise. Two institutions funded in the same currency at risk
+# are exposed to the same squeeze; neither owes the other anything. Clearing this
+# layer would be the same category error as running Eisenberg-Noe on a
+# correlation matrix, which is precisely the error this module was rebuilt to
+# remove. ``require_exposure`` refuses it, and a test asserts that it does.
+
+
+def _basis_by_funding_currency(
+    basis: object,
+) -> Dict[str, float]:
+    """Coerce a basis publication into ``{currency: basis_points}``.
+
+    Accepts a mapping, a ``pandas.Series`` indexed by currency, or a frame with
+    ``currency`` and ``basis`` columns. Duplicate, conflicting or non-finite
+    entries raise rather than being resolved by whichever row happened to be last.
+    """
+    rates: Dict[str, float] = {}
+    if isinstance(basis, pd.DataFrame):
+        required = {"currency", "basis"}
+        missing = required - set(basis.columns)
+        if missing:
+            raise ValueError(f"basis is missing required column(s): {sorted(missing)}")
+        pairs = list(zip(basis["currency"], basis["basis"]))
+    elif isinstance(basis, pd.Series):
+        pairs = list(basis.items())
+    elif isinstance(basis, dict):
+        pairs = list(basis.items())
+    else:
+        raise TypeError(
+            "basis must be a mapping, a pandas Series or a DataFrame with "
+            f"'currency' and 'basis' columns, got {type(basis).__name__}"
+        )
+
+    for currency, value in pairs:
+        key = str(currency)
+        numeric = float(value)
+        if not np.isfinite(numeric):
+            raise ValueError(f"basis for {key!r} is not finite: {value!r}")
+        if key in rates and rates[key] != numeric:
+            raise ValueError(
+                f"conflicting basis observations for {key!r}: "
+                f"{rates[key]} and {numeric}"
+            )
+        rates[key] = numeric
+    if not rates:
+        raise ValueError("basis is empty; no currency has a basis observation")
+    return rates
+
+
+def cross_currency_funding_exposure(
+    funding_mix: pd.DataFrame,
+    basis: object,
+    *,
+    stress_only: bool = True,
+) -> Dict[str, float]:
+    """Per-institution exposure to a cross-currency funding squeeze.
+
+    An institution's exposure is the share-weighted basis of the currencies it
+    funds itself in::
+
+        exposure_i = sum_c  share_ic * f(basis_c)
+
+    The basis is indexed by **funding currency** and quoted in basis points. A
+    negative basis is the stress direction -- it means obtaining US dollars
+    against that currency costs a premium -- so with ``stress_only`` (the
+    default) ``f(b) = max(0, -b)`` and a positive basis adds nothing. That
+    asymmetry is deliberate: a basis in the other direction is not evidence of a
+    dollar squeeze and must not be counted as one. ``stress_only=False`` uses
+    ``|b|`` to treat both directions as dislocation.
+
+    Args:
+        funding_mix: Columns ``institution``, ``currency`` and ``share``. Shares
+            are the institution's funding composition and must sum to 1 per
+            institution. A share may be zero, in which case the currency needs no
+            basis observation.
+        basis: Basis points by funding currency -- a mapping, a ``Series``, or a
+            frame with ``currency`` and ``basis``.
+        stress_only: Count only the dollar-squeeze direction, as above.
+
+    Returns:
+        ``{institution: exposure_in_basis_points}``.
+
+    Raises:
+        ValueError: If the frame is malformed, a share is negative or non-finite,
+            an institution's shares do not sum to 1, or the basis is malformed.
+        KeyError: If an institution funds in a currency with a non-zero share and
+            no basis observation exists. A missing price is not a zero price.
+    """
+    required = {"institution", "currency", "share"}
+    missing = required - set(funding_mix.columns)
+    if missing:
+        raise ValueError(
+            f"funding_mix is missing required column(s): {sorted(missing)}"
+        )
+    rates = _basis_by_funding_currency(basis)
+
+    mixes: Dict[str, Dict[str, float]] = {}
+    for institution, currency, share in zip(
+        funding_mix["institution"], funding_mix["currency"], funding_mix["share"]
+    ):
+        key = str(institution)
+        value = float(share)
+        if not np.isfinite(value) or value < 0:
+            raise ValueError(
+                f"funding share for {key!r} in {currency!r} is invalid: {share!r}"
+            )
+        bucket = mixes.setdefault(key, {})
+        bucket[str(currency)] = bucket.get(str(currency), 0.0) + value
+
+    if not mixes:
+        raise ValueError("funding_mix is empty; no institution has a funding mix")
+
+    exposure: Dict[str, float] = {}
+    for institution, bucket in mixes.items():
+        total = sum(bucket.values())
+        if not np.isfinite(total) or total <= 0.0:
+            raise ValueError(
+                f"funding shares for {institution!r} sum to {total!r}; a funding "
+                "composition must be a positive distribution"
+            )
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(
+                f"funding shares for {institution!r} sum to {total:.6f}, not 1"
+            )
+        unobserved = sorted(
+            currency
+            for currency, weight in bucket.items()
+            if weight > 0.0 and currency not in rates
+        )
+        if unobserved:
+            raise KeyError(
+                f"{institution!r} funds in {unobserved} but no basis observation "
+                "exists for those currencies; a missing basis is not a zero basis"
+            )
+        value = 0.0
+        for currency, weight in bucket.items():
+            if currency not in rates:
+                continue
+            quoted = rates[currency]
+            value += weight * (max(0.0, -quoted) if stress_only else abs(quoted))
+        exposure[institution] = float(value)
+    return exposure
+
+
+def build_fx_basis_layer(
+    funding_mix: pd.DataFrame,
+    basis: object,
+    node_ids: Sequence[str],
+    *,
+    as_of: pd.Timestamp,
+    name: str = "fx_swap_basis",
+    stress_only: bool = True,
+    absent_means_zero: bool = False,
+) -> MultiplexLayer:
+    """Cross-currency funding stress coupling: a ``CO_MOVEMENT`` layer.
+
+    The edge weight between two institutions is the product of their basis
+    exposures, so institutions with no cross-currency funding stress are
+    unconnected and none is ever connected to itself. This is a relation of
+    *shared vulnerability*, not of obligation: it identifies who would be hurt by
+    the same dollar squeeze at the same time. It is deliberately **not**
+    clearing-eligible, and ``require_exposure`` refuses it -- there is no "who
+    owes whom" in a price.
+
+    Args:
+        funding_mix: As for :func:`cross_currency_funding_exposure`.
+        basis: As for :func:`cross_currency_funding_exposure`.
+        node_ids: The shared universe.
+        as_of: Information cut-off.
+        name: Layer name.
+        stress_only: As for :func:`cross_currency_funding_exposure`.
+        absent_means_zero: What a node absent from ``funding_mix`` means. By
+            default this is a ``KeyError``: absence of funding data is not
+            evidence of domestic-only funding. Setting it to True is an explicit
+            caller declaration that every unlisted node funds purely in the base
+            currency, and the declaration is recorded in the layer metadata so it
+            cannot be forgotten later.
+
+    Raises:
+        KeyError: If a node has no funding mix and ``absent_means_zero`` is False,
+            or the mix names an institution outside the universe.
+        ValueError: If the inputs are malformed, as for
+            :func:`cross_currency_funding_exposure`.
+    """
+    exposure = cross_currency_funding_exposure(
+        funding_mix, basis, stress_only=stress_only
+    )
+    universe = [str(node) for node in node_ids]
+    if len(set(universe)) != len(universe):
+        raise ValueError("node_ids contains duplicates")
+
+    outside = sorted(set(exposure) - set(universe))
+    if outside:
+        raise KeyError(
+            f"funding_mix names institutions outside the node universe: {outside}"
+        )
+    absent = sorted(set(universe) - set(exposure))
+    if absent and not absent_means_zero:
+        raise KeyError(
+            f"no funding mix supplied for {absent}; absence of funding data is not "
+            "evidence of domestic-only funding. Pass absent_means_zero=True to "
+            "declare that explicitly."
+        )
+
+    if absent_means_zero:
+        vector = np.array(
+            [exposure.get(node, 0.0) for node in universe], dtype=float
+        )
+    else:
+        vector = np.array([exposure[node] for node in universe], dtype=float)
+
+    matrix = np.outer(vector, vector)
+    np.fill_diagonal(matrix, 0.0)
+
+    return MultiplexLayer(
+        name=name,
+        kind=RelationKind.CO_MOVEMENT,
+        adjacency=matrix,
+        node_ids=universe,
+        as_of=pd.Timestamp(as_of),
+        directed=False,
+        metadata={
+            "relation": "shared cross-currency funding stress",
+            "basis_units": "basis points",
+            "basis_convention": (
+                "dollar-squeeze direction only (a negative basis is the stress "
+                "sign); a positive basis contributes nothing"
+                if stress_only
+                else "absolute basis dislocation, both directions counted"
+            ),
+            "funding_exposure": {
+                node: float(value) for node, value in exposure.items()
+            },
+            "nodes_assumed_base_currency_funded": absent if absent_means_zero else [],
+            "clearing_eligible": False,
+            "n_edges": int(np.count_nonzero(matrix)),
+        },
+    )
+
+
+def build_fx_swap_exposure_layer(
+    fx_swaps: pd.DataFrame,
+    node_ids: Sequence[str],
+    *,
+    as_of: pd.Timestamp,
+    name: str = "fx_swap_funding",
+    seniority: int = 0,
+) -> MultiplexLayer:
+    """Cross-currency funding obligations: a ``debtor -> creditor`` relation.
+
+    An FX swap is a contractual obligation -- the near leg is drawn and the far
+    leg is owed -- so this layer is ``EXPOSURE`` and may be cleared, with the edge
+    pointing from the institution that owes the far leg to the one that holds it.
+
+    **Notionals must already share one numeraire.** The layer matrix is a
+    magnitude, and adding a EUR notional to a USD one would be adding unlike
+    quantities; the conversion is the caller's, and the currency pairs actually
+    used are recorded in the metadata so a reader can see what was aggregated.
+
+    Args:
+        fx_swaps: Columns ``debtor``, ``creditor``, ``notional`` and optionally
+            ``currency_pair`` and ``as_of``. Rows dated after ``as_of`` are
+            rejected, not silently included.
+        node_ids: The shared universe.
+        as_of: Information cut-off.
+        name: Layer name.
+        seniority: Clearing priority. Lower is paid first.
+
+    Raises:
+        ValueError: If a required column is missing or a notional is negative or
+            non-finite.
+        KeyError: If a counterparty is outside the node universe.
+    """
+    required = {"debtor", "creditor", "notional"}
+    missing = required - set(fx_swaps.columns)
+    if missing:
+        raise ValueError(f"fx_swaps is missing required column(s): {sorted(missing)}")
+
+    rows_withheld = 0
+    if "as_of" in fx_swaps.columns:
+        mask, rows_withheld = _filter_to_as_of(
+            fx_swaps["as_of"], as_of, "FX swap obligations"
+        )
+        fx_swaps = fx_swaps.loc[np.asarray(mask)]
+
+    universe = list(node_ids)
+    position = {node: index for index, node in enumerate(universe)}
+    matrix = np.zeros((len(universe), len(universe)), dtype=float)
+    pairs = set()
+    has_pairs = "currency_pair" in fx_swaps.columns
+    unknown = set()
+
+    for row in fx_swaps.itertuples(index=False):
+        debtor = row.debtor
+        creditor = row.creditor
+        if debtor not in position or creditor not in position:
+            unknown.add(debtor if debtor not in position else creditor)
+            continue
+        if debtor == creditor:
+            continue
+        value = float(row.notional)
+        if not np.isfinite(value) or value < 0:
+            raise ValueError(
+                f"FX swap {debtor}->{creditor} has invalid notional {row.notional!r}"
+            )
+        matrix[position[debtor], position[creditor]] += value
+        if has_pairs:
+            pairs.add(str(row.currency_pair))
+
+    if unknown:
+        raise KeyError(
+            "fx_swaps reference institutions outside the node universe: "
+            f"{sorted(unknown)}"
+        )
+
+    return MultiplexLayer(
+        name=name,
+        kind=RelationKind.EXPOSURE,
+        adjacency=matrix,
+        node_ids=universe,
+        as_of=pd.Timestamp(as_of),
+        directed=True,
+        metadata={
+            "seniority": int(seniority),
+            "currency_pairs": sorted(pairs),
+            "numeraire_note": (
+                "notionals are assumed to share a single numeraire; the conversion "
+                "is the caller's and is not performed here"
+            ),
+            "n_edges": int(np.count_nonzero(matrix)),
+            "gross_notional": float(matrix.sum()),
+            "rows_withheld_as_future": rows_withheld,
+        },
+    )

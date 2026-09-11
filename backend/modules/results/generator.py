@@ -625,14 +625,23 @@ class ResultsGenerator:
             if {'timestamps', 'market_liquidity'}.issubset(predictions_df.columns):
                 ts_df = predictions_df[['timestamps', 'market_liquidity']].dropna()
                 if not ts_df.empty:
-                    visuals['market_liquidity_timeseries'] = {
-                        "type": "line",
-                        "data": {
-                            "timestamps": ts_df['timestamps'].tolist(),
-                            "values": [float(x) for x in pd.to_numeric(ts_df['market_liquidity'], errors='coerce').fillna(0)]
-                        },
-                        "title": "Market Liquidity Trajectory"
-                    }
+                    # Un-readable entries are dropped, not zeroed. The previous
+                    # `.fillna(0)` turned "this value could not be read" into "market
+                    # liquidity was exactly zero", which on a liquidity chart reads as a
+                    # total seizure -- the most alarming possible reading, invented from a
+                    # parsing failure. Both lists are filtered by the same mask so the
+                    # timestamps and the values cannot drift out of alignment.
+                    liquidity = pd.to_numeric(ts_df['market_liquidity'], errors='coerce')
+                    readable = liquidity.notna()
+                    if readable.any():
+                        visuals['market_liquidity_timeseries'] = {
+                            "type": "line",
+                            "data": {
+                                "timestamps": ts_df.loc[readable, 'timestamps'].tolist(),
+                                "values": [float(x) for x in liquidity[readable]]
+                            },
+                            "title": "Market Liquidity Trajectory"
+                        }
 
             if 'funding_liquidity' in predictions_df.columns:
                 funding_series = pd.to_numeric(predictions_df['funding_liquidity'], errors='coerce').dropna()

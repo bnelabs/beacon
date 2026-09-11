@@ -974,6 +974,41 @@ reported here rather than approximated.
                     f"Clearing converged in {analysis.clearing.iterations} iteration(s); "
                     f"{analysis.clearing.n_defaults} institution(s) defaulted\n"
                 )
+        if analysis.fire_sale is None:
+            report += (
+                "Coupled fire-sale equilibrium: UNAVAILABLE - holdings, prices and\n"
+                "capital were not supplied. The clearing figure above holds prices\n"
+                "fixed; without those inputs the feedback loop that moves them\n"
+                "cannot be solved, and its absence is not evidence that it is small.\n"
+            )
+        else:
+            fire_sale = analysis.fire_sale
+            if fire_sale.diverged:
+                report += (
+                    "Coupled fire-sale equilibrium: DIVERGED after "
+                    f"{fire_sale.rounds} round(s) - {fire_sale.divergence_reason}.\n"
+                    "No finite equilibrium exists for this scenario. The run-away is\n"
+                    "the result, not a failure of the solver.\n"
+                )
+            else:
+                report += (
+                    "Coupled fire-sale equilibrium converged in "
+                    f"{fire_sale.rounds} round(s).\n"
+                )
+            if fire_sale.amplification is not None:
+                report += (
+                    "Shortfall attributable to the liquidation feedback, with price\n"
+                    "impact held at zero: "
+                    f"{fire_sale.amplification.feedback_shortfall:,.2f}\n"
+                )
+            if fire_sale.feedback_caused_defaults:
+                report += (
+                    "Institutions that fail only because of the feedback: "
+                    + ", ".join(fire_sale.feedback_caused_defaults)
+                    + "\n"
+                )
+        report += "\n"
+
         report += "\n"
 
         report += "INSTITUTION ASSESSMENTS:\n" + "-" * 70 + "\n"
