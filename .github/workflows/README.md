@@ -7,7 +7,7 @@ workflows, Dependabot configuration, and a pull-request template.
 | --- | --- | --- |
 | `backend-ci.yml` | Compile and test the FastAPI/Celery/PyTorch backend on Python 3.12 and upload a coverage report. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
 | `frontend-ci.yml` | Build the React/Vite app on Node 24 and run the Playwright end-to-end suite. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
-| `docker-backend.yml` | Validate every compose file and build the backend CPU image. | `push`/`pull_request` restricted to backend Dockerfile, backend requirements, compose and `configs/` paths, plus `workflow_dispatch`. |
+| `docker-backend.yml` | Validate every compose file (seconds, on every relevant push/PR) and build the backend CPU image on a weekly schedule or on demand. | `push`/`pull_request` for compose validation; `schedule` + `workflow_dispatch` for the image build. |
 | `docker-frontend.yml` | Build the frontend image. | `push`/`pull_request` restricted to `frontend/Dockerfile` and the frontend package files, plus `workflow_dispatch`. |
 | `security.yml` | Advisory dependency audits: `pip-audit` for `backend/requirements.txt` and `npm audit` for `frontend/`. Never blocks a merge. | `push` to `main`, every `pull_request`, weekly `schedule` (Mondays 06:17 UTC), manual `workflow_dispatch`. |
 | `../dependabot.yml` | Version-update PRs for `github-actions`, `pip`, `npm`, and `docker`. | GitHub's scheduler (see the policy below). |
@@ -85,10 +85,19 @@ any frontend change. Scoping each trigger to its own paths keeps cost
 proportional to the change.
 
 - `docker-backend.yml` runs `docker compose config` over the base file and both
-  overlays (`.cpu`, `.gpu`), then builds `backend/Dockerfile.cpu`.
-- `docker-frontend.yml` builds `frontend/Dockerfile`.
-- Both use the GitHub Actions build cache (`type=gha,mode=max`), so only a run
-  that actually changes the dependency set pays the full install cost.
+  overlays (`.cpu`, `.gpu`) on every relevant push/PR — that takes seconds — and
+  builds `backend/Dockerfile.cpu` **only on the weekly schedule or on demand**.
+  The image build installs torch, torch-geometric and scipy and takes 7-11
+  minutes, so it is deliberately kept out of the push/PR path: putting it in
+  front of ordinary work made every push wait. Nothing is lost, because Backend
+  CI installs the same requirements on the same Python 3.12 interpreter, and the
+  weekly run catches Dockerfile and base-image rot. Use *Actions → Docker
+  backend image → Run workflow* to validate a Dockerfile change before merging.
+- `docker-frontend.yml` builds `frontend/Dockerfile` on its own paths. This one
+  stays on pull requests because it takes ~80 seconds and it is the only thing
+  that catches a peer-dependency gap (it is how the `@deck.gl/widgets` breakage
+  was found).
+- Both use the GitHub Actions build cache (`type=gha,mode=max`).
 
 ## Speed notes
 

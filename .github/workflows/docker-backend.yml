@@ -1,24 +1,17 @@
 name: Docker backend image
 
-# why: the Backend CI workflow tests the code on the runner's interpreter and
-# never builds the container image. That gap is real, not theoretical: a
-# Dependabot PR proposed `python:3.14-slim` for backend/Dockerfile.cpu, which
-# passes every Python test (CI uses setup-python) but cannot build, because
-# torch/numpy publish no cp314 wheels.
+# why: two very different costs live in this workflow, so they are gated
+# separately.
 #
-# This workflow is separate from the frontend image build on purpose. A single
-# workflow with a shared `paths:` filter would rebuild this (expensive, torch
-# install) image whenever a frontend file changed. Scoping the trigger to
-# backend and compose paths keeps the cost proportional to the change.
+#   * `compose-config` takes seconds and runs on every relevant push/PR.
+#   * `build-backend` installs the whole ML stack into the image and takes
+#     7-11 minutes. Running that on every push put a multi-minute wait in front
+#     of ordinary work, so it now runs on a schedule and on demand only.
 #
-# `backend/requirements*.txt` is deliberately NOT a trigger.
-#
-# Backend CI already installs the same file on the same Python 3.12 interpreter,
-# so a requirements change that cannot install is caught there in ~2 minutes.
-# Rebuilding this image for it cost ~10 minutes and fired on every Dependabot pip
-# PR, which is exactly the kind of wait this workflow should not create.
-# What actually needs a real build is a Dockerfile change - the base interpreter,
-# apt packages, COPY layout - and those are rare and still validated on PRs.
+# Nothing is lost that is not covered elsewhere: Backend CI installs the same
+# requirements on the same Python 3.12 interpreter (so a bad pin fails there in
+# ~2 minutes), and the weekly build catches Dockerfile and base-image breakage
+# without blocking anyone. Use "Run workflow" when you want it before merging.
 on:
   push:
     branches: [main]
@@ -33,6 +26,9 @@ on:
       - "docker-compose*.yml"
       - "configs/**"
       - ".github/workflows/docker-backend.yml"
+  schedule:
+    # Weekly, so base-image and Dockerfile rot is still found automatically.
+    - cron: "23 5 * * 1"
   workflow_dispatch:
 
 # why: never cancel on main - a cancelled run leaves the commit unverified.
@@ -56,8 +52,8 @@ jobs:
       - name: Validate the base and both overlays
         # why: `docker compose config` resolves the YAML, interpolates every
         # ${VAR:-default}, and validates the merged service graph - the cheapest
-        # check that catches a broken compose edit. The overlays are only
-        # meaningful combined with the base file, which is how they are used.
+        # check that catches a broken compose edit, in seconds. The overlays are
+        # only meaningful combined with the base file, which is how they are used.
         run: |
           set -euo pipefail
           docker compose -f docker-compose.yml config --quiet
@@ -68,9 +64,12 @@ jobs:
   build-backend:
     name: Build backend image (CPU)
     runs-on: ubuntu-latest
-    # why: installing the pinned ML stack (torch, torch-geometric, scipy) inside
-    # the image is the slow leg. The build cache (type=gha, mode=max) means only
-    # runs that actually change requirements pay the full cost.
+    # why: NOT on push or pull_request. This installs torch, torch-geometric and
+    # scipy into the image and takes 7-11 minutes; putting that in front of every
+    # push made ordinary work wait on it. It is covered by the weekly schedule and
+    # can be started manually from the Actions tab when a Dockerfile change needs
+    # validating before merge.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     timeout-minutes: 45
 
     steps:
