@@ -184,14 +184,23 @@ Both now install torch from an **explicit index**, because the default is a trap
 
 ## 6. Secrets
 
-`.env` was **tracked in git on `main`** and its committed blob contained real
-`FRED_API_KEY`, `ALPHA_VANTAGE_API_KEY`, `SEC_API_KEY` and `POSTGRES_PASSWORD`
-values. It has been untracked (`git rm --cached .env`); the working file stays on
-disk so compose still reads it.
+`.env` was **tracked in git on `main`**. It has been untracked
+(`git rm --cached .env`); the working file stays on disk so compose still reads
+it, and that is where the values belong.
 
-**Untracking does not remove it from history.** Anyone with the repository can
-read those values from earlier commits, so all four must be **rotated**. Treat
-them as public.
+**What was actually exposed** — verified by walking every revision, rather than
+inferred from a masked listing:
+
+| Variable | Status in history |
+|---|---|
+| `FRED_API_KEY` | **A real key was committed in `19b004e`.** Rotate it. |
+| `ALPHA_VANTAGE_API_KEY` | Empty in every revision. Never exposed. |
+| `SEC_API_KEY` | Empty in every revision. Never exposed. |
+| `POSTGRES_PASSWORD` / `_USER` / `_DB` | Present, but only the compose defaults (`beacon_user` / `beacon_password` / `beacon_db`) that are already public in `docker-compose.yml`. Not a secret, though a LAN deployment should still change it. |
+
+**Untracking does not remove anything from history.** The `19b004e` blob is still
+readable by anyone with the repository, so the FRED key must be rotated. The
+other three need no action.
 
 `.env.example` is the tracked template. Keep real values in `.env` (gitignored)
 or in a secret manager.
