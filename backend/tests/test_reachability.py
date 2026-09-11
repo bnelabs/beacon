@@ -73,6 +73,9 @@ REQUIRED_REACHABLE: Dict[str, str] = {
     "backend.modules.risk.regulatory": "Basel III stress translation",
     "backend.modules.engine.persistence_vectors": "topological signature vectors",
     "backend.modules.engine.portfolio_overlap": "crowded-trade overlap",
+    "backend.modules.engine.causal_discovery": "NOTEARS, linear and non-linear basis",
+    "backend.modules.engine.tncm_vae": "abduction / intervention / propagation",
+    "backend.modules.engine.counterfactual": "the counterfactual scenario the engine accepts",
 }
 
 #: Modules implemented, tested and *not* reachable from production. Recorded
@@ -86,9 +89,7 @@ KNOWN_UNREACHABLE: Dict[str, str] = {
     "backend.modules.engine.uncertainty": "uncertainty helpers; superseded-or-pending relative to conformal",
     "backend.modules.engine.subgraphx": "attribution; needs a liability network and a game value on a job result",
     "backend.modules.engine.event_metrics": "event-precision metrics; needs an event target series in the pipeline",
-    "backend.modules.engine.causal_validation": "counterfactual validation; the causal subsystem has no production entry point",
-    "backend.modules.engine.causal_discovery": "NOTEARS DAG learning; imported only by causal_validation, which is itself unreachable, so it is loaded by nothing that runs",
-    "backend.modules.engine.tncm_vae": "counterfactual VAE; reached only through the unreachable causal subsystem",
+    "backend.modules.engine.causal_validation": "counterfactual validation; it validates a *pair* of graphs and needs both on a job result, which no producer supplies",
     "backend.modules.engine.mixture_of_experts": "regime-conditioned experts; needs a regime input",
     "backend.modules.data.network_gate": "network data-quality gate; not called by the collector",
     "backend.modules.data.streaming": "streaming ingestion; no streaming source is configured",

@@ -150,14 +150,20 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "NoteArsConfig",
+    "NoteArsBasisConfig",
     "NoteArsResult",
     "NoteArsDiscovery",
+    "NoteArsBasisDiscovery",
     "resolve_w_bound",
     "SkeletonResult",
     "PartialCorrelationSkeleton",
     "OrientationConflict",
     "DagComparison",
+    "notears",
     "notears_linear",
+    "notears_basis",
+    "basis_expansion",
+    "basis_structural_loss",
     "least_squares_loss",
     "least_squares_gradient",
     "note_ars_objective",
@@ -612,9 +618,22 @@ class NoteArsResult:
     ``StructuralCausalModel.coefficients[child][parent]``, which is why the
     conversion helpers exist.
 
+    **``weights`` does not mean the same thing for every solver**, and the
+    difference is not cosmetic. For :class:`NoteArsDiscovery` (linear) entry
+    ``[j, i]`` is a structural coefficient and can be read as an effect size. For
+    :class:`NoteArsBasisDiscovery` (non-linear) it is the L2 norm of a whole
+    coefficient block, so it measures whether ``i`` depends on ``j`` at all, not by
+    how much or with what slope; the individual basis coefficients are not carried
+    on this record. ``adjacency`` -- and therefore ``parents()`` and
+    ``edge_list()`` -- means the same thing in both cases, which is what the
+    downstream consumers use. Anything reading magnitudes must know which solver
+    produced the record.
+
     Attributes:
         variables: Column order of every matrix in this record.
-        weights: Raw ``d x d`` weight matrix, diagonal zero.
+        weights: Raw ``d x d`` matrix, diagonal zero. The structural coefficient
+            matrix for the linear solver; the block-norm matrix for the basis
+            solver. See the warning above.
         adjacency: 0/1 matrix obtained by thresholding ``weights``.
         h_trace: ``h(W)`` after each outer augmented-Lagrangian iteration,
             in order. A trace that stalls above ``h_tolerance`` is the signature of
@@ -656,6 +675,14 @@ class NoteArsResult:
     standardised: bool
     hit_bound: bool
     n_starts: int
+    solver: str = "linear"
+    """Which SEM produced this: ``"linear"`` or ``"basis"``.
+
+    Recorded because ``weights`` does not mean the same thing for the two. A
+    consumer that converts weights into structural coefficients -- notably
+    :func:`~backend.modules.engine.counterfactual.structural_model_from_weights` --
+    must branch on this, or it will read a block norm as an effect size.
+    """
 
     def parents(self) -> Dict[str, Tuple[str, ...]]:
         """The learned structure as a ``tncm_vae`` parents mapping."""
@@ -698,6 +725,7 @@ class NoteArsResult:
             "standardised": bool(self.standardised),
             "hit_bound": bool(self.hit_bound),
             "n_starts": int(self.n_starts),
+            "solver": str(self.solver),
             "summary": self.summary(),
         }
 
@@ -899,6 +927,7 @@ class NoteArsDiscovery:
             standardised=bool(config.standardize),
             hit_bound=bool(np.any(np.abs(weights) >= bound - 1e-9)),
             n_starts=n_starts,
+            solver="linear",
         )
         if not result.acyclic:
             logger.warning(
@@ -921,6 +950,564 @@ def notears_linear(
         effective = replace(effective, **overrides)
     return NoteArsDiscovery(effective).fit(X, variables)
 
+
+# ---------------------------------------------------------------------------
+# Non-linear NOTEARS: a per-variable basis expansion
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class NoteArsBasisConfig:
+    """Settings for the non-linear NOTEARS solver.
+
+    The linear solver fits ``X = X W + E`` and can therefore only represent a
+    linear influence: a relationship such as ``X2 = sin(X1)`` or
+    ``X3 = X2**2`` is either missed or absorbed into a spurious linear
+    coefficient. This solver keeps the estimator linear in its parameters but makes
+    the *features* non-linear. Each variable ``j`` contributes a block of basis
+    columns ``[x_j, x_j^2, ..., x_j^degree]``, the structural equation becomes
+
+        X_i = sum_j <b_{i,j}, phi_j(X)> + E_i
+
+    and the acyclicity constraint is applied to the matrix ``W`` with
+    ``W[i, j] = ||b_{i,j}||_2``, the L2 norm of the whole coefficient block of
+    ``j`` in the equation for ``i``. That is the same grouped-norm construction the
+    non-linear NOTEARS formulation uses for its MLP, and it is the reason an output
+    that ignores an input has norm zero and cannot be an edge into it.
+
+    **Why a basis expansion and not the MLP.** The MLP form was implemented first
+    and rejected on evidence. Its augmented-Lagrangian landscape has a fatal
+    property: ``h(W) = tr(exp(W o W)) - d`` is exactly zero at ``W = 0``, and so is
+    the penalty gradient there, which makes the all-zero model a global minimum of
+    the penalty that trivially satisfies the constraint. Fitted on
+    ``X2 = sin(X1) + e``, the unconstrained MLP reaches ``h(W) ~ 1.16e6`` (a good
+    fit that is wildly cyclic), and every augmented-Lagrangian run then collapsed
+    to the empty graph -- under L-BFGS-B with strong Wolfe, and under Adam, across
+    penalty ceilings from ``1e4`` to ``1e16`` and L1 strengths from ``0.001`` to
+    ``0.2``. Returning an empty graph while reporting ``converged=True`` is the
+    failure mode this module exists to avoid, so it is not shipped. The basis
+    expansion keeps the loss quadratic in the parameters, which is the regime the
+    linear solver's penalty schedule is already demonstrated to work in, and it
+    recovers the non-linear graph exactly at ``degree >= 2``.
+
+    **``W`` is a block norm, not a structural coefficient.** In the linear solver
+    ``weights[j, i]`` is an effect size and can be read as one. Here it is the
+    magnitude of a coefficient block; a large value means the output depends on
+    that input, not that the dependence is linear or has that slope. It is reported
+    because the constraint is defined on it and a caller must be able to audit the
+    constraint. ``threshold`` is likewise on this matrix's scale and is not
+    comparable to the linear solver's threshold.
+
+    **Every default is a judgement call, not a calibrated value.** There is no
+    cross-validation or stability selection here -- the linear config documents the
+    same gap -- and ``degree``, ``l1_strength`` and ``threshold`` all change the
+    graph that comes out. ``degree`` trades expressiveness against variance and
+    collinearity: on the module's own non-linear test the graph is recovered at
+    ``degree`` 2 and 3, and ``degree`` 4 without enough L1 starts dropping the
+    quadratic edge, which is exactly the sensitivity a caller must look at rather
+    than assume.
+
+    Attributes:
+        degree: Highest power of each variable in the basis. Must be at least 2 for
+            the solver to be non-linear at all; ``degree=1`` reduces it to the
+            linear model and is rejected so a caller cannot ask for the non-linear
+            method and silently get the linear one.
+        l1_strength: ``lambda`` on ``sum(W)``, i.e. on the group norms, which is what
+            sparsifies the graph. Larger means sparser.
+        threshold: ``W`` magnitude below which an edge is dropped when forming the
+            adjacency. Raw weights are always kept.
+        max_outer_iterations, max_inner_iterations, h_tolerance, initial_rho,
+        rho_max, rho_growth, rho_decrease_ratio: The penalty schedule, with the
+            same meaning as in :class:`NoteArsConfig`.
+        standardize: Divide each variable by its standard deviation after centering,
+            before the basis is built. Defaults to False for the same reason as the
+            linear solver: the noise-equal-variance assumption that orients the
+            edges is stated on the scale the model is fitted, and z-scoring turns
+            equal variances into unequal ones when the variables have different
+            scales.
+        n_restarts: Number of runs, each from a different seeded draw. With more
+            than one, ``seed`` is mandatory.
+        seed: Seed for the initial draws.
+    """
+
+    degree: int = 2
+    l1_strength: float = 0.1
+    threshold: float = 0.3
+    max_outer_iterations: int = 100
+    max_inner_iterations: int = 400
+    h_tolerance: float = 1e-8
+    initial_rho: float = 1.0
+    rho_max: float = 1e16
+    rho_growth: float = 10.0
+    rho_decrease_ratio: float = 0.25
+    coefficient_bound: Optional[float] = None
+    standardize: bool = False
+    n_restarts: int = 1
+    seed: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.degree, bool) or not isinstance(self.degree, int):
+            raise ValueError(f"degree must be an integer, got {self.degree!r}")
+        if self.degree < 2:
+            raise ValueError(
+                f"degree must be at least 2 for a non-linear basis, got {self.degree}. "
+                "A degree of 1 is the linear model; use notears_linear for it."
+            )
+        if not math.isfinite(self.l1_strength) or self.l1_strength < 0.0:
+            raise ValueError(
+                f"l1_strength must be finite and non-negative, got {self.l1_strength}"
+            )
+        if not math.isfinite(self.threshold) or self.threshold < 0.0:
+            raise ValueError(
+                f"threshold must be finite and non-negative, got {self.threshold}"
+            )
+        for name in ("max_outer_iterations", "max_inner_iterations", "n_restarts"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{name} must be an integer >= 1, got {value!r}")
+        if not math.isfinite(self.h_tolerance) or self.h_tolerance <= 0.0:
+            raise ValueError(
+                f"h_tolerance must be finite and positive, got {self.h_tolerance}"
+            )
+        if not math.isfinite(self.initial_rho) or self.initial_rho <= 0.0:
+            raise ValueError(
+                f"initial_rho must be finite and positive, got {self.initial_rho}"
+            )
+        if not math.isfinite(self.rho_max) or self.rho_max < self.initial_rho:
+            raise ValueError(
+                f"rho_max must be finite and at least initial_rho, got {self.rho_max}"
+            )
+        if not math.isfinite(self.rho_growth) or self.rho_growth <= 1.0:
+            raise ValueError(
+                f"rho_growth must be finite and greater than 1, got {self.rho_growth}"
+            )
+        if not 0.0 < self.rho_decrease_ratio < 1.0:
+            raise ValueError(
+                "rho_decrease_ratio must lie in (0, 1), got "
+                f"{self.rho_decrease_ratio}"
+            )
+        if self.coefficient_bound is not None and (
+            not math.isfinite(self.coefficient_bound) or self.coefficient_bound <= 0.0
+        ):
+            raise ValueError(
+                "coefficient_bound must be finite and positive, got "
+                f"{self.coefficient_bound}"
+            )
+        if self.n_restarts > 1 and self.seed is None:
+            raise ValueError(
+                "seed is required when n_restarts > 1; otherwise the restarts are "
+                "not reproducible and neither is the returned graph"
+            )
+        if self.seed is not None and (
+            isinstance(self.seed, bool) or not isinstance(self.seed, int)
+        ):
+            raise ValueError(f"seed must be an integer, got {self.seed!r}")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "degree": int(self.degree),
+            "l1_strength": float(self.l1_strength),
+            "threshold": float(self.threshold),
+            "max_outer_iterations": int(self.max_outer_iterations),
+            "max_inner_iterations": int(self.max_inner_iterations),
+            "h_tolerance": float(self.h_tolerance),
+            "initial_rho": float(self.initial_rho),
+            "rho_max": float(self.rho_max),
+            "rho_growth": float(self.rho_growth),
+            "rho_decrease_ratio": float(self.rho_decrease_ratio),
+            "coefficient_bound": (
+                None if self.coefficient_bound is None else float(self.coefficient_bound)
+            ),
+            "standardize": bool(self.standardize),
+            "n_restarts": int(self.n_restarts),
+            "seed": None if self.seed is None else int(self.seed),
+        }
+
+
+def basis_expansion(
+    data: np.ndarray, degree: int
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Expand each column into powers ``1..degree`` and report which block it came from.
+
+    Returns:
+        ``(features, groups)`` where ``features`` is ``(n, d * degree)`` and
+        ``groups[c]`` is the variable index that built column ``c``. The grouping is
+        the whole point: the acyclicity constraint is applied to the norm of each
+        variable's block, not to individual basis coefficients, so a variable whose
+        block is zero has no edge regardless of how many of its columns exist.
+    """
+    if isinstance(degree, bool) or not isinstance(degree, int) or degree < 1:
+        raise ValueError(f"degree must be an integer >= 1, got {degree!r}")
+    columns: List[np.ndarray] = []
+    groups: List[int] = []
+    for variable in range(data.shape[1]):
+        for power in range(1, degree + 1):
+            columns.append(np.power(data[:, variable], power))
+            groups.append(variable)
+    return np.column_stack(columns), np.asarray(groups, dtype=int)
+
+
+class NoteArsBasisDiscovery:
+    """Augmented-Lagrangian NOTEARS for a non-linear basis SEM.
+
+    The loop -- inner solve, penalty growth when the constraint fails to shrink,
+    dual ascent, stop on ``h <= tolerance`` or on exhausting ``rho`` -- mirrors
+    :class:`NoteArsDiscovery` deliberately, so a reviewer only has to learn one
+    schedule and the two solvers stay comparable.
+
+    Args:
+        config: Solver settings; defaults to :class:`NoteArsBasisConfig`.
+    """
+
+    def __init__(self, config: Optional[NoteArsBasisConfig] = None) -> None:
+        self.config = config if config is not None else NoteArsBasisConfig()
+        if not isinstance(self.config, NoteArsBasisConfig):
+            raise TypeError(
+                "config must be a NoteArsBasisConfig, got "
+                f"{type(self.config).__name__}"
+            )
+
+    def _coefficient_bound(self, n_variables: int) -> float:
+        """Box bound on a basis coefficient, derived so the exponential cannot overflow.
+
+        ``W[i, j]`` is the norm of ``degree`` coefficients, so that norm is at most
+        ``max|b| * sqrt(degree)``. Feeding the bound
+        :func:`resolve_w_bound` derives for ``W`` back through that factor keeps
+        ``tr(exp(W o W))``, and therefore the augmented-Lagrangian term, finite in
+        float64.
+        """
+        weight_bound = resolve_w_bound(n_variables, None, self.config.rho_max)
+        return float(weight_bound / math.sqrt(self.config.degree))
+
+    @staticmethod
+    def _group_norms(
+        coefficients: np.ndarray, groups: np.ndarray, n_variables: int
+    ) -> np.ndarray:
+        """``W[parent, child] = ||b_{child, parent}||_2`` over that variable's columns.
+
+        The transposition is deliberate and is the module's documented convention
+        (``weights[j, i]`` is the coefficient of ``j`` in the equation for ``i``).
+        ``coefficients`` is ``(basis columns, outputs)``, so the block norm is
+        naturally indexed ``[output, variable]``; returning it in that order would
+        make ``edge_list`` report every edge backwards. ``h(W) = h(W^T)``, so the
+        constraint value and the convergence test are unaffected by the choice --
+        which is exactly why the mistake is invisible unless the edges are checked
+        against a known graph, as the tests do.
+        """
+        by_output = np.zeros((n_variables, n_variables))
+        for variable in range(n_variables):
+            columns = np.nonzero(groups == variable)[0]
+            by_output[:, variable] = np.linalg.norm(coefficients[columns, :], axis=0)
+        return by_output.T
+
+    def _make_objective(
+        self,
+        features: np.ndarray,
+        target: np.ndarray,
+        groups: np.ndarray,
+        alpha: float,
+        rho: float,
+    ):
+        """Return ``f(theta) -> (value, gradient)`` for the inner solve."""
+        n_samples, n_columns = features.shape
+        n_variables = target.shape[1]
+        config = self.config
+        # Gram matrices so the residual is never formed over the full data matrix
+        # inside the optimiser.
+        gram = features.T @ features / n_samples
+        cross = features.T @ target / n_samples
+        target_gram_trace = float(np.trace(target.T @ target)) / n_samples
+        identity = np.eye(n_variables)
+
+        def objective(theta: np.ndarray) -> Tuple[float, np.ndarray]:
+            coefficients = theta.reshape(n_columns, n_variables)
+            # 0.5/n * ||X - Phi B||^2, in Gram form.
+            loss = 0.5 * (
+                target_gram_trace
+                - 2.0 * np.trace(cross.T @ coefficients)
+                + np.trace(coefficients.T @ gram @ coefficients)
+            )
+            gradient = gram @ coefficients - cross
+
+            weights = self._group_norms(coefficients, groups, n_variables)
+            exponential = expm(weights * weights)
+            h_value = float(np.trace(exponential) - n_variables)
+            h_gradient = exponential.T * (2.0 * weights)
+
+            penalty = config.l1_strength * np.sum(weights)
+            upstream = h_gradient * (alpha + rho * h_value) + config.l1_strength
+            # dW[parent, child]/dB[c, output] is nonzero exactly when column ``c``
+            # belongs to ``parent`` and ``output`` is ``child``; the group norm's
+            # gradient is the block divided by its own norm.
+            for parent in range(n_variables):
+                columns = np.nonzero(groups == parent)[0]
+                for child in range(n_variables):
+                    norm = weights[parent, child]
+                    if norm > 1e-12:
+                        gradient[columns, child] += (
+                            upstream[parent, child]
+                            * coefficients[columns, child]
+                            / norm
+                        )
+
+            value = (
+                loss
+                + penalty
+                + alpha * h_value
+                + 0.5 * rho * h_value * h_value
+            )
+            if not math.isfinite(value) or not np.all(np.isfinite(gradient)):
+                raise ValueError(
+                    "the augmented-Lagrangian objective became non-finite; this "
+                    "should be impossible inside coefficient_bound and rho_max and "
+                    "indicates a numerical breakdown rather than a data problem"
+                )
+            return float(value), gradient.reshape(-1)
+
+        return objective
+
+    def _run(
+        self, features: np.ndarray, target: np.ndarray, groups: np.ndarray, seed: int
+    ) -> Tuple[np.ndarray, np.ndarray, Tuple[float, ...], bool, bool]:
+        """One augmented-Lagrangian run from a seeded initialisation.
+
+        Returns ``(weights, coefficients, h_trace, converged, hit_bound)``. The
+        coefficients are returned rather than discarded because the structural loss
+        and the reported fit must be recomputed from an actual parameter matrix --
+        ``W`` is a norm and cannot be inverted back to one.
+        """
+        config = self.config
+        n_samples, n_columns = features.shape
+        n_variables = target.shape[1]
+        bound = self._coefficient_bound(n_variables)
+        if config.coefficient_bound is not None and config.coefficient_bound > bound:
+            raise ValueError(
+                f"coefficient_bound={config.coefficient_bound} is too large for "
+                f"{n_variables} variables, degree={config.degree} and "
+                f"rho_max={config.rho_max}: the penalty term would overflow to inf. "
+                f"The largest safe bound here is {bound:.4g}"
+            )
+        effective_bound = (
+            bound if config.coefficient_bound is None else float(config.coefficient_bound)
+        )
+
+        rng = np.random.default_rng(seed)
+        coefficients = rng.uniform(-0.5, 0.5, size=(n_columns, n_variables))
+        rho = float(config.initial_rho)
+        alpha = 0.0
+        h_previous = float("inf")
+        h_trace: List[float] = []
+        converged = False
+        weights = self._group_norms(coefficients, groups, n_variables)
+
+        for _ in range(config.max_outer_iterations):
+            objective = self._make_objective(features, target, groups, alpha, rho)
+            solution = minimize(
+                objective,
+                coefficients.reshape(-1),
+                method="L-BFGS-B",
+                jac=True,
+                bounds=[(-effective_bound, effective_bound)] * (n_columns * n_variables),
+                options={"maxiter": config.max_inner_iterations},
+            )
+            coefficients = solution.x.reshape(n_columns, n_variables)
+            coefficients = np.clip(coefficients, -effective_bound, effective_bound)
+            weights = self._group_norms(coefficients, groups, n_variables)
+            h_value = acyclicity_constraint(weights)
+
+            if h_value > config.rho_decrease_ratio * h_previous and rho < config.rho_max:
+                # The inner solve did not shrink the constraint enough for this
+                # penalty: raise the penalty and re-solve from here rather than
+                # accepting the point.
+                rho = min(rho * config.rho_growth, config.rho_max)
+                continue
+
+            alpha += rho * h_value
+            h_trace.append(h_value)
+            h_previous = h_value
+
+            if h_value <= config.h_tolerance:
+                converged = True
+                break
+            if rho >= config.rho_max:
+                # Out of penalty budget with the constraint still violated; reported
+                # as not converged rather than quietly accepted.
+                break
+
+        hit_bound = bool(np.any(np.abs(coefficients) >= effective_bound - 1e-9))
+        return weights, coefficients, tuple(h_trace), converged, hit_bound
+
+    def fit(self, X: Any, variables: Sequence[str]) -> NoteArsResult:
+        """Learn a weighted DAG from ``X`` (samples x variables) under a non-linear SEM.
+
+        Raises:
+            ValueError: for shape, config, or weight-matrix mistakes.
+            DataQualityError: for non-finite data, constant columns, or fewer
+                samples than variables.
+        """
+        config = self.config
+        matrix, names = _validated_data(X, variables)
+
+        standard_deviation = matrix.std(axis=0, ddof=0)
+        degenerate = [
+            names[column]
+            for column in range(len(names))
+            if standard_deviation[column] == 0.0
+        ]
+        if degenerate:
+            raise DataQualityError(
+                "these variables are constant in the sample, so their structural "
+                f"equation cannot be estimated: {degenerate}",
+                context={"variables": degenerate},
+            )
+
+        matrix = matrix - matrix.mean(axis=0)
+        if config.standardize:
+            matrix = matrix / standard_deviation
+
+        features, groups = basis_expansion(matrix, config.degree)
+        n_starts = int(config.n_restarts)
+        base_seed = 0 if config.seed is None else int(config.seed)
+
+        best: Optional[
+            Tuple[float, float, np.ndarray, np.ndarray, Tuple[float, ...], bool, bool]
+        ] = None
+        for start in range(n_starts):
+            weights, coefficients, h_trace, converged, hit_bound = self._run(
+                features, matrix, groups, base_seed + start
+            )
+            h_final = acyclicity_constraint(weights)
+            structural_loss = basis_structural_loss(features, matrix, coefficients)
+            objective = structural_loss + config.l1_strength * float(
+                np.sum(np.abs(weights))
+            )
+            candidate = (
+                h_final, objective, weights, coefficients, h_trace, converged, hit_bound
+            )
+            if best is None:
+                best = candidate
+                continue
+            # Same ordering rule as the linear solver: a converged run wins; among
+            # equals a smaller constraint violation, then a smaller objective. A
+            # lower objective with a violated constraint is not a better DAG.
+            best_key = (not best[5], best[0], best[1])
+            new_key = (not converged, h_final, objective)
+            if new_key < best_key:
+                best = candidate
+
+        assert best is not None  # n_restarts >= 1 is enforced by the config
+        (
+            h_final,
+            objective,
+            weights,
+            coefficients,
+            h_trace,
+            converged,
+            hit_bound,
+        ) = best
+
+        adjacency = threshold_weights(weights, config.threshold)
+        result = NoteArsResult(
+            variables=names,
+            weights=weights,
+            adjacency=adjacency,
+            h_trace=h_trace,
+            h_final=float(h_final),
+            objective=float(objective),
+            structural_loss=float(
+                basis_structural_loss(features, matrix, coefficients)
+            ),
+            l1_penalty=float(config.l1_strength * np.sum(np.abs(weights))),
+            acyclic=is_acyclic(adjacency),
+            raw_pattern_acyclic=is_acyclic(weights),
+            converged=bool(converged),
+            threshold=float(config.threshold),
+            l1_strength=float(config.l1_strength),
+            standardised=bool(config.standardize),
+            hit_bound=bool(hit_bound),
+            n_starts=n_starts,
+            solver="basis",
+        )
+        if not result.acyclic:
+            logger.warning(
+                "NOTEARS (basis) returned a thresholded graph that is still cyclic "
+                "(h=%s); it must not be used as a DAG",
+                result.h_final,
+            )
+        return result
+
+
+def basis_structural_loss(
+    features: np.ndarray, target: np.ndarray, coefficients: np.ndarray
+) -> float:
+    """``0.5/n * ||X - Phi B||_F^2``, recomputed from the fitted coefficients.
+
+    Reported rather than taken from the optimiser's own value, for the same reason
+    :func:`least_squares_loss` is exposed: the reported loss is then an independently
+    computable quantity rather than the solver's self-assessment.
+    """
+    residual = target - features @ coefficients
+    return float(0.5 * np.sum(residual * residual) / target.shape[0])
+
+
+def notears_basis(
+    X: Any,
+    variables: Sequence[str],
+    config: Optional[NoteArsBasisConfig] = None,
+    **overrides: Any,
+) -> NoteArsResult:
+    """Convenience wrapper: fit the non-linear (basis) NOTEARS with a config."""
+    effective = config if config is not None else NoteArsBasisConfig()
+    if overrides:
+        effective = replace(effective, **overrides)
+    return NoteArsBasisDiscovery(effective).fit(X, variables)
+
+
+def notears(
+    X: Any,
+    variables: Sequence[str],
+    *,
+    method: str = "linear",
+    config: Optional[Any] = None,
+    **overrides: Any,
+) -> NoteArsResult:
+    """Fit either SEM from one entry point.
+
+    Args:
+        method: ``"linear"`` for ``X = X W + E`` (:func:`notears_linear`) or
+            ``"basis"`` for the non-linear per-variable basis expansion
+            (:func:`notears_basis`). The returned :class:`NoteArsResult` has the
+            same shape either way, so the two can be compared on the same data --
+            but see the warning on :class:`NoteArsBasisConfig`: ``weights`` means a
+            structural coefficient for ``"linear"`` and a block norm for
+            ``"basis"``, and the two are not the same quantity.
+        config: The matching config type, or ``None`` for its defaults.
+        **overrides: Fields to replace on ``config``.
+
+    Raises:
+        ValueError: for an unknown method name, or when ``config`` is not the type
+            the selected method takes. A mis-typed config raises rather than being
+            silently ignored, which would run the method with defaults the caller
+            did not choose.
+    """
+    if not isinstance(method, str):
+        raise ValueError(f"method must be a string, got {method!r}")
+    normalised = method.strip().lower()
+    if normalised == "linear":
+        if config is not None and not isinstance(config, NoteArsConfig):
+            raise ValueError(
+                "method='linear' takes a NoteArsConfig, got "
+                f"{type(config).__name__}"
+            )
+        return notears_linear(X, variables, config, **overrides)
+    if normalised == "basis":
+        if config is not None and not isinstance(config, NoteArsBasisConfig):
+            raise ValueError(
+                "method='basis' takes a NoteArsBasisConfig, got "
+                f"{type(config).__name__}"
+            )
+        return notears_basis(X, variables, config, **overrides)
+    raise ValueError(f"method must be 'linear' or 'basis', got {method!r}")
 
 # ---------------------------------------------------------------------------
 # Conversions to and from the tncm_vae parents representation
