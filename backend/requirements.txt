@@ -30,7 +30,7 @@ pandera==0.33.1
 scipy==1.18.1
 # reportlab renders the PDF report artefact. Without it declared, PDF export
 # silently degrades and no report.pdf is produced.
-reportlab==4.2.2
+reportlab==5.0.1
 
 # Utilities
 tenacity==9.1.4
