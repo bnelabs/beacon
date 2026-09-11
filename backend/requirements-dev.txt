@@ -19,10 +19,10 @@ pytest==8.3.4
 pytest-cov==6.0.0
 
 # HTTP client used by starlette's TestClient (mirrors backend/requirements.txt)
-httpx==0.26.0
+httpx==0.28.1
 
 # Lint / static analysis
-ruff==0.8.6
+ruff==0.16.6
 
 # Dependency vulnerability scanner used by .github/workflows/security.yml
-pip-audit==2.7.3
+pip-audit==2.10.1
