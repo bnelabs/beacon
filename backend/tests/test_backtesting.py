@@ -380,6 +380,24 @@ class TestFoldBoundaryInvariants:
         with pytest.raises(ValueError):
             bt.segment_slices(["3"], 10)
 
+    def test_boundaries_from_group_sizes_is_the_inverse_of_segment_slices(self):
+        assert bt.boundaries_from_group_sizes([]).tolist() == []
+        assert bt.boundaries_from_group_sizes([0]).tolist() == []
+        assert bt.boundaries_from_group_sizes([5]).tolist() == []
+        assert bt.boundaries_from_group_sizes([5, 0]).tolist() == []
+        assert bt.boundaries_from_group_sizes([5, 3]).tolist() == [5]
+        assert bt.boundaries_from_group_sizes([5, 3, 2]).tolist() == [5, 8]
+
+        for sizes in ([5], [5, 3], [4, 0, 6, 2]):
+            boundaries = bt.boundaries_from_group_sizes(sizes)
+            rebuilt = [segment.stop - segment.start for segment in bt.segment_slices(boundaries, sum(sizes))]
+            assert rebuilt == [size for size in sizes if size]
+
+        with pytest.raises(ValueError):
+            bt.boundaries_from_group_sizes([5, -1])
+        with pytest.raises(ValueError):
+            bt.boundaries_from_group_sizes([5.5])
+
     def test_returns_never_span_a_boundary(self):
         signal = np.array([0.0, 1.0, 2.0, 5.0, 6.0, 7.0])
 
@@ -454,6 +472,58 @@ class TestFoldBoundaryInvariants:
         # mismatches, which is what the naive whole-series score does.
         assert bt.hit_rate(actual, predicted, boundaries=[3]) == pytest.approx(1.0)
         assert bt.hit_rate(actual, predicted) == pytest.approx(0.6)
+
+    def test_per_segment_folds_stay_inside_their_segment(self):
+        """Folding across a concatenation would train on one block, test on another."""
+        boundaries = bt.boundaries_from_group_sizes([40, 40])
+        config = bt.WalkForwardConfig(n_splits=2, test_size=10, gap=0)
+
+        entries, failures = bt.walk_forward_folds_per_segment(boundaries, 80, config)
+
+        assert failures == {}
+        assert [index for index, _, _ in entries] == [0, 1]
+        assert [segment for _, segment, _ in entries] == [slice(0, 40), slice(40, 80)]
+        for (_, segment, folds) in entries:
+            assert len(folds) == 2
+            for train_idx, test_idx in folds:
+                # Global indices, and every fold stays inside its own segment.
+                assert train_idx.min() >= segment.start
+                assert test_idx.max() < segment.stop
+                assert train_idx.max() < test_idx.min()
+
+        # The second segment's folds really are shifted by the segment offset.
+        first_test = entries[0][2][0][1]
+        second_test = entries[1][2][0][1]
+        assert int(first_test[0]) == 20
+        assert int(second_test[0]) == 60
+
+    def test_per_segment_folds_report_segments_that_are_too_short(self):
+        # 20 samples fill two 10-sample test blocks but leave no training window.
+        boundaries = bt.boundaries_from_group_sizes([40, 20])
+        config = bt.WalkForwardConfig(n_splits=2, test_size=10, gap=0)
+
+        entries, failures = bt.walk_forward_folds_per_segment(boundaries, 60, config)
+
+        assert [index for index, _, _ in entries] == [0]
+        assert set(failures) == {1}
+        assert "Not enough training samples" in failures[1]
+
+    def test_per_segment_folds_on_a_single_segment(self):
+        config = bt.WalkForwardConfig(n_splits=2, test_size=10, gap=0)
+        entries, failures = bt.walk_forward_folds_per_segment(None, 60, config)
+
+        assert failures == {}
+        assert len(entries) == 1
+        assert entries[0][1] == slice(0, 60)
+
+        # With no concatenation the indices are unchanged.
+        expected = bt.generate_walk_forward_folds(60, config)
+        assert len(entries[0][2]) == len(expected)
+        for (train_actual, test_actual), (train_expected, test_expected) in zip(
+            entries[0][2], expected
+        ):
+            np.testing.assert_array_equal(train_actual, train_expected)
+            np.testing.assert_array_equal(test_actual, test_expected)
 
     def test_compute_metrics_rejects_returns_and_boundaries_together(self):
         with pytest.raises(ValueError):

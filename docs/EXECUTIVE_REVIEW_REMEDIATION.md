@@ -274,7 +274,8 @@ All three are now declared explicitly with pins.
 | Suite | Result |
 |---|---|
 | `backend/tests/test_data_governance.py` | 45 passed |
-| `backend/tests/test_backtesting.py` | 50 passed |
+| `backend/tests/test_backtesting.py` | 54 passed |
+| `backend/tests/test_risk_series.py` | 13 passed (torch-gated, real checkpoint) |
 | `backend/tests/test_snapshots.py` | 12 passed |
 | `backend/tests/test_reproducibility.py` | 14 passed |
 | `backend/tests/test_baselines.py` | 7 passed (torch-gated) |
@@ -282,7 +283,7 @@ All three are now declared explicitly with pins.
 | `backend/tests/test_model_io.py` | 14 passed |
 | `python -m compileall -q backend` | clean |
 | `ruff check backend --select E9,F63,F7,F82` | clean |
-| **entire backend suite** (pinned dependency set: FastAPI, torch, Celery) | **215 passed, 1 skipped** |
+| **entire backend suite** (pinned dependency set: FastAPI, torch, Celery) | **232 passed, 1 skipped** |
 | `frontend`: `npm run build` | passed |
 | `frontend`: Playwright e2e | 1 passed |
 
@@ -507,6 +508,9 @@ gate runs and passes the id into `enforce(...)`; the DATA job result exposes bot
 | `test_resolver_prefers_the_explicit_argument_over_its_default` | The argument, not frame metadata, decides |
 | `test_unverified_override_is_environment_gated` | Production refuses the override |
 | `test_baselines.py::test_reports_lift_over_the_baselines` | The primary model actually runs through the harness, and its lift is reported |
+| `test_risk_series.py::test_last_step_matches_the_point_prediction` | The rolling series and the point prediction agree on the row they share |
+| `test_risk_series.py::test_series_is_aligned_time_ordered_and_seam_bounded` | Every prediction is paired with the row it was made for |
+| `test_per_segment_folds_stay_inside_their_segment` | No fold trains on one source and tests on another |
 
 ## Removals
 
@@ -528,12 +532,42 @@ MSE, R², directional accuracy, Sharpe, and friends across the misaligned pair �
 differencing a concatenation of *unrelated entities*, which is the same class of
 error as the fold-seam artefact but larger.
 
-`job_tasks.py` now checks that the prediction series and the target series
-describe the same observations. When they do, every metric is computed as before.
-When they do not, the metrics are reported as skipped with an explicit
-`quant_metrics_skipped` reason instead of being published. This removes numbers
-from existing job payloads, which is the intended outcome: they were not
-measuring what their names claimed.
+**First response (insufficient).** The job refused to publish metrics it could
+not justify, reporting `quant_metrics_skipped` with a reason. Honest, but it left
+the backtest job producing no numbers at all, which is not acceptable for a
+platform whose whole point is validating a model.
+
+**Proper fix.** `RealPredictionEngine.predict_risk_series()` rolls the same
+window, the same source mapping and the same normalisation across the payload,
+producing **one prediction per timestep**:
+
+| Property | Detail |
+|---|---|
+| Alignment | Each prediction carries the `row_offset` of the very row whose window it used, so it pairs with that row's target without relying on a unique frame index. |
+| Ordering | Rows are grouped by source and time-ordered inside each group. |
+| Seams | `boundaries` records the offset between consecutive sources, so returns, the equity curve and the directional score never difference across a seam. The job passes those boundaries straight into `compute_metrics`. |
+| Folds | `walk_forward_folds_per_segment()` generates each source's folds inside that source's own contiguous span and shifts the indices back into the concatenated series. Folding across sources would train on one entity and test on another. |
+| Cost | `max_steps` (default 2000 per source, configurable per job via `parameters["risk_series"]`) caps the timesteps inferred, keeping the most recent; `batch_size` shares a forward pass across windows. Rows dropped by the cap are reported in `truncated`. |
+| Consistency | The final step of a source's series equals the point prediction `predict()` returns for that source — asserted in `test_risk_series.py`. |
+
+Reproduced by `backend/tests/test_risk_series.py` against a **real checkpoint**
+(the test builds one with `MultiScaleTemporalAttentionModel` and `safe_torch_save`),
+so it exercises the same model-call convention the live engine uses.
+
+**Second finding while implementing this.** The rolling series normalises each
+source with the checkpoint's training-time statistics when they exist. When a
+checkpoint carries no `source_stats`, the only available statistics are computed
+over the window being evaluated — which lets the normalisation see the future and
+makes the resulting metrics optimistic. That fallback still happens (it is what
+`predict()` does too), but it is now *recorded*: `stats_provenance` maps each
+source to `"checkpoint"` or `"payload_window"`, and a warning names the sources
+affected. A backtest can therefore state whether its normalisation was leak-free.
+
+The metrics are no longer dropped: a series that exists is scored, and a target
+column is optional (without one, the return-based metrics still describe the
+model's own risk trajectory). `quant_metrics_skipped` now appears only when no
+per-timestep series could be built at all, and it still carries the exception
+that caused it.
 
 ## Trajectory
 

@@ -190,6 +190,28 @@ def count_segment_transitions(boundaries: Optional[Sequence[int]], size: int) ->
     return max(len(segment_slices(boundaries, size)) - 1, 0)
 
 
+def boundaries_from_group_sizes(sizes: Sequence[int]) -> np.ndarray:
+    """Interior offsets for a concatenation of blocks of the given sizes.
+
+    The inverse of :func:`segment_slices`: given the length of every block that
+    was concatenated, return the offsets at which each block after the first
+    begins. Blocks of size zero contribute no rows and therefore no boundary.
+    Fewer than two non-empty blocks means nothing was concatenated.
+    """
+    non_empty: List[int] = []
+    for raw in sizes:
+        if isinstance(raw, bool) or not isinstance(raw, (int, np.integer)):
+            raise ValueError(f"group sizes must be integers, got {raw!r}")
+        value = int(raw)
+        if value < 0:
+            raise ValueError(f"group sizes must be non-negative, got {value!r}")
+        if value:
+            non_empty.append(value)
+    if len(non_empty) <= 1:
+        return np.array([], dtype=int)
+    return np.cumsum(non_empty)[:-1].astype(int)
+
+
 def risk_signal_to_returns(
     risk_signal: ArrayLike, boundaries: Optional[Sequence[int]] = None
 ) -> np.ndarray:
@@ -791,9 +813,50 @@ def generate_walk_forward_folds(
     return folds
 
 
+def walk_forward_folds_per_segment(
+    boundaries: Optional[Sequence[int]],
+    size: int,
+    config: Optional[WalkForwardConfig] = None,
+) -> Tuple[List[Tuple[int, slice, List[IndexPair]]], Dict[int, str]]:
+    """Generate walk-forward folds *inside* each segment of a concatenated series.
+
+    When a series is a concatenation of blocks -- separate data sources, say --
+    folding across the whole thing would train on one block and test on another.
+    Folds are therefore generated per segment and their indices shifted back into
+    the concatenated frame.
+
+    Returns ``(entries, failures)``. Each entry is
+    ``(segment_index, segment_slice, folds)`` with **global** fold indices;
+    ``failures`` maps a segment index to the reason no folds could be built for
+    it (typically too few samples for the requested configuration).
+    """
+    entries: List[Tuple[int, slice, List[IndexPair]]] = []
+    failures: Dict[int, str] = {}
+    for segment_index, segment in enumerate(segment_slices(boundaries, size)):
+        local_size = segment.stop - segment.start
+        try:
+            folds = generate_walk_forward_folds(local_size, config)
+        except (TypeError, ValueError) as exc:
+            failures[segment_index] = str(exc)
+            continue
+        entries.append(
+            (
+                segment_index,
+                segment,
+                [
+                    (train_idx + segment.start, test_idx + segment.start)
+                    for train_idx, test_idx in folds
+                ],
+            )
+        )
+    return entries, failures
+
+
 # ---------------------------------------------------------------------------
 # Result objects
 # ---------------------------------------------------------------------------
+
+
 @dataclass
 class FoldResult:
     """Metrics and index bookkeeping for a single walk-forward fold."""
@@ -1027,11 +1090,7 @@ class WalkForwardBacktester:
         # Fold seams are not observations. Returns, the equity curve, and the
         # directional score are all computed segment-by-segment so no metric ever
         # sees a transition that did not happen in the underlying series.
-        boundaries = (
-            np.cumsum([chunk.size for chunk in predictions])[:-1]
-            if predictions
-            else np.array([], dtype=int)
-        )
+        boundaries = boundaries_from_group_sizes([chunk.size for chunk in predictions])
         returns = risk_signal_to_returns(oos_predictions, boundaries=boundaries)
         equity_curve = equity_curve_from_returns(returns)
         metrics = compute_metrics(

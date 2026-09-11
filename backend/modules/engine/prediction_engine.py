@@ -9,11 +9,13 @@ import logging
 from pathlib import Path
 import json
 
+from backend.exceptions import SchemaValidationError
 from backend.modules.data.quality_gate import (
     UNVERIFIED_OVERRIDE_ENV,
     AttestationResolver,
     QualityAttestation,
 )
+from backend.modules.engine.backtesting import boundaries_from_group_sizes
 from backend.modules.engine.model_io import safe_torch_load
 from backend.modules.explainability.shap_explainer import ModelExplainer
 from backend.modules.risk.bank_analyzer import BankRiskAnalyzer, MultiBankAnalysis, generate_executive_summary
@@ -44,6 +46,54 @@ class PredictionResult:
 
     # User-friendly summary
     executive_summary: str
+
+
+@dataclass
+class RiskSeriesResult:
+    """A per-timestep risk series, ordered in time and aligned to the input rows.
+
+    :meth:`RealPredictionEngine.predict` collapses each data source to a single
+    score -- the value for its most recent timestep -- which cannot be scored
+    against per-row targets. Return-based and drawdown metrics need a series, so
+    :meth:`RealPredictionEngine.predict_risk_series` rolls the same window and
+    the same normalisation across the payload.
+
+    Rows are grouped by source and time-ordered inside each group, so
+    ``boundaries`` marks the seam between consecutive sources: those seams are
+    not observations and must never be differenced as if they were.
+    """
+
+    frame: pd.DataFrame
+    boundaries: List[int]
+    sources: List[str]
+    n_dropped_for_history: int
+    truncated: Dict[str, int]
+    stats_provenance: Dict[str, str]
+    batch_size: int
+    max_steps: Optional[int] = None
+
+    @property
+    def n_steps(self) -> int:
+        return int(self.frame.shape[0])
+
+    @property
+    def n_sources(self) -> int:
+        return len(self.sources)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """JSON-ready metadata. The row-level series is not inlined here."""
+        return {
+            "n_sources": self.n_sources,
+            "n_steps": self.n_steps,
+            "n_dropped_for_history": int(self.n_dropped_for_history),
+            "boundaries": [int(value) for value in self.boundaries],
+            "sources": list(self.sources),
+            "truncated": dict(self.truncated),
+            "stats_provenance": dict(self.stats_provenance),
+            "batch_size": int(self.batch_size),
+            "max_steps": None if self.max_steps is None else int(self.max_steps),
+            "ordering": "source_major_then_time",
+        }
 
 
 class RealPredictionEngine:
@@ -374,6 +424,193 @@ class RealPredictionEngine:
         else:
             # Single entity analysis
             return self._predict_single(input_data)
+
+    def predict_risk_series(
+        self,
+        input_data: pd.DataFrame,
+        *,
+        attestation: Optional[QualityAttestation] = None,
+        max_steps: Optional[int] = None,
+        batch_size: int = 256,
+    ) -> RiskSeriesResult:
+        """Predict a risk level for every timestep that has enough history.
+
+        ``predict()`` returns one score per data source -- the value for its most
+        recent timestep -- which cannot be scored against per-row targets.
+        Return-based metrics (Sharpe, Sortino, drawdown, Calmar, VaR/CVaR) need a
+        series ordered in time, so this rolls the same window, the same source
+        mapping and the same normalisation across the payload.
+
+        Predictions come back grouped by source and time-ordered within each
+        group; ``boundaries`` records the seam between consecutive sources so
+        those seams are never differenced as if they were observations.
+
+        ``max_steps`` caps the timesteps inferred per source, keeping the most
+        recent ones, because every step costs a model forward pass; ``None``
+        disables the cap. ``batch_size`` controls how many windows share one
+        forward pass.
+
+        Raises:
+            SchemaValidationError: The payload cannot yield a risk series.
+        """
+        self._enforce_data_quality(attestation)
+
+        if 'source_code' not in input_data.columns:
+            raise SchemaValidationError(
+                "A per-timestep risk series requires a 'source_code' column",
+                context={"columns": [str(column) for column in input_data.columns]},
+            )
+
+        sequence_length = int(self.sequence_length)
+        if sequence_length < 1:
+            raise SchemaValidationError(
+                f"sequence_length must be positive, got {sequence_length}"
+            )
+
+        step_cap: Optional[int] = None if max_steps is None else int(max_steps)
+        if step_cap is not None and step_cap <= sequence_length:
+            raise SchemaValidationError(
+                f"max_steps={step_cap} cannot fill a {sequence_length}-step window"
+            )
+        window_batch = max(1, int(batch_size))
+
+        # Keep the caller's row positions so each prediction can be aligned with
+        # its own row (and therefore with that row's target) without relying on
+        # the frame index being unique.
+        working = input_data.assign(
+            __row_offset=np.arange(input_data.shape[0], dtype=int)
+        )
+
+        frames: List[pd.DataFrame] = []
+        sources: List[str] = []
+        group_sizes: List[int] = []
+        truncated: Dict[str, int] = {}
+        stats_provenance: Dict[str, str] = {}
+        dropped_for_history = 0
+
+        for raw_source, group in working.groupby('source_code', sort=True):
+            source_code = str(raw_source)
+            ordered = group.sort_values('Date') if 'Date' in group.columns else group
+            value_column = 'Close' if 'Close' in ordered.columns else 'Value'
+            if value_column not in ordered.columns:
+                raise SchemaValidationError(
+                    "Payload has neither a 'Close' nor a 'Value' column for source "
+                    f"{source_code}"
+                )
+
+            values = (
+                ordered[value_column]
+                .astype(float)
+                .ffill()
+                .bfill()
+                .fillna(0.0)
+                .to_numpy(dtype=float)
+            )
+            if step_cap is not None and values.size > step_cap:
+                truncated[source_code] = int(values.size - step_cap)
+                values = values[-step_cap:]
+                ordered = ordered.iloc[-step_cap:]
+
+            if values.size <= sequence_length:
+                dropped_for_history += int(values.size)
+                logger.warning(
+                    "Risk series: source %s has %d row(s), too few for a %d-step window",
+                    source_code,
+                    values.size,
+                    sequence_length,
+                )
+                continue
+
+            # Reuse `_prepare_sequence`'s normalisation so a rolling prediction is
+            # directly comparable with the point prediction `predict()` returns
+            # for the same row. Checkpoint stats are the training-time ones;
+            # falling back to stats computed over the evaluated window is
+            # recorded, because that fallback lets the normalisation see the
+            # future and makes the resulting metrics optimistic.
+            _, stats = self._prepare_sequence(values, source_code)
+            stats_provenance[source_code] = (
+                "checkpoint" if self.source_stats.get(source_code) else "payload_window"
+            )
+            mean = float(stats.get('mean', 0.0))
+            std = float(stats.get('std', 1.0)) or 1.0
+            normalized = (values - mean) / std
+
+            windows = np.lib.stride_tricks.sliding_window_view(normalized, sequence_length)
+            scores = self._score_windows(
+                windows, self._map_source_id(source_code), window_batch
+            )
+
+            # Row i of `windows` ends at index i + sequence_length - 1.
+            ends = np.arange(sequence_length - 1, values.size)
+            frame = pd.DataFrame({
+                'source': source_code,
+                'row_offset': np.asarray(ordered['__row_offset'])[ends],
+                'risk_score': scores,
+                'prediction': scores * std + mean,
+            })
+            if 'Date' in ordered.columns:
+                frame['Date'] = np.asarray(ordered['Date'])[ends]
+
+            dropped_for_history += sequence_length - 1
+            frames.append(frame)
+            sources.append(source_code)
+            group_sizes.append(int(frame.shape[0]))
+
+        if not frames:
+            raise SchemaValidationError(
+                "No source in the payload has enough history for a per-timestep risk series",
+                context={
+                    "sequence_length": sequence_length,
+                    "max_steps": step_cap,
+                    "rows": int(input_data.shape[0]),
+                },
+            )
+
+        optimistic = sorted(
+            source
+            for source, origin in stats_provenance.items()
+            if origin == "payload_window"
+        )
+        if optimistic:
+            logger.warning(
+                "Risk series normalisation for %s came from the evaluated window rather "
+                "than the checkpoint, so metrics on those sources are optimistic: the "
+                "normalisation saw the future",
+                optimistic,
+            )
+
+        return RiskSeriesResult(
+            frame=pd.concat(frames, ignore_index=True),
+            boundaries=[int(value) for value in boundaries_from_group_sizes(group_sizes)],
+            sources=sources,
+            n_dropped_for_history=int(dropped_for_history),
+            truncated=truncated,
+            stats_provenance=stats_provenance,
+            batch_size=window_batch,
+            max_steps=step_cap,
+        )
+
+    def _score_windows(
+        self, windows: np.ndarray, source_id: int, batch_size: int
+    ) -> np.ndarray:
+        """Run the frozen model over pre-normalised windows, in batches."""
+        total = int(windows.shape[0])
+        scores = np.empty(total, dtype=float)
+        self.model.eval()
+        with torch.no_grad():
+            for start in range(0, total, batch_size):
+                chunk = np.asarray(windows[start:start + batch_size], dtype=np.float32)
+                inputs = torch.FloatTensor(chunk).to(self.device)
+                source_ids = torch.full(
+                    (chunk.shape[0], 1),
+                    int(source_id),
+                    dtype=torch.long,
+                    device=self.device,
+                )
+                outputs = self.model(inputs, source_ids)
+                flat = outputs.detach().cpu().numpy().astype(float).reshape(chunk.shape[0], -1)
+                scores[start:start + chunk.shape[0]] = flat[:, 0]
+        return scores
 
     def _predict_single(self, input_data: pd.DataFrame) -> PredictionResult:
         """Predict for single entity."""

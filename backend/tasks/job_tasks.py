@@ -766,15 +766,51 @@ def run_backtest(self, job_id: int, parameters: dict):
 
         self.update_progress(job_id, 60.0)
 
-        # Generate predictions on test set, with the source attestation passed
-        # explicitly rather than assumed from the frame.
-        prediction_result = engine.predict(test_data, attestation=attestation)
+        # Roll the window across the test rows so the metrics describe the same
+        # observations as the target, with a seam between sources that no metric is
+        # allowed to difference across. `predict()` is deliberately not called here:
+        # it collapses each source to one score (and pays for explainability), so it
+        # is only used as a fallback when no series can be built.
+        from backend.modules.engine.backtesting import (
+            WalkForwardConfig,
+            compute_metrics,
+            directional_accuracy as _directional_accuracy,
+            walk_forward_folds_per_segment,
+        )
+
+        risk_series_params = parameters.get("risk_series")
+        if not isinstance(risk_series_params, dict):
+            risk_series_params = {}
+
+        risk_series = None
+        risk_series_error = None
+        try:
+            risk_series = engine.predict_risk_series(
+                test_data,
+                attestation=attestation,
+                max_steps=risk_series_params.get("max_steps", 2000),
+                batch_size=risk_series_params.get("batch_size", 256),
+            )
+        except Exception as series_exc:  # noqa: BLE001 - degrade to an explicit skip
+            risk_series_error = f"{type(series_exc).__name__}: {series_exc}"
+            logger.warning(
+                "Per-timestep risk series unavailable for job %s: %s", job_id, risk_series_error
+            )
 
         actuals = None
         pred_values = None
+        boundaries: list = []
+        # Only a genuine per-timestep series may feed the return-based metrics. The
+        # per-source fallback below is a vector of unrelated entities and must never
+        # be differenced as if it were a time series.
+        series_usable = False
+        prediction_result = None
 
         def _extract_risk_scores() -> np.ndarray:
             """Pull the engine's per-source risk scores out of the result frame."""
+            nonlocal prediction_result
+            if prediction_result is None:
+                prediction_result = engine.predict(test_data, attestation=attestation)
             frame = prediction_result.predictions_df
             if 'risk_score' in frame.columns:
                 column = frame['risk_score']
@@ -784,83 +820,85 @@ def run_backtest(self, job_id: int, parameters: dict):
                 column = frame.iloc[:, -1]
             return np.asarray(column.values, dtype=float)
 
-        # Calculate backtest metrics. The engine emits one risk score per data
-        # source while a target column is per-row, so the two series only describe
-        # the same observations when their lengths agree. A mismatch is reported as
-        # a skip instead of being truncated into confident-looking numbers.
-        if 'actual_risk' in test_data.columns or 'target' in test_data.columns:
-            target_col = 'actual_risk' if 'actual_risk' in test_data.columns else 'target'
-            actuals = np.asarray(test_data[target_col].values, dtype=float)
-            pred_values = _extract_risk_scores()
+        if risk_series is not None and risk_series.n_steps > 1:
+            # Align by the caller's row positions, so each risk score is paired
+            # with the target of the very row it was predicted for.
+            offsets = np.asarray(risk_series.frame["row_offset"], dtype=int)
+            pred_values = np.asarray(risk_series.frame["risk_score"], dtype=float)
+            boundaries = list(risk_series.boundaries)
+            series_usable = True
+            backtest_metrics = {
+                "risk_series": risk_series.to_dict(),
+                "prediction_count": int(pred_values.size),
+            }
 
-            if pred_values.size == actuals.size and pred_values.size > 0:
+            target_col = (
+                'actual_risk' if 'actual_risk' in test_data.columns
+                else 'target' if 'target' in test_data.columns
+                else None
+            )
+            if target_col is not None:
+                target_series = np.asarray(test_data[target_col].values, dtype=float)
+                if offsets.size and offsets.max() < target_series.size:
+                    actuals = target_series[offsets]
+                else:
+                    backtest_metrics["target_alignment"] = "skipped: risk-series rows are no longer in range"
+                    logger.warning(
+                        "Backtest target alignment skipped for job %s: risk-series row positions "
+                        "fall outside the test frame",
+                        job_id,
+                    )
+
+            if actuals is not None and pred_values.size == actuals.size and pred_values.size > 0:
                 mse = float(np.mean((actuals - pred_values) ** 2))
                 mae = float(np.mean(np.abs(actuals - pred_values)))
-                rmse = float(np.sqrt(mse))
                 ss_res = float(np.sum((actuals - pred_values) ** 2))
                 ss_tot = float(np.sum((actuals - np.mean(actuals)) ** 2))
-                r2 = float(1 - (ss_res / (ss_tot + 1e-8)))
-
-                if actuals.size > 1:
-                    directional_accuracy = float(
-                        np.mean((np.diff(actuals) > 0) == (np.diff(pred_values) > 0))
-                    )
-                else:
-                    directional_accuracy = 0.0
-
-                backtest_metrics = {
+                backtest_metrics.update({
                     "mse": mse,
                     "mae": mae,
-                    "rmse": rmse,
-                    "r2": r2,
-                    "directional_accuracy": directional_accuracy,
-                }
-            else:
-                backtest_metrics = {
-                    "prediction_count": int(pred_values.size),
-                    "target_count": int(actuals.size),
-                    "note": (
-                        "skipped: the engine returned "
-                        f"{pred_values.size} per-source risk scores for "
-                        f"{actuals.size} labelled test rows, so the series are not aligned"
+                    "rmse": float(np.sqrt(mse)),
+                    "r2": float(1 - (ss_res / (ss_tot + 1e-8))),
+                    # Awareness of source seams is part of the metric, not a caveat.
+                    "directional_accuracy": _directional_accuracy(
+                        actuals, pred_values, boundaries
                     ),
-                }
-                # The comparison is unusable for this job; drop the target series so
-                # the return-based block below also reports a skip instead of
-                # differencing unrelated values.
-                actuals = None
-                logger.warning(
-                    "Backtest metrics skipped for job %s: %s",
-                    job_id,
-                    backtest_metrics["note"],
-                )
+                })
+            elif target_col is None:
+                backtest_metrics.update({
+                    "mean_prediction": float(np.mean(pred_values)),
+                    "std_prediction": float(np.std(pred_values)),
+                    "min_prediction": float(np.min(pred_values)),
+                    "max_prediction": float(np.max(pred_values)),
+                    "note": "No ground truth column in the test window",
+                })
         else:
-            # No ground truth - compute prediction statistics
+            # No usable series: fall back to the per-source scores so the job still
+            # reports prediction statistics, and say plainly that nothing was scored.
             pred_values = _extract_risk_scores()
-
             backtest_metrics = {
+                "prediction_count": int(pred_values.size),
                 "mean_prediction": float(np.mean(pred_values)) if pred_values.size else None,
                 "std_prediction": float(np.std(pred_values)) if pred_values.size else None,
                 "min_prediction": float(np.min(pred_values)) if pred_values.size else None,
                 "max_prediction": float(np.max(pred_values)) if pred_values.size else None,
-                "note": "No ground truth available"
+                "risk_series_skipped": (
+                    risk_series_error
+                    or "the risk series has no more than one aligned timestep"
+                ),
             }
+            logger.info(
+                "Per-timestep risk series skipped for job %s: %s",
+                job_id,
+                backtest_metrics["risk_series_skipped"],
+            )
 
         # Quantitative extension: risk-signal returns, tail-risk statistics, and
         # walk-forward fold diagnostics. Purely additive to backtest_metrics.
         #
         # These metrics are return- and transition-based, so they require a series
-        # ordered in time. They are reported only when the engine's risk scores are
-        # genuinely aligned with the target rows; otherwise a concatenation of
-        # per-source scores would invent transitions between unrelated entities --
-        # the same class of artefact the boundary-aware aggregation in
-        # `backtesting` exists to remove.
-        from backend.modules.engine.backtesting import (
-            WalkForwardConfig,
-            compute_metrics,
-            generate_walk_forward_folds,
-        )
-
+        # ordered in time. The series is source-major, so `boundaries` marks the
+        # seam between sources and no metric differences across it.
         wf_raw = parameters.get("walk_forward")
         if not isinstance(wf_raw, dict):
             wf_raw = {}
@@ -887,52 +925,63 @@ def run_backtest(self, job_id: int, parameters: dict):
             "cvar_95",
         )
 
-        aligned_series = (
-            actuals is not None
-            and pred_values is not None
-            and np.asarray(pred_values).size == np.asarray(actuals).size
-            and np.asarray(pred_values).size > 1
-        )
-
-        if aligned_series:
-            quant_metrics = compute_metrics(actual=actuals, predicted=pred_values)
+        # A series is scoreable when it is ordered in time and has more than one
+        # point. A ground-truth target is optional: without it the return-based
+        # metrics still describe the model's own risk trajectory.
+        if series_usable:
+            quant_metrics = compute_metrics(
+                actual=actuals, predicted=pred_values, boundaries=boundaries or None
+            )
             for quant_key in quant_keys:
                 backtest_metrics[quant_key] = quant_metrics[quant_key]
 
-            walk_forward = {"config": {}, "folds": []}
-            try:
-                walk_forward["config"] = wf_config.to_dict()
-                folds = generate_walk_forward_folds(len(pred_values), wf_config)
+            # Folds are generated inside each source's own contiguous span: folding
+            # across a concatenation of sources would train on one entity and test
+            # on another.
+            walk_forward = {
+                "config": wf_config.to_dict(),
+                "folds": [],
+                "aggregation": "per_source",
+            }
+            source_names = risk_series.sources if risk_series is not None else []
+            entries, failures = walk_forward_folds_per_segment(
+                boundaries or None, int(pred_values.size), wf_config
+            )
+            for segment_index, _segment, folds in entries:
+                source_name = (
+                    source_names[segment_index]
+                    if segment_index < len(source_names)
+                    else str(segment_index)
+                )
                 for fold_index, (train_idx, test_idx) in enumerate(folds):
                     walk_forward["folds"].append({
+                        "source": source_name,
                         "fold": fold_index,
                         "train_start": int(train_idx[0]),
                         "train_end": int(train_idx[-1]) + 1,
                         "test_start": int(test_idx[0]),
                         "test_end": int(test_idx[-1]) + 1,
-                        "n_train": int(len(train_idx)),
-                        "n_test": int(len(test_idx)),
+                        "n_train": int(train_idx.size),
+                        "n_test": int(test_idx.size),
                         "metrics": compute_metrics(
-                            actual=actuals[test_idx],
+                            actual=None if actuals is None else actuals[test_idx],
                             predicted=pred_values[test_idx],
                         ),
                     })
-            except (TypeError, ValueError) as wf_exc:
-                walk_forward["error"] = str(wf_exc)
-                logger.warning(f"Walk-forward folds skipped for job {job_id}: {wf_exc}")
+            if failures:
+                walk_forward["skipped_sources"] = {
+                    source_names[index] if index < len(source_names) else str(index): reason
+                    for index, reason in failures.items()
+                }
+            if not walk_forward["folds"]:
+                walk_forward["skipped"] = "no source had enough timesteps for the fold configuration"
             backtest_metrics["walk_forward"] = walk_forward
         else:
-            if actuals is None:
-                skip_reason = (
-                    "the test window carries no ground-truth target column, so the "
-                    "risk signal cannot be scored against realised outcomes"
-                )
-            else:
-                skip_reason = (
-                    f"the engine returned {np.asarray(pred_values).size} per-source risk "
-                    f"scores for {np.asarray(actuals).size} test rows, so the two series "
-                    "are not a time series of the same observations"
-                )
+            skip_reason = risk_series_error or (
+                "the per-timestep risk series has no more than one aligned point"
+                if risk_series is not None
+                else "the per-timestep risk series could not be built"
+            )
             quant_metrics = {quant_key: None for quant_key in quant_keys}
             backtest_metrics["quant_metrics_skipped"] = skip_reason
             backtest_metrics["walk_forward"] = {
@@ -959,6 +1008,21 @@ def run_backtest(self, job_id: int, parameters: dict):
                 return None
             return obj
 
+        # Persist the aligned series when an output directory is configured, so a
+        # risk curve can be inspected without re-running the backtest.
+        risk_series_path = None
+        series_output_dir = parameters.get('output_dir')
+        if risk_series is not None and series_output_dir:
+            try:
+                os.makedirs(series_output_dir, exist_ok=True)
+                candidate = f"{series_output_dir}/risk_series_{job_id}.csv"
+                risk_series.frame.to_csv(candidate, index=False)
+                risk_series_path = candidate
+            except Exception as write_exc:  # noqa: BLE001 - the metrics matter more than the file
+                logger.warning(
+                    "Could not persist the risk series for job %s: %s", job_id, write_exc
+                )
+
         # Prepare results summary
         result = {
             "status": "completed",
@@ -967,6 +1031,10 @@ def run_backtest(self, job_id: int, parameters: dict):
             "backtest_metrics": clean_nan(backtest_metrics),
             "quant_metrics": clean_nan(quant_metrics),
             "walk_forward": clean_nan(walk_forward),
+            "risk_series": (
+                None if risk_series is None else clean_nan(risk_series.to_dict())
+            ),
+            "risk_series_path": risk_series_path,
             "completed_at": datetime.now(timezone.utc).isoformat()
         }
 
