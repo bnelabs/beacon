@@ -1,66 +1,66 @@
 # Core ML/Data Science
-torch==2.5.1
-torch-geometric==2.6.1
+torch==2.14.0
+torch-geometric==2.8.0.post1
 pandas==2.2.3
 numpy==1.26.4
-scikit-learn==1.5.2
-matplotlib==3.9.2
+scikit-learn==1.9.0
+matplotlib==3.11.1
 seaborn==0.13.2
-networkx==3.3
+networkx==3.6.1
 plotly==5.24.1
 
 # Data Sources
 yfinance==0.2.46
 kaggle==1.6.17
 fredapi==0.5.2
-sec-api==1.0.32
+sec-api==1.0.36
 alpha-vantage==2.3.1
 # Imported directly by the ECB, BIS, IMF, World Bank, FMP, FDIC, custom-API and
 # Alpha Vantage plugins. Previously satisfied only transitively via yfinance /
 # fredapi, which meant those plugins silently failed to register if any of those
 # packages changed their dependencies.
-requests==2.32.3
+requests==2.34.2
 
 # Data Validation
-pandera==0.20.4
+pandera==0.33.1
 
 # Statistics and reporting
 # scipy is imported directly by the correlation graph builder and the residual
 # plots; it was previously present only transitively via scikit-learn.
-scipy==1.13.1
+scipy==1.18.1
 # reportlab renders the PDF report artefact. Without it declared, PDF export
 # silently degrades and no report.pdf is produced.
 reportlab==4.2.2
 
 # Utilities
-tenacity==9.0.0
-pyyaml==6.0.2
-python-dotenv==1.0.1
+tenacity==9.1.4
+pyyaml==6.0.3
+python-dotenv==1.2.3
 pyarrow==18.1.0
 pycountry==24.6.1
 
 # Backend API
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
-pydantic-settings==2.1.0
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+pydantic==2.13.5
+pydantic-settings==2.15.0
 
 # Database
-sqlalchemy==2.0.25
-psycopg2-binary==2.9.9
-alembic==1.13.1
+sqlalchemy==2.0.52
+psycopg2-binary==2.9.12
+alembic==1.19.2
 
 # Task Queue
-celery==5.3.6
+celery==5.6.3
 redis==5.0.1
 
 # System Monitoring
 psutil==5.9.8
 
 # Observability (Prometheus metrics; Celery multiprocess mode supported)
-prometheus-client==0.21.0
+prometheus-client==0.26.0
 
 # Testing
 pytest==8.3.4
 pytest-cov==6.0.0
-httpx==0.26.0
+httpx==0.28.1
