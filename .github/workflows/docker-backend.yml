@@ -4,14 +4,16 @@ name: Docker backend image
 # separately.
 #
 #   * `compose-config` takes seconds and runs on every relevant push/PR.
-#   * `build-backend` installs the whole ML stack into the image and takes
-#     7-11 minutes. Running that on every push put a multi-minute wait in front
-#     of ordinary work, so it now runs on a schedule and on demand only.
+#   * `build-backend` installs the whole ML stack into the image and takes about
+#     5 minutes warm, 11 cold. It runs on a push to main and never on a pull
+#     request, so review never waits on it. The `paths` filter below is what keeps
+#     ordinary pushes fast: this workflow only triggers at all when a Dockerfile,
+#     compose file or configs/ entry changed.
 #
-# Nothing is lost that is not covered elsewhere: Backend CI installs the same
-# requirements on the same Python 3.12 interpreter (so a bad pin fails there in
-# ~2 minutes), and the weekly build catches Dockerfile and base-image breakage
-# without blocking anyone. Use "Run workflow" when you want it before merging.
+# Backend CI also installs the same requirements on the same Python 3.12
+# interpreter, so a bad pin fails there in ~2 minutes without a build; the weekly
+# run additionally catches base-image rot. Use "Run workflow" to prove a
+# Dockerfile change before merging it.
 on:
   push:
     branches: [main]
@@ -64,12 +66,19 @@ jobs:
   build-backend:
     name: Build backend image (CPU)
     runs-on: ubuntu-latest
-    # why: NOT on push or pull_request. This installs torch, torch-geometric and
-    # scipy into the image and takes 7-11 minutes; putting that in front of every
-    # push made ordinary work wait on it. It is covered by the weekly schedule and
-    # can be started manually from the Actions tab when a Dockerfile change needs
-    # validating before merge.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # why: never on pull_request. This installs torch, torch-geometric and scipy
+    # into the image and takes roughly 5 minutes warm (11 cold), and putting that
+    # in front of a PR makes review wait on it.
+    #
+    # It DOES run on a push to main, but the workflow-level `paths` filter above
+    # means only a push that actually touches a Dockerfile, compose file or
+    # configs/ triggers this workflow at all. Ordinary pushes never reach here.
+    #
+    # Gating it off push as well was a mistake: a base-image bump merged with only
+    # a stale pre-merge build behind it, and validating it then required starting
+    # a 5-minute job by hand. Validating on the relevant pushes closes that gap
+    # without putting a multi-minute build in front of anyone's pull request.
+    if: github.event_name != 'pull_request'
     timeout-minutes: 45
 
     steps:
