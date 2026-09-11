@@ -61,7 +61,9 @@ jobs:
         # why: uv resolves and installs the pinned stack in seconds where pip
         # takes the better part of a minute, and its cache is keyed on the
         # requirements files so an unchanged stack is reused across runs.
-        uses: astral-sh/setup-uv@v10
+        # Pinned to an exact version because this action publishes no floating
+        # `v10` tag (only v10.0.0, v10.0.1, v10.1.0), so `@v10` fails to resolve.
+        uses: astral-sh/setup-uv@v10.1.0
         with:
           enable-cache: true
           cache-dependency-glob: |
