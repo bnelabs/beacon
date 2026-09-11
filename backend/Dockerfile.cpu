@@ -3,6 +3,12 @@
 # scikit-learn 1.9, matplotlib 3.11 all require >= 3.12/3.11).
 FROM python:3.12-slim
 
+# uv resolves and installs the pinned stack in a fraction of pip's time - the
+# dominant cost when building this image (torch alone is ~200 MB of wheels).
+# Copied from the official image rather than pip-installed to avoid a second
+# Python package manager in the layer.
+COPY --from=ghcr.io/astral-sh/uv:0.12.13 /uv /uvx /bin/
+
 # Set working directory
 WORKDIR /app
 
@@ -13,14 +19,15 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip
-RUN python -m pip install --upgrade pip
-
 # Copy requirements file first (for better Docker layer caching)
 COPY requirements.txt .
 
-# Install Python packages (CPU versions)
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python packages into the system interpreter.
+# UV_COMPILE_BYTECODE keeps application start-up fast; caching is disabled
+# because the layer cache already covers rebuilds.
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+RUN uv pip install --system --no-cache -r requirements.txt
 
 # Copy backend application code to backend/ subdirectory
 COPY . backend/

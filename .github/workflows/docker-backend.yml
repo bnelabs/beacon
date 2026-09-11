@@ -1,37 +1,36 @@
-name: Docker build
+name: Docker backend image
 
-# why: the Backend CI and Frontend CI workflows test the code on the runner's own
-# interpreter/Node install - they never build the container images. That gap is
-# real, not theoretical: a Dependabot PR once proposed `python:3.14-slim` for
-# backend/Dockerfile.cpu, which passes every Python test (CI uses setup-python)
-# but cannot build, because torch/numpy publish no cp314 wheels. This workflow
-# builds the actual images so base-image, Dockerfile and requirements changes are
-# validated before they can merge.
+# why: the Backend CI workflow tests the code on the runner's interpreter and
+# never builds the container image. That gap is real, not theoretical: a
+# Dependabot PR proposed `python:3.14-slim` for backend/Dockerfile.cpu, which
+# passes every Python test (CI uses setup-python) but cannot build, because
+# torch/numpy publish no cp314 wheels.
+#
+# This workflow is separate from the frontend image build on purpose. A single
+# workflow with a shared `paths:` filter would rebuild this (expensive, torch
+# install) image whenever a frontend file changed. Scoping the trigger to
+# backend and compose paths keeps the cost proportional to the change.
 on:
   push:
     branches: [main]
     paths:
       - "backend/Dockerfile*"
       - "backend/requirements*.txt"
-      - "frontend/Dockerfile"
-      - "frontend/package.json"
-      - "frontend/package-lock.json"
       - "docker-compose*.yml"
-      - ".github/workflows/docker-ci.yml"
+      - "configs/**"
+      - ".github/workflows/docker-backend.yml"
   pull_request:
     paths:
       - "backend/Dockerfile*"
       - "backend/requirements*.txt"
-      - "frontend/Dockerfile"
-      - "frontend/package.json"
-      - "frontend/package-lock.json"
       - "docker-compose*.yml"
-      - ".github/workflows/docker-ci.yml"
+      - "configs/**"
+      - ".github/workflows/docker-backend.yml"
   workflow_dispatch:
 
 # why: never cancel on main - a cancelled run leaves the commit unverified.
 concurrency:
-  group: docker-ci-${{ github.workflow }}-${{ github.ref }}
+  group: docker-backend-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
@@ -63,8 +62,8 @@ jobs:
     name: Build backend image (CPU)
     runs-on: ubuntu-latest
     # why: installing the pinned ML stack (torch, torch-geometric, scipy) inside
-    # the image is the slow leg; 45 minutes bounds a hung build while leaving
-    # headroom on a cold cache.
+    # the image is the slow leg. The build cache (type=gha, mode=max) means only
+    # runs that actually change requirements pay the full cost.
     timeout-minutes: 45
 
     steps:
@@ -81,29 +80,5 @@ jobs:
           file: ./backend/Dockerfile.cpu
           push: false
           load: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  build-frontend:
-    name: Build frontend image
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build frontend image
-        uses: docker/build-push-action@v7
-        with:
-          context: ./frontend
-          file: ./frontend/Dockerfile
-          push: false
-          load: false
-          build-args: |
-            VITE_API_BASE_URL=http://localhost:3456
           cache-from: type=gha
           cache-to: type=gha,mode=max

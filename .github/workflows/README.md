@@ -1,13 +1,14 @@
 # CI/CD workflows
 
-This directory contains the GitHub Actions automation for BEACON: four
+This directory contains the GitHub Actions automation for BEACON: five
 workflows, Dependabot configuration, and a pull-request template.
 
 | File | Purpose | Triggers |
 | --- | --- | --- |
 | `backend-ci.yml` | Compile and test the FastAPI/Celery/PyTorch backend on Python 3.12 and upload a coverage report. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
 | `frontend-ci.yml` | Build the React/Vite app on Node 24 and run the Playwright end-to-end suite. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
-| `docker-ci.yml` | Build the real backend and frontend container images and validate every compose file. | `push`/`pull_request` **restricted to Docker, requirements, package and compose paths**, plus `workflow_dispatch`. |
+| `docker-backend.yml` | Validate every compose file and build the backend CPU image. | `push`/`pull_request` restricted to backend Dockerfile, backend requirements, compose and `configs/` paths, plus `workflow_dispatch`. |
+| `docker-frontend.yml` | Build the frontend image. | `push`/`pull_request` restricted to `frontend/Dockerfile` and the frontend package files, plus `workflow_dispatch`. |
 | `security.yml` | Advisory dependency audits: `pip-audit` for `backend/requirements.txt` and `npm audit` for `frontend/`. Never blocks a merge. | `push` to `main`, every `pull_request`, weekly `schedule` (Mondays 06:17 UTC), manual `workflow_dispatch`. |
 | `../dependabot.yml` | Version-update PRs for `github-actions`, `pip`, `npm`, and `docker`. | GitHub's scheduler (see the policy below). |
 
@@ -64,24 +65,42 @@ Every workflow uses a per-ref `concurrency` group, but cancellation is
   intercepts every `**/api/**` request via `page.route(...)`. Playwright's `webServer`
   block only starts the Vite dev server on `127.0.0.1:8173`.
 
-## Docker build (`docker-ci.yml`)
+## Docker image builds (`docker-backend.yml`, `docker-frontend.yml`)
 
-This workflow exists because `backend-ci.yml` and `frontend-ci.yml` test the code
-on the *runner's* interpreter and never build the images. That gap is not
-theoretical: a Dependabot PR proposed `python:3.14-slim` for
-`backend/Dockerfile.cpu`, which passes every Python test — CI uses
-`setup-python`, not the image — but cannot build, because `torch` and `numpy`
-publish no cp314 wheels. Without this workflow such a change fails only at
-`docker compose build` time, on the operator's machine.
+These exist because `backend-ci.yml` and `frontend-ci.yml` test the code on the
+*runner's* interpreter and Node install, and never build the images. That gap is
+not theoretical — both halves of it have already bitten this repository:
 
-- `compose-config` runs `docker compose config` over the base file and both
-  overlays (`.cpu`, `.gpu`), resolving variables and validating the merged service
-  graph.
-- `build-backend` builds `backend/Dockerfile.cpu`; `build-frontend` builds
-  `frontend/Dockerfile`. Both use the GitHub Actions build cache.
-- Path-filtered on purpose: it runs only when a Dockerfile, requirements file,
-  `package.json`/lockfile, or compose file changes, so ordinary code PRs do not
-  pay for a container build.
+- A Dependabot PR proposed `python:3.14-slim` for `backend/Dockerfile.cpu`,
+  which passes every Python test (CI uses `setup-python`, not the image) but
+  cannot build, because `torch` and `numpy` publish no cp314 wheels.
+- `frontend/Dockerfile` used `npm install --legacy-peer-deps`, which skips peer
+  dependencies. `@deck.gl/widgets` (a peer of `@deck.gl/react`) was therefore
+  absent and the image build failed with *"Rollup failed to resolve import
+  '@deck.gl/widgets'"* while Frontend CI stayed green. Now fixed with `npm ci`.
+
+**They are two workflows, not one, for cost reasons.** A single workflow with a
+shared `paths:` filter rebuilds the backend image (torch — the expensive one) on
+any frontend change. Scoping each trigger to its own paths keeps cost
+proportional to the change.
+
+- `docker-backend.yml` runs `docker compose config` over the base file and both
+  overlays (`.cpu`, `.gpu`), then builds `backend/Dockerfile.cpu`.
+- `docker-frontend.yml` builds `frontend/Dockerfile`.
+- Both use the GitHub Actions build cache (`type=gha,mode=max`), so only a run
+  that actually changes the dependency set pays the full install cost.
+
+## Speed notes
+
+- **Backend installs use `uv`**, not pip. `uv pip install` resolves and installs
+  the pinned stack in seconds where pip took the better part of a minute, and
+  its cache is keyed on the two requirements files.
+- **The remaining dominant cost is the test run itself** (~98s for 150+ tests,
+  including a full offline pipeline execution that trains a model), not installs.
+- **Both Dockerfiles use `uv`**, and `frontend/Dockerfile` uses `npm ci`, which
+  is faster and reproducible.
+- **Docker builds are path-scoped and layer-cached**, so an ordinary code change
+  triggers no image build at all.
 
 ## Security audit (`security.yml`)
 

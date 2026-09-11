@@ -5,6 +5,9 @@
 # Python >= 3.12. CUDA stays on 12.6 to match the PyTorch build.
 FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu24.04
 
+# uv installs the pinned stack far faster than pip; see Dockerfile.cpu.
+COPY --from=ghcr.io/astral-sh/uv:0.12.13 /uv /uvx /bin/
+
 # Set working directory
 WORKDIR /app
 
@@ -22,12 +25,11 @@ RUN apt-get update && apt-get install -y \
 RUN ln -sf /usr/bin/python3.12 /usr/bin/python && \
     ln -sf /usr/bin/python3.12 /usr/bin/python3
 
-# Upgrade pip
-RUN python -m pip install --upgrade pip
-
 # Copy requirements file first (for better Docker layer caching)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+RUN uv pip install --system --no-cache -r requirements.txt
 
 # Copy backend application code
 COPY . .

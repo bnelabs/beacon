@@ -5,7 +5,12 @@ FROM node:24-alpine AS deps
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm install --legacy-peer-deps
+# `npm ci` installs the exact locked tree, including peer dependencies.
+# The previous `npm install --legacy-peer-deps` skipped peer deps entirely, so
+# `@deck.gl/widgets` (a peer of @deck.gl/react) was absent and `npm run build`
+# failed inside the image with "Rollup failed to resolve import
+# '@deck.gl/widgets'". `npm ci` is also faster and reproducible.
+RUN npm ci
 
 # ======================
 # Stage 2: Builder
