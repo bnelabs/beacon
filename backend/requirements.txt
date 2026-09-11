@@ -7,7 +7,7 @@ scikit-learn==1.9.0
 matplotlib==3.11.1
 seaborn==0.13.2
 networkx==3.6.1
-plotly==5.24.1
+plotly==7.0.0
 
 # Data Sources
 yfinance==0.2.46
