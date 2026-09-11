@@ -569,6 +569,38 @@ model's own risk trajectory). `quant_metrics_skipped` now appears only when no
 per-timestep series could be built at all, and it still carries the exception
 that caused it.
 
+## A pre-existing integration bug this work runs into
+
+`ModelTrainer` (the single-scale path, chosen when the training frame has no
+`source_code`) saves a **`TemporalAttentionNetwork`** checkpoint and does not
+persist `source_stats`. `RealPredictionEngine._load_model` unconditionally builds
+a **`MultiScaleTemporalAttentionModel`**, so that checkpoint cannot be loaded at
+all:
+
+```
+RuntimeError: Error(s) in loading state_dict for MultiScaleTemporalAttentionModel:
+  Missing key(s) in state_dict: "source_encoders.0.0.weight", ...
+```
+
+Verified directly (build a `create_model("temporal_attention", ...)` checkpoint
+with `safe_torch_save`, hand it to `RealPredictionEngine`, observe the
+`RuntimeError`). The consequence is that a single-source-trained model cannot
+reach the prediction or backtest jobs at all.
+
+This is pre-existing and out of the selected scope, so it is recorded rather than
+fixed: closing it means deciding which architecture the engine should serve, or
+teaching `_load_model` to dispatch on `model_type`. Two things follow from it
+that are worth knowing:
+
+* The engine only ever loads a `MultiScaleTrainer` artefact, and that trainer
+  **does** persist `source_stats` and `sources` (in `multi_scale_trainer.py`).
+  So the leak-free `"checkpoint"` normalisation described above is the normal
+  case in practice, and the optimistic `"payload_window"` path is only reached by
+  a checkpoint that carries no stats.
+* The rolling risk series is therefore tested against a
+  `MultiScaleTemporalAttentionModel` checkpoint, which is exactly what the live
+  engine can load.
+
 ## Trajectory
 
 Confirmed sound and left alone: the signal-to-return convention
