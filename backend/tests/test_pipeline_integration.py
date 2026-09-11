@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, timedelta, datetime, UTC
+from datetime import date, timedelta, datetime, timezone
 from importlib import reload
 from pathlib import Path
 from uuid import uuid4
@@ -117,7 +117,7 @@ def test_execute_pipeline_end_to_end(tmp_path):
         status=JobStatus.PENDING,
         config={"sequence_length": 10, "batch_size": 8, "model": "integration_fallback"},
         started_by="pytest",
-        started_at=datetime.now(UTC),
+        started_at=datetime.now(timezone.utc),
     )
     session.add(pipeline_job)
     session.commit()
