@@ -26,8 +26,11 @@ alpha-vantage==2.3.1
 requests==2.34.2
 
 # Statistics and reporting
-# scipy is imported directly by the correlation graph builder and the residual
-# plots; it was previously present only transitively via scikit-learn.
+# scipy is imported directly by the regression diagnostics in
+# modules/engine/visualizer.py; it was previously present only transitively via
+# scikit-learn. (The correlation graph builder that also imported it was removed
+# with the static-graph purge -- it treated a correlation matrix as an exposure
+# network, which no clearing algorithm can consume.)
 scipy==1.18.1
 # reportlab renders the PDF report artefact. Without it declared, PDF export
 # silently degrades and no report.pdf is produced.
