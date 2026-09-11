@@ -95,6 +95,11 @@ from ..engine.latent_dynamics import (
     LatentDynamicsScenario,
     simulate_latent_stress,
 )
+from ..engine.counterfactual import (
+    CounterfactualOutcome,
+    CounterfactualScenario,
+    run_counterfactual,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -344,6 +349,17 @@ class MultiBankAnalysis:
     ``calibrated`` flag that is always ``False``.
     """
 
+    counterfactual: Optional[CounterfactualOutcome] = None
+    """The counterfactual answer to a caller-declared ``do`` query, when one was given.
+
+    ``None`` unless a :class:`CounterfactualScenario` was supplied. It is
+    **conditional on the scenario's declared structural model**: an answer to "what
+    follows from this intervention given this model", not a forecast of the world.
+    A misspecified coefficient yields a precise wrong answer, and nothing here
+    bounds that error -- the outcome carries
+    :data:`~backend.modules.engine.counterfactual.CONDITIONALITY_NOTE` and an
+    ``is_forecast`` flag that is always ``False``.
+    """
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -369,6 +385,9 @@ class MultiBankAnalysis:
             },
             "latent_dynamics": (
                 self.latent_dynamics.to_dict() if self.latent_dynamics else None
+            ),
+            "counterfactual": (
+                self.counterfactual.to_dict() if self.counterfactual else None
             ),
             "shock_scenarios": {
                 bank_id: result.to_dict()
@@ -416,6 +435,7 @@ class BankRiskAnalyzer:
         topology_parameters: Optional[PersistenceVectorParameters] = None,
         spiral_parameters: Optional[Mapping[str, SpiralParameters]] = None,
         latent_dynamics_scenario: Optional[LatentDynamicsScenario] = None,
+        counterfactual_scenario: Optional[CounterfactualScenario] = None,
     ) -> MultiBankAnalysis:
         """Score every institution, then analyse the network if possible.
 
@@ -463,6 +483,14 @@ class BankRiskAnalyzer:
                 interval** -- the drift and diffusion are caller inputs and are
                 neither fitted nor validated here -- so it is deliberately not
                 placed in ``confidence_lower``/``confidence_upper``.
+            counterfactual_scenario: Optional caller-declared ``do`` query over a
+                structural model. When supplied, abduction/intervention/propagation
+                is run and the answer is attached as
+                :attr:`MultiBankAnalysis.counterfactual`. The variables of the
+                structural model are factors, not analysed institutions, so unlike
+                the other scenarios this one is *not* required to cover the analysed
+                set -- it is a different question attached to the same report. The
+                answer is conditional on the declared model and is not a forecast.
 
         Returns:
             A :class:`MultiBankAnalysis`. ``systemic_risk_score`` is ``None``
@@ -736,6 +764,22 @@ class BankRiskAnalyzer:
             # model rather than a property of the declared process.
             latent_result = simulate_latent_stress(latent_dynamics_scenario)
 
+        counterfactual_result: Optional[CounterfactualOutcome] = None
+        if counterfactual_scenario is not None:
+            if not isinstance(counterfactual_scenario, CounterfactualScenario):
+                raise TypeError(
+                    "counterfactual_scenario must be a CounterfactualScenario, got "
+                    f"{type(counterfactual_scenario).__name__}"
+                )
+            # Deliberately no coverage requirement here, unlike the regulatory,
+            # spiral and latent tables: the structural model's variables are
+            # factors, not the analysed institutions, so demanding that they match
+            # bank ids would force a caller to mislabel one as the other. The
+            # scenario validates its own shape -- observation columns against model
+            # variables, interventions against declared variables -- in its
+            # constructor, so a mismatch still fails closed.
+            counterfactual_result = run_counterfactual(counterfactual_scenario)
+
         return MultiBankAnalysis(
             analysis_date=pd.Timestamp.now().isoformat(),
             num_banks=len(bank_ids),
@@ -756,6 +800,7 @@ class BankRiskAnalyzer:
             topology=topology_result,
             liquidity_spiral=spiral_results,
             latent_dynamics=latent_result,
+            counterfactual=counterfactual_result,
         )
 
     def _score_bank(self, bank_id: str, df: pd.DataFrame) -> float:

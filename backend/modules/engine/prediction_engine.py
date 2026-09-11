@@ -440,6 +440,7 @@ class RealPredictionEngine:
         attestation: Optional[QualityAttestation] = None,
         spiral_parameters: Optional[Dict[str, Any]] = None,
         latent_dynamics_scenario: Optional[Any] = None,
+        counterfactual_scenario: Optional[Any] = None,
     ) -> PredictionResult:
         """
         Score the payload and, when a balance sheet is supplied, clear the network.
@@ -472,6 +473,14 @@ class RealPredictionEngine:
                 **simulated scenario dispersion under a declared SDE, not a
                 calibrated prediction interval**; it is never written into the
                 ``confidence_*`` fields.
+            counterfactual_scenario: Optional
+                :class:`~backend.modules.engine.counterfactual.CounterfactualScenario`.
+                When supplied, the declared structural model's abduction /
+                intervention / propagation is run and the answer is attached to the
+                analysis and rendered in the report. It is **conditional on the
+                declared model** -- an answer to "what follows from this
+                intervention given this model", not a forecast -- and the outcome
+                reports that explicitly.
 
         Returns:
             PredictionResult with per-source risk scores and network analysis
@@ -491,6 +500,7 @@ class RealPredictionEngine:
                 bank_endowments,
                 spiral_parameters,
                 latent_dynamics_scenario,
+                counterfactual_scenario,
             )
         else:
             # Single entity analysis
@@ -779,6 +789,7 @@ reported here rather than approximated.
         bank_endowments: Optional[Dict[str, float]] = None,
         spiral_parameters: Optional[Dict[str, Any]] = None,
         latent_dynamics_scenario: Optional[Any] = None,
+        counterfactual_scenario: Optional[Any] = None,
     ) -> PredictionResult:
         """Predict for multiple institutions and clear the network if possible."""
 
@@ -802,6 +813,7 @@ reported here rather than approximated.
             bank_endowments=bank_endowments,
             spiral_parameters=spiral_parameters,
             latent_dynamics_scenario=latent_dynamics_scenario,
+            counterfactual_scenario=counterfactual_scenario,
         )
 
         # Extract predictions
@@ -1165,6 +1177,42 @@ reported here rather than approximated.
                 "  not estimates, and no coverage guarantee, threshold probability or\n"
                 "  forecast follows from this dispersion. It is a simulated scenario\n"
                 "  dispersion and is not written to the prediction-interval fields.\n"
+            )
+        report += "\n"
+
+        if analysis.counterfactual is None:
+            report += (
+                "Counterfactual: UNAVAILABLE - no counterfactual scenario was supplied.\n"
+                "It is not run by default: it requires a caller-declared structural\n"
+                "model plus an explicit do-operation, and a counterfactual invented\n"
+                "from the model risk score would be a restatement of the model rather\n"
+                "than an answer to an intervention.\n"
+            )
+        else:
+            counterfactual = analysis.counterfactual
+            result = counterfactual.result
+            report += (
+                "Counterfactual (conditional on the caller-declared structural model;\n"
+                "NOT a forecast):\n"
+                f"  model: {counterfactual.reference}\n"
+            )
+            for item in result.interventions:
+                rendered = (
+                    f"{float(item.value):.6g}"
+                    if np.isscalar(item.value)
+                    else "a per-timestep path"
+                )
+                report += f"  do({item.variable} := {rendered})\n"
+            report += (
+                f"  affected: {', '.join(result.affected) or 'nothing'}\n"
+                f"  unaffected: {', '.join(result.unaffected) or 'nothing'}\n"
+                f"  largest change {result.max_absolute_effect:.6g}; trajectory "
+                f"constraints "
+                f"{'satisfied' if result.constraints_ok else 'VIOLATED: ' + ', '.join(result.constraint_violations)}\n"
+                "  Conditionality: this answers 'what follows from this intervention\n"
+                "  given this model'. It is not a prediction of the world, and a\n"
+                "  misspecified coefficient yields a precise wrong answer that nothing\n"
+                "  here bounds.\n"
             )
         report += "\n"
 

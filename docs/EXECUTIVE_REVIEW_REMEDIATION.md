@@ -875,9 +875,7 @@ importers:**
 | `engine/uncertainty.py` | — | implemented; **unreachable** |
 | `engine/subgraphx.py` | "SubgraphX modules" | implemented; **unreachable** |
 | `engine/event_metrics.py` | — | implemented; **unreachable** |
-| `engine/causal_validation.py` | counterfactual validation | implemented; **unreachable** |
-| `engine/causal_discovery.py` | "uses NOTEARS" | implemented; imported only by the unreachable `causal_validation`, so **unreachable** |
-| `engine/tncm_vae.py` | "counterfactual analysis (TNCM-VAE)" | implemented; reached only through the unreachable causal subsystem |
+| `engine/causal_validation.py` | counterfactual validation | implemented; **unreachable** (needs two graphs on a job result, which no producer supplies) |
 | `engine/mixture_of_experts.py` | — | implemented; **unreachable** |
 | `data/network_gate.py` | — | implemented; **unreachable** |
 | `data/streaming.py` | — | implemented; **unreachable** |
@@ -1075,10 +1073,11 @@ exists to establish rather than restating the implementation.
 Recorded plainly, because the value of a remediation record is that a reader can
 tell the difference between "verified" and "asserted".
 
-* **The twelve orphaned modules other than `cpcv` and `neural_sde` are still
-  orphaned.** They are now enumerated, each with what a real integration would
-  require, and guarded by a test that fails if the census drifts. Wiring them is
-  the largest remaining item and is deliberately not rushed here.
+* **The orphaned modules other than `cpcv`, `neural_sde`, `causal_discovery` and
+  `tncm_vae` are still orphaned.** They are now enumerated, each with what a real
+  integration would require, and guarded by a test that fails if the census drifts.
+  Wiring the rest is the largest remaining item and is deliberately not rushed
+  here.
 * **The uploaded exposure matrix does not yet drive the engine automatically.**
   The endpoint, validation, persistence and an engine-ready reader all exist; an
   explicit opt-in to consume them was not added, because changing engine output
@@ -1091,5 +1090,121 @@ tell the difference between "verified" and "asserted".
   which can replace the matrix driving the map. This is pre-existing and
   platform-level; the module docstring says so rather than implying protection
   that does not exist.
-* **Non-linear causal discovery** is the one review recommendation whose status is
-  recorded separately below rather than claimed here.
+* **`causal_validation.py` remains unreachable.** It validates a *pair* of graphs
+  (declared against learned); nothing in the pipeline produces both on a job
+  result, so it needs a product decision about where that comparison belongs, not
+  a call site.
+
+---
+
+# Second sitting: the remaining objective items
+
+The four items below closed after the first sitting was committed and merged as
+PR #27. They are recorded separately so the change sets stay legible.
+
+## 5.10 Non-linear causal discovery — *Done*
+
+The review asked to "upgrade this to NOTEARS-MLP or DAG-GNN to capture complex,
+non-linear causal drivers". What shipped is a non-linear **basis expansion**, and
+the deviation is the interesting part.
+
+The MLP form was implemented first and **rejected on evidence**. Its
+augmented-Lagrangian landscape has a fatal property: ``h(W) = tr(exp(W o W)) - d``
+is exactly zero at ``W = 0``, and so is the penalty gradient there, which makes
+the all-zero model a global minimum of the penalty that trivially satisfies the
+constraint. On ``X2 = sin(X1) + e`` the unconstrained MLP fits well and reaches
+``h(W) ~ 1.16e6`` — a good fit that is wildly cyclic — and then every
+augmented-Lagrangian run collapsed to the **empty graph**, under L-BFGS-B with
+strong Wolfe *and* under Adam, across penalty ceilings from ``1e4`` to ``1e16``
+and L1 strengths from ``0.001`` to ``0.2``. An empty graph satisfies every
+structural check the module performs and reports ``converged=True``, which is the
+exact failure this round exists to remove, so it was not shipped.
+
+The basis expansion keeps each structural equation linear in its parameters —
+``X_i = sum_j <b_ij, phi_j(X)> + E_i`` with ``phi_j`` the powers of ``x_j`` — and
+applies the same grouped-norm constraint ``W[i, j] = ||b_ij||_2``. That keeps the
+loss quadratic in the parameters, which is the regime the linear solver's penalty
+schedule is already demonstrated to work in. It recovers the non-linear graph
+exactly at ``degree`` 2 and 3 where the linear solver misses it:
+
+| Solver | Edges recovered on ``X1 -> X2 -> X3`` with ``X2 = sin(X1)``, ``X3 = X2^2`` |
+|---|---|
+| `notears_linear` | `{X1 -> X2}` — **misses the quadratic edge** |
+| `notears_basis(degree=2)` | `{X1 -> X2, X2 -> X3}` — exact |
+
+**One bug worth recording, because it was invisible to the constraint.** The
+group norm was first returned as ``[output, variable]`` while the module's
+documented convention is ``weights[parent, child]``. ``h(W) = h(W^T)``, so the
+constraint value, the convergence test and the acyclicity check all passed
+regardless — but ``edge_list`` reported **every edge backwards**. Only comparing
+against a known graph catches that, which is what the tests now do.
+
+`NoteArsResult` gained a ``solver`` field ("linear" / "basis") because ``weights``
+is a structural coefficient for one and a block norm for the other. Without it,
+any consumer converting weights into coefficients would read a norm as an effect
+size. The field is what lets the counterfactual seam below refuse a non-linear fit
+instead of inventing coefficients from it.
+
+**Tests:** `backend/tests/test_notears_nonlinear.py` (45 tests): exact recovery at
+two degrees, the linear model's failure on the same data asserted as the premise,
+acyclicity after thresholding, determinism, the non-vacuousness check (`W = 0`
+converges and is acyclic, so emptiness is asserted against directly), and the full
+fail-closed matrix.
+
+## 5.11 Counterfactual analysis is on the engine path — *Done*
+
+`tncm_vae.py` is no longer an orphan, and neither is `causal_discovery.py`: a new
+`backend/modules/engine/counterfactual.py` exposes a caller-declared ``do`` query,
+`analyze_multiple_banks` accepts it, `RealPredictionEngine.predict` forwards it,
+and the multi-institution report renders it. The reachability guard immediately
+caught the promotion and demanded the census be updated, which is the behaviour it
+exists for.
+
+The seam the `NoteArsResult` docstring always described now exists:
+`structural_model_from_weights` builds a `StructuralCausalModel` from a **linear**
+NOTEARS fit, and refuses a basis fit with an explicit reason — its weights are
+group norms, so reading them as coefficients would fabricate the coefficients of
+the model. It also refuses a non-acyclic fit, which is not a structural model.
+
+The honesty property is the same one imposed on the SDE: the outcome carries
+``is_forecast: False`` and an explicit conditionality note, the report header says
+"conditional on the caller-declared structural model; NOT a forecast", and the
+counterfactual is deliberately **not** required to cover the analysed
+institutions, because its variables are factors rather than banks — forcing that
+match would make a caller mislabel one as the other.
+
+**Tests:** `backend/tests/test_counterfactual_coupling.py` (29 tests), including
+the basis-fit rejection, the cyclic-fit rejection, constraint violations reported
+rather than clipped, and reachability through `_predict_multi_bank` with both the
+rendered and the `UNAVAILABLE` branch.
+
+## 5.12 The graph-engine recommendation: rejected, now with a measurement — *Rejected*
+
+§5.5 rejected this on the structural argument that no table stores an adjacency.
+That argument is now backed by a measurement, because "we looked and it seemed
+fine" is weaker than a number.
+
+| Workload | Measured |
+|---|---|
+| `clear_multiplex`, n = 1000 nodes, ~4% density | **2.8 ms** |
+| 10 full contagion clears at n = 1000 | **30 ms** |
+| `analyze_multiple_banks`' real workload: one clear **per institution** at n = 200 | tens of milliseconds |
+
+A database-backed graph engine would add a network round trip per iteration to
+work that currently finishes in single-digit milliseconds. There is nothing to
+make faster, so integration would buy an operational dependency, a second
+representation of the network to keep in sync, and no query the system performs.
+
+`backend/tests/test_analytical_capacity.py` (6 tests) locks this in with
+deliberately loose bounds — roughly 1000x the measured cost — so it catches an
+accidental complexity regression (a per-edge round trip, an O(n^4) rewrite)
+without asserting a benchmark number a shared CI runner would make flaky.
+
+## Verification for the second sitting
+
+| Check | Result |
+|---|---|
+| Full backend suite | **1960 passed, 7 skipped** (was 1880 at the first sitting, 1676 before the round) |
+| Non-linear recovery distinguished from linear | asserted as the test's premise |
+| Reachability guard | caught the `causal_discovery`/`tncm_vae` promotion and required the census update |
+
