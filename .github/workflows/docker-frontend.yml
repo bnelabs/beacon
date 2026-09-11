@@ -1,27 +1,18 @@
 name: Docker frontend image
 
-# why: the Frontend CI workflow runs `npm ci && npm run build` on the runner,
-# which is NOT the same as building the container image. The distinction matters:
-# the image previously used `npm install --legacy-peer-deps`, which skips peer
-# dependencies, so `@deck.gl/widgets` was missing and the image build failed with
+# why: manual only, for the same reason as the backend image workflow - no wait it
+# creates can land in front of ordinary work. Start it from the Actions tab (Run
+# workflow) when a frontend Dockerfile, package.json or lockfile change needs
+# proving inside the real image.
+#
+# The distinction this workflow exists to catch still matters even though it is no
+# longer automatic: Frontend CI runs `npm ci && npm run build` on the runner, which
+# is NOT the same as building the container image. The image previously used
+# `npm install --legacy-peer-deps`, which skips peer dependencies, so
+# `@deck.gl/widgets` was missing and the image build failed with
 # "Rollup failed to resolve import '@deck.gl/widgets'" while Frontend CI stayed
 # green. Only building the real image catches that class of failure.
-#
-# Scoped to frontend paths so a backend file change never pays for this build.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "frontend/Dockerfile"
-      - "frontend/package.json"
-      - "frontend/package-lock.json"
-      - ".github/workflows/docker-frontend.yml"
-  pull_request:
-    paths:
-      - "frontend/Dockerfile"
-      - "frontend/package.json"
-      - "frontend/package-lock.json"
-      - ".github/workflows/docker-frontend.yml"
   workflow_dispatch:
 
 # why: never cancel on main - a cancelled run leaves the commit unverified.

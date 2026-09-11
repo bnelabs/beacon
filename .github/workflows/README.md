@@ -7,8 +7,8 @@ workflows, Dependabot configuration, and a pull-request template.
 | --- | --- | --- |
 | `backend-ci.yml` | Compile and test the FastAPI/Celery/PyTorch backend on Python 3.12 and upload a coverage report. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
 | `frontend-ci.yml` | Build the React/Vite app on Node 24 and run the Playwright end-to-end suite. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
-| `docker-backend.yml` | Validate every compose file (seconds, on every relevant push/PR) and build the backend CPU image on a weekly schedule or on demand. | `push`/`pull_request` for compose validation; `schedule` + `workflow_dispatch` for the image build. |
-| `docker-frontend.yml` | Build the frontend image. | `push`/`pull_request` restricted to `frontend/Dockerfile` and the frontend package files, plus `workflow_dispatch`. |
+| `docker-backend.yml` | Validate every compose file and build the backend CPU image. **Manual only.** | `workflow_dispatch` (*Actions → Docker backend image → Run workflow*). |
+| `docker-frontend.yml` | Build the frontend image. **Manual only.** | `workflow_dispatch` (*Actions → Docker frontend image → Run workflow*). |
 | `security.yml` | Advisory dependency audits: `pip-audit` for `backend/requirements.txt` and `npm audit` for `frontend/`. Never blocks a merge. | `push` to `main`, every `pull_request`, weekly `schedule` (Mondays 06:17 UTC), manual `workflow_dispatch`. |
 | `../dependabot.yml` | Version-update PRs for `github-actions`, `pip`, `npm`, and `docker`. | GitHub's scheduler (see the policy below). |
 
@@ -67,7 +67,11 @@ Every workflow uses a per-ref `concurrency` group, but cancellation is
 
 ## Docker image builds (`docker-backend.yml`, `docker-frontend.yml`)
 
-These exist because `backend-ci.yml` and `frontend-ci.yml` test the code on the
+**Both are manual only: `workflow_dispatch` and nothing else.** They are the
+"build the real image" button, not a merge gate. No push, pull request or schedule
+can start them, so no wait they create can land in front of ordinary work.
+
+They exist because `backend-ci.yml` and `frontend-ci.yml` test the code on the
 *runner's* interpreter and Node install, and never build the images. That gap is
 not theoretical — both halves of it have already bitten this repository:
 
@@ -79,25 +83,40 @@ not theoretical — both halves of it have already bitten this repository:
   absent and the image build failed with *"Rollup failed to resolve import
   '@deck.gl/widgets'"* while Frontend CI stayed green. Now fixed with `npm ci`.
 
-**They are two workflows, not one, for cost reasons.** A single workflow with a
-shared `paths:` filter rebuilds the backend image (torch — the expensive one) on
-any frontend change. Scoping each trigger to its own paths keeps cost
-proportional to the change.
+**What manual-only gives up.** Nothing validates a Dockerfile, base image or
+compose change automatically any more. Two things cover most of that gap without
+a build:
+
+- Backend CI installs the *same* `backend/requirements*.txt` on the *same* Python
+  3.12 interpreter, so an uninstallable pin still fails there in ~2 minutes, and
+  a Python-version bump that cannot resolve is caught the same way.
+- Frontend CI runs `npm ci && npm run build` on Node 24, which catches a broken
+  dependency graph — but **not** a peer-dependency gap in the image, because that
+  only appears when the image resolves its own tree.
+
+Everything else — a broken base-image tag, a Dockerfile instruction error, a
+compose edit — is found when someone runs the workflow. Two changes make that
+cheap enough to do on demand:
 
 - `docker-backend.yml` runs `docker compose config` over the base file and both
-  overlays (`.cpu`, `.gpu`) on every relevant push/PR — that takes seconds — and
-  builds `backend/Dockerfile.cpu` **only on the weekly schedule or on demand**.
-  The image build installs torch, torch-geometric and scipy and takes 7-11
-  minutes, so it is deliberately kept out of the push/PR path: putting it in
-  front of ordinary work made every push wait. Nothing is lost, because Backend
-  CI installs the same requirements on the same Python 3.12 interpreter, and the
-  weekly run catches Dockerfile and base-image rot. Use *Actions → Docker
-  backend image → Run workflow* to validate a Dockerfile change before merging.
-- `docker-frontend.yml` builds `frontend/Dockerfile` on its own paths. This one
-  stays on pull requests because it takes ~80 seconds and it is the only thing
-  that catches a peer-dependency gap (it is how the `@deck.gl/widgets` breakage
-  was found).
-- Both use the GitHub Actions build cache (`type=gha,mode=max`).
+  overlays (`.cpu`, `.gpu`) in seconds, then builds `backend/Dockerfile.cpu`. The
+  build installs torch, torch-geometric and scipy: about **5 minutes warm**
+  (measured 282s) and up to **11 minutes cold**.
+- `docker-frontend.yml` builds `frontend/Dockerfile` in about 80 seconds.
+- Both use the GitHub Actions build cache (`type=gha,mode=max`), and the
+  Dockerfiles use BuildKit cache mounts, so a re-run that changes nothing about
+  the image finishes in seconds (measured 25s).
+
+Running them before merging a Dockerfile or base-image change is the point: a
+`backend/Dockerfile` bump was once merged on the strength of a build that had run
+*before* a later Dockerfile change, and proving it afterwards meant starting a
+five-minute job by hand.
+
+```bash
+# Trigger either workflow on main from the CLI instead of the Actions tab:
+gh workflow run docker-backend.yml --ref main
+gh workflow run docker-frontend.yml --ref main
+```
 
 ## Speed notes
 
@@ -110,13 +129,15 @@ Measured improvements, in order of impact:
 - **Backend installs use `uv`**, not pip: the CPU torch install went from 23s to
   **3s** and the project dependencies from 39s to **4s** (62s → 7s total). The
   uv cache is keyed on both requirements files.
-- **`backend/requirements*.txt` no longer triggers a Docker image build.**
-  Backend CI installs the same file on the same Python 3.12 interpreter, so a
-  bad pin is already caught in ~2 minutes. Treating it as a Docker trigger made
-  every Dependabot pip PR pay a ~10-minute image build.
-- **The Docker image builds are split and path-scoped** (`docker-backend.yml`,
-  `docker-frontend.yml`), so a frontend change never rebuilds the backend image
-  and vice versa.
+- **A requirements change never needs a Docker image build.** Backend CI
+  installs the same files on the same Python 3.12 interpreter, so an
+  uninstallable pin is caught in ~2 minutes without paying for a torch image
+  build.
+- **No image build runs automatically at all.** `docker-backend.yml` and
+  `docker-frontend.yml` are `workflow_dispatch`-only, so a push or a pull request
+  never pays for one. The trade is explicit: a Dockerfile or base-image change is
+  validated when someone runs the workflow, not on every change. See the Docker
+  section above for what still catches what.
 - **The Dockerfiles use BuildKit cache mounts** for the uv and npm caches. A
   cache mount is keyed by path rather than by layer hash, so downloaded wheels
   and tarballs survive a base-image change instead of being re-fetched.
@@ -145,8 +166,8 @@ everywhere.
 | Ecosystem | Routine version updates | Policy |
 | --- | --- | --- |
 | `github-actions` (`/`) | **Yes** — weekly, grouped, limit 3 | Low risk, high value, no application code. |
-| `docker` (`/backend`) | **Yes** — monthly, limit 2 | `python` and `nvidia/cuda` exempt from minor **and** major bumps. |
-| `docker` (`/frontend`) | **Yes** — monthly, limit 2 | `node` and `nginx` exempt from minor **and** major bumps. |
+| `docker` (`/backend`) | **Yes** — monthly, limit 2 | `python` and `nvidia/cuda` exempt from minor **and** major bumps. These PRs are no longer image-built automatically: run *Docker backend image → Run workflow* before merging one. |
+| `docker` (`/frontend`) | **Yes** — monthly, limit 2 | `node` and `nginx` exempt from minor **and** major bumps. Same manual-validation caveat. |
 | `pip` (`/backend`) | **No** — `open-pull-requests-limit: 0` | Security updates only. |
 | `npm` (`/frontend`) | **No** — `open-pull-requests-limit: 0` | Security updates only. |
 
@@ -169,7 +190,9 @@ dependency_file_not_resolvable {message: "Error while updating peer dependency."
 
 while walking `@tanstack/react-query`'s peers through deck.gl's large peer set.
 A job that fails on every run and produces nothing is worse than no job, and
-Frontend CI plus the Docker frontend image build already catch real breakage.
+Frontend CI catches real breakage. The image-build gap is covered on demand:
+`docker-frontend.yml` is the only thing that resolves peers *inside the image*, so
+run it manually when a frontend dependency changes.
 
 **Base images are exempt where the version is contractual.** `python` defines
 the interpreter the whole stack is compiled against (Dependabot called

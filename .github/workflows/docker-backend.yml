@@ -1,36 +1,21 @@
 name: Docker backend image
 
-# why: two very different costs live in this workflow, so they are gated
-# separately.
+# why: manual only. This workflow is the "build the real image" button, not a
+# merge gate. It is not triggered by pushes, pull requests or a schedule, so no
+# wait it creates can land in front of ordinary work. Start it from the Actions
+# tab (Run workflow) when a Dockerfile, base image or compose change needs
+# proving.
 #
-#   * `compose-config` takes seconds and runs on every relevant push/PR.
-#   * `build-backend` installs the whole ML stack into the image and takes about
-#     5 minutes warm, 11 cold. It runs on a push to main and never on a pull
-#     request, so review never waits on it. The `paths` filter below is what keeps
-#     ordinary pushes fast: this workflow only triggers at all when a Dockerfile,
-#     compose file or configs/ entry changed.
+# What that gives up, deliberately: nothing validates a Dockerfile or base-image
+# change automatically any more. Backend CI still installs the same requirements
+# on the same Python 3.12 interpreter, so an uninstallable pin still fails there
+# in ~2 minutes without a build; a broken Dockerfile or base image is found when
+# someone runs this.
 #
-# Backend CI also installs the same requirements on the same Python 3.12
-# interpreter, so a bad pin fails there in ~2 minutes without a build; the weekly
-# run additionally catches base-image rot. Use "Run workflow" to prove a
-# Dockerfile change before merging it.
+# Both jobs run on a dispatch: `compose-config` (seconds) validates the compose
+# files, and `build-backend` (~5 minutes warm, up to 11 cold) builds the CPU
+# image.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "backend/Dockerfile*"
-      - "docker-compose*.yml"
-      - "configs/**"
-      - ".github/workflows/docker-backend.yml"
-  pull_request:
-    paths:
-      - "backend/Dockerfile*"
-      - "docker-compose*.yml"
-      - "configs/**"
-      - ".github/workflows/docker-backend.yml"
-  schedule:
-    # Weekly, so base-image and Dockerfile rot is still found automatically.
-    - cron: "23 5 * * 1"
   workflow_dispatch:
 
 # why: never cancel on main - a cancelled run leaves the commit unverified.
@@ -66,19 +51,8 @@ jobs:
   build-backend:
     name: Build backend image (CPU)
     runs-on: ubuntu-latest
-    # why: never on pull_request. This installs torch, torch-geometric and scipy
-    # into the image and takes roughly 5 minutes warm (11 cold), and putting that
-    # in front of a PR makes review wait on it.
-    #
-    # It DOES run on a push to main, but the workflow-level `paths` filter above
-    # means only a push that actually touches a Dockerfile, compose file or
-    # configs/ triggers this workflow at all. Ordinary pushes never reach here.
-    #
-    # Gating it off push as well was a mistake: a base-image bump merged with only
-    # a stale pre-merge build behind it, and validating it then required starting
-    # a 5-minute job by hand. Validating on the relevant pushes closes that gap
-    # without putting a multi-minute build in front of anyone's pull request.
-    if: github.event_name != 'pull_request'
+    # why: manual only (see the header). Nothing below runs automatically, so the
+    # multi-minute build cannot sit in front of a push, a pull request or a review.
     timeout-minutes: 45
 
     steps:
