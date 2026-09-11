@@ -5,7 +5,7 @@ import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import RiskMap from '../components/map/RiskMap'
-import { useBanksByRegion } from '../hooks/useApi'
+import { normalizeNetworkGraph, useBanksByRegion, useNetworkGraph } from '../hooks/useApi'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import { cn } from '../utils/cn'
@@ -16,6 +16,12 @@ import {
   networkConnections
 } from '../data/network-connections'
 import { regions } from '../data/regions'
+
+// The bundled network file is demo data. It is only consulted when this flag is
+// explicitly set AND the backend has nothing to serve, and the fallback is
+// labelled in the UI so it cannot be mistaken for live exposures.
+const ALLOW_STATIC_NETWORK_FALLBACK =
+  import.meta.env.VITE_ALLOW_STATIC_NETWORK_FALLBACK === 'true'
 
 const API_REGION_BY_ID = {
   'us-northeast': 'north_america',
@@ -70,16 +76,64 @@ export default function RiskMapPage() {
   const totalAssets = banks.length
   const criticalAssets = useMemo(() => banks.filter((bank) => bank.risk_score && bank.risk_score >= 0.7), [banks])
 
+  const {
+    data: networkPayload,
+    isLoading: networkLoading,
+    isError: networkIsError
+  } = useNetworkGraph()
+
+  const network = useMemo(() => normalizeNetworkGraph(networkPayload), [networkPayload])
+
+  const fallbackActive = Boolean(
+    ALLOW_STATIC_NETWORK_FALLBACK &&
+      !networkLoading &&
+      (networkIsError || network.status === 'unavailable') &&
+      networkConnections.length > 0
+  )
+
+  // Exposures come from the backend. An institution-level edge is only loadable
+  // when both endpoints are present in the network payload; nothing is
+  // synthesised for edges the API did not send.
+  const connections = useMemo(() => {
+    if (network.status === 'available') {
+      return network.edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        exposure: Number(edge.exposure),
+        riskScore: typeof edge.risk_score === 'number' ? edge.risk_score : null,
+        layer: edge.layer,
+        kind: edge.kind
+      }))
+    }
+    if (fallbackActive) {
+      return networkConnections.map((connection) => ({
+        ...connection,
+        riskScore: typeof connection.riskScore === 'number' ? connection.riskScore : null
+      }))
+    }
+    return []
+  }, [network, fallbackActive])
+
   const networkSummary = useMemo(() => {
-    const totalExposure = networkConnections.reduce((sum, connection) => sum + connection.exposure, 0)
-    const averageRisk =
-      networkConnections.reduce((sum, connection) => sum + connection.riskScore, 0) / networkConnections.length
-    const riskiest = networkConnections.reduce(
-      (max, connection) => (connection.riskScore > max.riskScore ? connection : max),
-      networkConnections[0]
+    const totalExposure = connections.reduce(
+      (sum, connection) => sum + (Number(connection.exposure) || 0),
+      0
     )
-    return { totalExposure, averageRisk, riskiest }
-  }, [])
+    const scored = connections.filter((connection) => typeof connection.riskScore === 'number')
+    const averageRisk = scored.length
+      ? scored.reduce((sum, connection) => sum + connection.riskScore, 0) / scored.length
+      : null
+    const riskiest = scored.length
+      ? scored.reduce((max, connection) => (connection.riskScore > max.riskScore ? connection : max))
+      : null
+    const largest = connections.length
+      ? connections.reduce((max, connection) =>
+          (Number(connection.exposure) || 0) > (Number(max.exposure) || 0) ? connection : max
+        )
+      : null
+    return { totalExposure, averageRisk, riskiest, largest, count: connections.length }
+  }, [connections])
 
   const getRegionName = (regionId) => regions.find((region) => region.id === regionId)?.name || regionId
 
@@ -144,6 +198,7 @@ export default function RiskMapPage() {
               banks={banks}
               onConnectionClick={handleConnectionClick}
               resetToken={resetToken}
+              allowStaticNetworkFallback={ALLOW_STATIC_NETWORK_FALLBACK}
             />
           </Card>
         </div>
@@ -219,49 +274,71 @@ export default function RiskMapPage() {
                   <div>
                     <p className="text-xs text-bne-steel mb-1">Exposure</p>
                     <p className="font-semibold text-bne-ink text-lg">
-                      {formatExposure(selectedConnection.exposure)}
+                      {formatExposure(Number(selectedConnection.exposure) || 0)}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-bne-steel mb-1">Risk Level</p>
-                    <Badge
-                      variant={
-                        selectedConnection.riskScore < 0.3
-                          ? 'success'
-                          : selectedConnection.riskScore < 0.6
-                          ? 'default'
-                          : selectedConnection.riskScore < 0.8
-                          ? 'warning'
-                          : 'danger'
-                      }
-                    >
-                      {getRiskLevel(selectedConnection.riskScore)}
-                    </Badge>
+                    {typeof selectedConnection.riskScore === 'number' ? (
+                      <Badge
+                        variant={
+                          selectedConnection.riskScore < 0.3
+                            ? 'success'
+                            : selectedConnection.riskScore < 0.6
+                            ? 'default'
+                            : selectedConnection.riskScore < 0.8
+                            ? 'warning'
+                            : 'danger'
+                        }
+                      >
+                        {getRiskLevel(selectedConnection.riskScore)}
+                      </Badge>
+                    ) : (
+                      <Badge variant="default">Unavailable</Badge>
+                    )}
                   </div>
                 </div>
                 <div>
                   <p className="text-xs text-bne-steel mb-1">Risk Score</p>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 bg-bne-frost rounded-full h-2 overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all"
-                        style={{
-                          width: `${selectedConnection.riskScore * 100}%`,
-                          backgroundColor: getRiskColor(selectedConnection.riskScore)
-                        }}
-                      />
+                  {typeof selectedConnection.riskScore === 'number' ? (
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 bg-bne-frost rounded-full h-2 overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${selectedConnection.riskScore * 100}%`,
+                            backgroundColor: getRiskColor(selectedConnection.riskScore)
+                          }}
+                        />
+                      </div>
+                      <span className="text-xs font-mono font-semibold text-bne-ink">
+                        {(selectedConnection.riskScore * 100).toFixed(1)}%
+                      </span>
                     </div>
-                    <span className="text-xs font-mono font-semibold text-bne-ink">
-                      {(selectedConnection.riskScore * 100).toFixed(1)}%
-                    </span>
-                  </div>
+                  ) : (
+                    <p className="text-sm text-bne-steel">
+                      Not reported for this exposure. A risk score is never inferred
+                      from an exposure amount.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <p className="text-xs text-bne-steel mb-1">Transaction Volume</p>
                   <p className="font-medium text-bne-ink">
-                    {selectedConnection.transactionVolume.toLocaleString()} transactions
+                    {typeof selectedConnection.transactionVolume === 'number'
+                      ? `${selectedConnection.transactionVolume.toLocaleString()} transactions`
+                      : 'Unavailable'}
                   </p>
                 </div>
+                {selectedConnection.layer && (
+                  <div>
+                    <p className="text-xs text-bne-steel mb-1">Layer</p>
+                    <p className="font-medium text-bne-ink">
+                      {selectedConnection.layer}
+                      {selectedConnection.kind ? ` (${selectedConnection.kind})` : ''}
+                    </p>
+                  </div>
+                )}
               </div>
               <div className="mt-4 pt-4 border-t border-bne-frost">
                 <Button variant="outline" size="sm" className="w-full">
@@ -378,32 +455,52 @@ export default function RiskMapPage() {
 
           <Card>
             <h3 className="font-semibold text-bne-ink mb-4">Exposure Summary</h3>
+            {fallbackActive && (
+              <p className="mb-3 rounded-lg bg-amber-100 px-3 py-2 text-xs text-amber-900">
+                DEMO NETWORK — backend unavailable; these totals come from the bundled
+                sample file, not from live exposures.
+              </p>
+            )}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-bne-steel">Total Network Exposure</span>
                 <span className="text-sm font-semibold text-bne-ink">
-                  {formatExposure(networkSummary.totalExposure)}
+                  {networkSummary.count > 0 ? formatExposure(networkSummary.totalExposure) : 'Unavailable'}
                 </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-bne-steel">Average Corridor Risk</span>
-                <Badge
-                  variant={
-                    networkSummary.averageRisk < 0.3
-                      ? 'success'
-                      : networkSummary.averageRisk < 0.6
-                      ? 'default'
-                      : 'warning'
-                  }
-                  size="sm"
-                >
-                  {(networkSummary.averageRisk * 100).toFixed(1)}%
-                </Badge>
+                {networkSummary.averageRisk != null ? (
+                  <Badge
+                    variant={
+                      networkSummary.averageRisk < 0.3
+                        ? 'success'
+                        : networkSummary.averageRisk < 0.6
+                        ? 'default'
+                        : 'warning'
+                    }
+                    size="sm"
+                  >
+                    {(networkSummary.averageRisk * 100).toFixed(1)}%
+                  </Badge>
+                ) : (
+                  <Badge variant="default" size="sm">Unavailable</Badge>
+                )}
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-bne-steel">Highest Risk Corridor</span>
                 <span className="text-xs font-medium text-bne-ink">
-                  {getRegionName(networkSummary.riskiest.source)} → {getRegionName(networkSummary.riskiest.target)}
+                  {networkSummary.riskiest
+                    ? `${getRegionName(networkSummary.riskiest.source)} → ${getRegionName(networkSummary.riskiest.target)}`
+                    : 'Unavailable'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-bne-steel">Largest Exposure Corridor</span>
+                <span className="text-xs font-medium text-bne-ink">
+                  {networkSummary.largest
+                    ? `${getRegionName(networkSummary.largest.source)} → ${getRegionName(networkSummary.largest.target)}`
+                    : 'Unavailable'}
                 </span>
               </div>
             </div>
@@ -424,7 +521,7 @@ export default function RiskMapPage() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-bne-steel">Interbank Corridors</span>
-                <Badge variant="success" size="sm">{networkConnections.length}</Badge>
+                <Badge variant="success" size="sm">{networkSummary.count}</Badge>
               </div>
             </div>
           </Card>

@@ -38,9 +38,16 @@ RISK_THRESHOLD_MODERATE = 0.6
 RISK_THRESHOLD_HIGH = 0.85
 
 # Risk level thresholds (0-100 scale)
-RISK_THRESHOLD_LOW_PERCENT = 30
-RISK_THRESHOLD_MODERATE_PERCENT = 60
-RISK_THRESHOLD_HIGH_PERCENT = 80
+#
+# Derived from the 0-1 scale above rather than written out a second time. They
+# previously read 30/60/80, so the two scales disagreed at the top band: 0.82 was
+# "high" on the 0-1 scale and "critical" on the 0-100 scale. The decimal literals
+# had drifted from the source of truth they were meant to mirror, which is the
+# failure a second copy invites. Deriving them makes the disagreement
+# unrepresentable.
+RISK_THRESHOLD_LOW_PERCENT = int(round(RISK_THRESHOLD_LOW * 100))
+RISK_THRESHOLD_MODERATE_PERCENT = int(round(RISK_THRESHOLD_MODERATE * 100))
+RISK_THRESHOLD_HIGH_PERCENT = int(round(RISK_THRESHOLD_HIGH * 100))
 
 # Systemic risk thresholds
 SYSTEMIC_RISK_THRESHOLD_MODERATE = 60

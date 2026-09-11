@@ -1,8 +1,12 @@
 /**
- * Interbank network connections data
+ * Demo interbank network connections (FIXTURE, NOT LIVE DATA)
  *
- * Each connection represents interbank exposure between regions.
- * This data structure will be replaced with real-time API data in production.
+ * Each connection represents a fabricated interbank exposure between regions.
+ * These numbers are NOT production data and must never be shown without a
+ * visible demo label. Live exposures come from `GET /api/v1/network/graph`
+ * (see `useNetworkGraph`); the map only reads this file when the caller opts in
+ * via `VITE_ALLOW_STATIC_NETWORK_FALLBACK=true` AND the backend has no matrix,
+ * and when it does the UI says so explicitly.
  *
  * Risk levels: low (0-0.3), medium (0.3-0.6), high (0.6-0.8), critical (0.8-1.0)
  */

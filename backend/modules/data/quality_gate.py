@@ -19,6 +19,37 @@ The gate owns its verdict twice over:
   optimistic score that the gate would then inherit, because there is no
   parameter through which to inject one.
 
+Stationarity: reported, not certified away
+------------------------------------------
+
+The gate also runs the KPSS stationarity test (see
+:mod:`backend.modules.data.fractional`) on each non-empty value column, because
+a prediction engine that regresses non-stationary levels on one another can
+produce a spurious fit no accuracy score will reveal. The deliberate decision is
+to **report non-stationarity as a finding rather than fail certification by
+default**, and to make failing an explicit opt-in (``require_stationarity``).
+
+The reasoning is that this gate certifies *raw collected* data, and raw
+financial levels are non-stationary by construction: prices, exchange rates and
+nominal aggregates are I(1). If a unit root were fatal here, the gate would
+reject the standard input of the very models that are built to handle it -- the
+same module already ships fractional differencing precisely so that levels can
+be stationarised at the feature stage -- and operators would have no compliant
+way to ingest a macro series, which in practice means the gate gets disabled.
+Failing everything and silently passing everything are both worse than a
+finding that is always recorded: non-stationary and unassessable columns are
+written into the attestation with the statistic and the verdict, logged as a
+warning, and can be made blocking per deployment with
+``QualityPolicy.require_stationarity``.
+
+Degenerate input is never waved through. An empty payload is still rejected
+structurally and independently of the composite (section 2A of the executive
+review); a value column with no finite observations or with zero variance is a
+hard failure, because no stationarity verdict -- and no information -- can be
+extracted from it. A column that is simply too short to test is reported as a
+warning rather than a failure, since sample size is already governed by the
+row-count checks.
+
 Governance-critical state travels as an explicit argument, never through
 ``DataFrame.attrs``: pandas does not preserve ``attrs`` through ``groupby``,
 ``merge``, ``concat``, or most reshaping, so a pipeline that transforms the
@@ -40,6 +71,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
+import numpy as np
 import pandas as pd
 
 from backend.exceptions import (
@@ -48,6 +80,7 @@ from backend.exceptions import (
     PredictionBlockedError,
     SchemaValidationError,
 )
+from .fractional import KPSS_CRITICAL_VALUES, KPSS_MIN_OBSERVATIONS, kpss_test
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +216,9 @@ class QualityPolicy:
     value_columns: Sequence[str] = ("Value", "Close")
     max_staleness_days: Optional[int] = None
     score_weights: Optional[Mapping[str, float]] = None
+    check_stationarity: bool = True
+    stationarity_significance: str = "5%"
+    require_stationarity: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -425,6 +461,15 @@ class DataQualityGate:
                 else "no parseable Date column to assess freshness",
             )
 
+        # Stationarity is reported for every non-empty value column. It is
+        # deliberately outside ``_structural_checks`` so it does not enter the
+        # consistency sub-score: the sub-score measures completeness of the
+        # schema, while non-stationarity is a property of the data that is
+        # expected for legitimate levels and must not silently move the gate's
+        # arithmetic.
+        if policy.check_stationarity:
+            checks.extend(self._stationarity_checks(non_empty))
+
         # The composite is always the gate's own arithmetic.
         if not non_empty:
             resolved = QualityComponents(completeness=0.0, consistency=0.0)
@@ -607,6 +652,170 @@ class DataQualityGate:
             missing_ratio <= policy.max_missing_ratio,
             f"missing ratio {missing_ratio:.3f}, limit {policy.max_missing_ratio}",
         )
+        return checks
+
+    def _value_column(self, df: pd.DataFrame) -> Optional[str]:
+        """First policy value column present in ``df``, or ``None``.
+
+        The ``value_column`` structural check already fails a dataset that has
+        none, so the stationarity scan skips such a frame instead of duplicating
+        that verdict.
+        """
+        for column in self.policy.value_columns:
+            if column in df.columns:
+                return column
+        return None
+
+    def _stationarity_checks(
+        self, datasets: Mapping[str, pd.DataFrame]
+    ) -> List[QualityCheck]:
+        """KPSS findings for every non-empty value column.
+
+        One check per ``(dataset, value column)``. A column is *non-stationary*
+        only when KPSS rejects stationarity under **both** the level and the
+        trend null; rejecting only the level null is the signature of a
+        trend-stationary series and is acceptable. A variant that cannot be
+        computed (for example a trend so clean its residuals are numerical dust)
+        cannot prove a unit root, so it is reported as unassessable rather than
+        treated as evidence either way.
+
+        The pass/fail mapping is where the report-versus-fail decision lives:
+        an unfavourable or unassessable finding is recorded with
+        ``severity="warning"`` and ``passed=True`` unless
+        ``policy.require_stationarity`` is set, in which case it becomes a
+        ``critical`` failure that blocks certification. A column with no finite
+        observations or no variance is always a ``critical`` failure: there is
+        nothing to assess and nothing to certify. See the module docstring for
+        why reporting is the default for legitimate I(1) levels.
+        """
+        policy = self.policy
+        for variant in ("level", "trend"):
+            if policy.stationarity_significance not in KPSS_CRITICAL_VALUES[variant]:
+                raise ValueError(
+                    f"stationarity_significance {policy.stationarity_significance!r} "
+                    f"is not a tabulated KPSS level; expected one of "
+                    f"{sorted(KPSS_CRITICAL_VALUES[variant])}"
+                )
+
+        checks: List[QualityCheck] = []
+        for code, df in datasets.items():
+            column = self._value_column(df)
+            if column is None:
+                continue
+            name = f"stationarity[{code}.{column}]"
+
+            series = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
+            series = series[np.isfinite(series)]
+
+            if series.size == 0:
+                checks.append(
+                    QualityCheck(
+                        name=name,
+                        passed=False,
+                        severity="critical",
+                        detail=(
+                            "KPSS not assessable: the value column has no finite "
+                            "observations, so it carries no information"
+                        ),
+                    )
+                )
+                continue
+            if series.size < KPSS_MIN_OBSERVATIONS:
+                checks.append(
+                    QualityCheck(
+                        name=name,
+                        passed=True,
+                        severity="warning",
+                        detail=(
+                            f"KPSS not assessed: {series.size} finite observation(s), "
+                            f"need at least {KPSS_MIN_OBSERVATIONS}; sample size is "
+                            f"governed by the row-count checks"
+                        ),
+                    )
+                )
+                continue
+            if float(np.ptp(series)) == 0.0:
+                checks.append(
+                    QualityCheck(
+                        name=name,
+                        passed=False,
+                        severity="critical",
+                        detail=(
+                            "KPSS not assessable: the value column is constant, so "
+                            "its long-run variance is zero and it carries no "
+                            "information"
+                        ),
+                    )
+                )
+                continue
+
+            results: Dict[str, Optional[Any]] = {}
+            fragments: List[str] = []
+            for regression in ("level", "trend"):
+                try:
+                    result = kpss_test(
+                        series,
+                        regression=regression,
+                        significance=policy.stationarity_significance,
+                    )
+                except ValueError as exc:
+                    results[regression] = None
+                    fragments.append(f"{regression}: not assessable ({exc})")
+                else:
+                    results[regression] = result
+                    fragments.append(
+                        f"{regression}: {result.statistic:.3f} "
+                        f"({result.verdict} at {result.significance})"
+                    )
+
+            rejected = [
+                regression
+                for regression, result in results.items()
+                if result is not None and not result.stationary
+            ]
+            accepted = [
+                regression
+                for regression, result in results.items()
+                if result is not None and result.stationary
+            ]
+            if accepted:
+                verdict = "stationary"
+            elif len(rejected) == 2:
+                verdict = "non-stationary"
+            else:
+                verdict = "unassessable"
+
+            summary = "; ".join(fragments)
+            if verdict == "stationary":
+                checks.append(
+                    QualityCheck(
+                        name=name,
+                        passed=True,
+                        severity="critical",
+                        detail=f"KPSS stationarity not rejected ({summary})",
+                    )
+                )
+                continue
+
+            blocking = bool(policy.require_stationarity)
+            suffix = "" if blocking else "; reported, not blocking"
+            if verdict == "non-stationary":
+                detail = (
+                    f"KPSS rejects stationarity under both level and trend "
+                    f"({summary}){suffix}"
+                )
+            else:
+                detail = f"KPSS stationarity could not be assessed ({summary}){suffix}"
+            if not blocking:
+                logger.warning("Data-quality finding for %s: %s", name, detail)
+            checks.append(
+                QualityCheck(
+                    name=name,
+                    passed=not blocking,
+                    severity="critical" if blocking else "warning",
+                    detail=detail,
+                )
+            )
         return checks
 
     def _emit_alert(self, job_id: str, attestation: QualityAttestation) -> None:

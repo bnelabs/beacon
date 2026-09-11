@@ -22,6 +22,7 @@ from . import (
     analytics,
     alert_rules,
     reports,
+    network,
 )
 
 __all__ = [
@@ -46,4 +47,5 @@ __all__ = [
     "analytics",
     "alert_rules",
     "reports",
+    "network",
 ]

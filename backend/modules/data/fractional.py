@@ -79,6 +79,54 @@ calibrated decision rule. That matters for ``min_frac_diff_order``, which scans
 a grid and will therefore occasionally reject on a grid point by chance; the
 selected order should be read as a starting point, not a p-value.
 
+The complementary test
+----------------------
+
+ADF and KPSS answer opposite questions, and that is exactly why both belong
+here. ADF's null is "the series has a unit root", so it only rejects when there
+is strong evidence *for* stationarity; in a short sample it has low power and
+will fail to reject a stationary series. KPSS turns the null around -- "the
+series is stationary around a level, or around a deterministic trend" -- so it
+rejects when the evidence points to a unit root. Neither test alone decides:
+ADF rejects and KPSS does not is stationarity, both reject is a unit root, and
+the ambiguous middle is precisely the case where doing only one test would have
+lied by omission. This module previously had only ADF, so a series could pass
+``min_frac_diff_order`` on ADF evidence alone and still regress spuriously.
+
+``kpss_statistic`` computes the Lagrange-multiplier statistic of Kwiatkowski,
+Phillips, Schmidt and Shin (1992)::
+
+    eta = T**-2 * sum_t S_t**2 / s2(l),    S_t = sum_{i<=t} e_i
+
+where ``e`` are the residuals from regressing the series on a constant
+(``regression="level"``) or on a constant plus a deterministic trend
+(``regression="trend"``), and ``s2(l)`` is the Newey-West / Bartlett long-run
+variance estimator
+
+    s2(l) = gamma_0 + 2 * sum_{j=1..l} (1 - j/(l+1)) * gamma_j,
+    gamma_j = T**-1 * sum_t e_t e_{t-j}.
+
+The statistic is one-sided: *large* values are evidence against stationarity,
+so the stationary null is rejected when the statistic exceeds the tabulated
+upper-tail critical value. The truncation lag defaults to the same Schwert
+(1989) rule the ADF test uses, ``floor(4 * (T/100)**0.25)``, which KPSS also
+recommend for the Bartlett window; passing ``max_lag`` overrides it.
+
+The values in :data:`KPSS_CRITICAL_VALUES` are the asymptotic upper-tail
+percentiles from Table 1 of Kwiatkowski et al. (1992). They are reproduced
+rather than computed. **Every number was checked twice**: once against the
+original paper's Table 1 and once against the widely used ``statsmodels``
+implementation, which hard-codes the same table in
+``statsmodels/tsa/stattools.py`` (the ``kpss`` function); the two agree
+exactly. Note a correction to a common assumption: ``statsmodels`` does **not**
+use a Beta approximation for KPSS -- it interpolates this same Table 1 -- so
+writing a Beta approximation here would have introduced a second, unverifiable
+source of error rather than removing one. The p-value is therefore a linear
+interpolation of the statistic between the tabulated quantiles, which is only
+defined on the interval ``(0.01, 0.10)``; outside it the boundary value is
+reported, exactly as ``statsmodels`` does. The verdict compares the statistic
+directly with the critical value, so it does not depend on that interpolation.
+
 The honest caveat
 -----------------
 
@@ -96,7 +144,8 @@ pretend the answer is sample-free.
 from __future__ import annotations
 
 import math
-from typing import Dict, Optional, Sequence, Tuple, Union
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -109,6 +158,11 @@ __all__ = [
     "ADF_CRITICAL_VALUES",
     "min_frac_diff_order",
     "frac_diff_optimal",
+    "kpss_statistic",
+    "kpss_test",
+    "KPSSResult",
+    "KPSS_CRITICAL_VALUES",
+    "KPSS_MIN_OBSERVATIONS",
 ]
 
 ArrayLike = Union[Sequence[float], np.ndarray]
@@ -401,6 +455,275 @@ def adf_statistic(
         )
 
     return float(beta[1] / standard_error), int(lag)
+
+
+#: Asymptotic upper-tail critical values for the KPSS stationary-null test,
+#: by regression variant. Keys ``"level"`` (constant only) and ``"trend"``
+#: (constant plus deterministic trend) map to the four upper-tail percentiles
+#: of Table 1 in Kwiatkowski, Phillips, Schmidt and Shin (1992). These are
+#: *asymptotic* values: finite-sample percentiles drift with the sample size and
+#: the truncation lag, so a comparison against them is indicative, not exact.
+#: Every number was verified against the original paper's Table 1 and against
+#: the ``statsmodels`` ``kpss`` implementation, which hard-codes the identical
+#: table.
+KPSS_CRITICAL_VALUES: Dict[str, Dict[str, float]] = {
+    "level": {"10%": 0.347, "5%": 0.463, "2.5%": 0.574, "1%": 0.739},
+    "trend": {"10%": 0.119, "5%": 0.146, "2.5%": 0.176, "1%": 0.216},
+}
+
+#: The significance level each tabulated critical value corresponds to. Kept
+#: beside the table so the interpolation cannot drift out of step with it.
+_KPSS_PVALUES: Dict[str, float] = {"10%": 0.10, "5%": 0.05, "2.5%": 0.025, "1%": 0.01}
+
+#: Accepted spellings of the regression variant. ``"c"`` and ``"ct"`` are the
+#: labels ``statsmodels`` uses; ``"level"`` and ``"trend"`` are the words the
+#: KPSS paper uses for the same two models.
+_KPSS_REGRESSIONS: Dict[str, str] = {
+    "level": "level",
+    "c": "level",
+    "trend": "trend",
+    "ct": "trend",
+}
+
+#: Minimum usable sample for the KPSS long-run variance. Below this there are
+#: too few autocovariances for even the Schwert lag rule to mean anything.
+KPSS_MIN_OBSERVATIONS = 10
+
+
+def _normalize_kpss_regression(regression: str) -> str:
+    """Map a regression label onto ``"level"`` or ``"trend"``.
+
+    Raises:
+        ValueError: If the label is not one of the accepted spellings.
+    """
+    try:
+        return _KPSS_REGRESSIONS[str(regression).strip().lower()]
+    except KeyError as exc:
+        raise ValueError(
+            f"unknown KPSS regression {regression!r}; expected 'level' (alias "
+            f"'c') or 'trend' (alias 'ct')"
+        ) from exc
+
+
+@dataclass(frozen=True)
+class KPSSResult:
+    """Outcome of a KPSS stationary-null test, with its verdict made explicit.
+
+    ``stationary`` is the decision: ``True`` means the stationary null was *not*
+    rejected at ``significance``. ``p_value`` is an interpolation of the
+    statistic between the tabulated quantiles and is only meaningful on
+    ``(0.01, 0.10)``; outside that range a boundary value is reported, which is
+    why the decision is taken from the statistic against the critical value and
+    not from the p-value. All scalar fields are native Python types, so the
+    result serialises to JSON apart from nothing at all -- ``critical_values``
+    is a plain dict.
+    """
+
+    statistic: float
+    p_value: float
+    lags: int
+    regression: str
+    n_obs: int
+    critical_values: Dict[str, float]
+    stationary: bool
+    significance: str
+
+    @property
+    def verdict(self) -> str:
+        """``"stationary"`` or ``"non-stationary"`` at ``significance``."""
+        return "stationary" if self.stationary else "non-stationary"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "statistic": self.statistic,
+            "p_value": self.p_value,
+            "lags": self.lags,
+            "regression": self.regression,
+            "n_obs": self.n_obs,
+            "critical_values": dict(self.critical_values),
+            "stationary": self.stationary,
+            "significance": self.significance,
+            "verdict": self.verdict,
+        }
+
+
+def _kpss_components(
+    series: ArrayLike, regression: str, max_lag: Optional[int]
+) -> Tuple[float, int, int]:
+    """Shared KPSS machinery: ``(statistic, lag, n_obs)``.
+
+    Separated from the two public entry points so the low-level
+    :func:`kpss_statistic` can mirror :func:`adf_statistic`'s ``(statistic,
+    lag)`` return shape while :func:`kpss_test` can also report the sample size
+    without recomputing the regression.
+    """
+    variant = _normalize_kpss_regression(regression)
+    arr = _trim_leading_nonfinite(_as_1d(series))
+    n = arr.shape[0]
+
+    if n < KPSS_MIN_OBSERVATIONS:
+        raise ValueError(
+            f"series is too short for the KPSS test: need at least "
+            f"{KPSS_MIN_OBSERVATIONS} finite observations, got {n}"
+        )
+    if float(np.ptp(arr)) == 0.0:
+        raise ValueError(
+            "series is constant; the residuals have no variation and the KPSS "
+            "long-run variance is not identified"
+        )
+
+    centered = arr - float(np.mean(arr))
+    if variant == "trend":
+        design = np.column_stack([np.ones(n, dtype=float), np.arange(n, dtype=float)])
+        beta, _, _, _ = np.linalg.lstsq(design, arr, rcond=None)
+        residual = arr - design @ beta
+    else:
+        residual = centered
+
+    residual_ss = float(residual @ residual)
+    centered_ss = float(centered @ centered)
+    # A series explained *exactly* by the deterministic regressors leaves only
+    # floating-point dust as residuals. The KPSS ratio is then a 0/0 artefact
+    # whose value depends on summation noise -- a linear trend scored 3.3 here,
+    # which would have been read as a decisive rejection. Refuse to score that
+    # rather than report a number the data cannot support. The comparison is
+    # relative to the series' own variation so it is scale-free.
+    if not math.isfinite(residual_ss) or residual_ss <= np.finfo(float).eps * centered_ss:
+        raise ValueError(
+            "series is explained exactly by the deterministic regressors; the "
+            "KPSS long-run variance is not identified"
+        )
+
+    if max_lag is None:
+        # Schwert (1989), identical to the ADF default and the Bartlett-window
+        # rule recommended in Kwiatkowski et al. (1992).
+        lag = int(math.floor(4.0 * (n / 100.0) ** 0.25))
+    else:
+        lag = int(max_lag)
+        if lag < 0:
+            raise ValueError(f"max_lag must be non-negative, got {max_lag!r}")
+    lag = min(lag, max(0, n - 1))
+
+    eta = float(np.sum(np.cumsum(residual) ** 2)) / (n**2)
+
+    # Newey-West / Bartlett long-run variance, eq. 10 of Kwiatkowski et al.
+    # (1992). The weights 1 - j/(l+1) decay linearly to zero, which guarantees
+    # a non-negative estimate in the population; the numeric guard below catches
+    # the finite-sample cases where it is not.
+    long_run = residual_ss / n
+    for i in range(1, lag + 1):
+        long_run += (
+            2.0
+            * float(residual[i:] @ residual[:-i])
+            / n
+            * (1.0 - i / (lag + 1))
+        )
+
+    if not math.isfinite(long_run) or long_run <= 0.0:
+        raise ValueError(
+            "KPSS long-run variance estimate is non-positive; the series is "
+            "degenerate for this test"
+        )
+
+    return eta / long_run, lag, n
+
+
+def kpss_statistic(
+    series: ArrayLike, regression: str = "level", max_lag: Optional[int] = None
+) -> Tuple[float, int]:
+    """KPSS Lagrange-multiplier statistic for stationarity, ``(statistic, lag)``.
+
+    The null is stationarity and the alternative is a unit root, so this is the
+    mirror image of :func:`adf_statistic`: a *larger* statistic is evidence
+    against the null. Regress the series on a constant (``regression="level"``)
+    or a constant plus a deterministic trend (``regression="trend"``), take the
+    partial sums of the residuals and divide their normalised sum of squares by
+    the Newey-West / Bartlett long-run variance. The return shape deliberately
+    matches :func:`adf_statistic` -- ``(statistic, lag)`` as Python ``float``
+    and ``int`` -- so the two tests compose the same way.
+
+    A leading run of ``NaN`` (the fractional-difference warm-up) is dropped
+    before estimation; interior non-finite values are an error, exactly as in
+    the ADF path.
+
+    Args:
+        series: The series to test.
+        regression: ``"level"`` (alias ``"c"``) for stationarity around a
+            constant, ``"trend"`` (alias ``"ct"``) for stationarity around a
+            deterministic trend.
+        max_lag: Bartlett truncation lag ``l``. If ``None`` the Schwert rule
+            ``floor(4 * (T/100)**0.25)`` is used; either way it is capped so the
+            lagged autocovariances stay inside the sample.
+
+    Returns:
+        ``(statistic, lag_used)``.
+
+    Raises:
+        ValueError: If ``regression`` is unknown, the series has no finite
+            observations, contains non-finite values after the warm-up, is too
+            short, is constant, is explained exactly by its deterministic
+            regressors, leaves a non-positive long-run variance, or has a
+            negative ``max_lag``.
+    """
+    statistic, lag, _ = _kpss_components(series, regression, max_lag)
+    return statistic, lag
+
+
+def kpss_test(
+    series: ArrayLike,
+    regression: str = "level",
+    max_lag: Optional[int] = None,
+    significance: str = "5%",
+) -> KPSSResult:
+    """Full KPSS verdict: statistic, interpolated p-value and a decision.
+
+    Wraps :func:`kpss_statistic` with the critical-value comparison and a
+    boundary-limited p-value. The decision rejects the stationary null when the
+    statistic exceeds the tabulated critical value for ``significance``:
+    ``result.stationary is False`` means a unit root could not be ruled out.
+
+    Args:
+        series: The series to test.
+        regression: ``"level"``/``"c"`` or ``"trend"``/``"ct"``.
+        max_lag: Bartlett truncation lag; see :func:`kpss_statistic`.
+        significance: Key into :data:`KPSS_CRITICAL_VALUES`, e.g. ``"5%"``.
+
+    Returns:
+        A :class:`KPSSResult`.
+
+    Raises:
+        ValueError: For any condition that makes :func:`kpss_statistic` raise,
+            or if ``significance`` is not a tabulated level.
+    """
+    variant = _normalize_kpss_regression(regression)
+    table = KPSS_CRITICAL_VALUES[variant]
+    if significance not in table:
+        raise ValueError(
+            f"unknown significance {significance!r}; expected one of "
+            f"{sorted(table)}"
+        )
+
+    statistic, lag, n_obs = _kpss_components(series, variant, max_lag)
+
+    # Interpolate the statistic between the tabulated quantiles. Sorting by the
+    # critical value keeps the ordering correct whether or not the table is
+    # later reordered; outside the tabulated range np.interp clamps to the
+    # boundary p-value, which is the documented statsmodels behaviour.
+    ordered = sorted(table, key=lambda key: table[key])
+    p_value = float(
+        np.interp(statistic, [table[key] for key in ordered], [_KPSS_PVALUES[key] for key in ordered])
+    )
+
+    return KPSSResult(
+        statistic=statistic,
+        p_value=p_value,
+        lags=lag,
+        regression=variant,
+        n_obs=n_obs,
+        critical_values=dict(table),
+        stationary=statistic <= float(table[significance]),
+        significance=significance,
+    )
 
 
 def _validate_series_for_order_search(arr: np.ndarray) -> np.ndarray:
