@@ -6,7 +6,7 @@ workflows plus Dependabot configuration, and a pull-request template.
 | File | Purpose | Triggers |
 | --- | --- | --- |
 | `backend-ci.yml` | Compile and test the FastAPI/Celery/PyTorch backend on Python 3.12 and upload a coverage report. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
-| `frontend-ci.yml` | Build the React/Vite app on Node 20 and run the Playwright end-to-end suite. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
+| `frontend-ci.yml` | Build the React/Vite app on Node 24 and run the Playwright end-to-end suite. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
 | `security.yml` | Advisory dependency audits: `pip-audit` for `backend/requirements.txt` and `npm audit` for `frontend/`. Never blocks a merge. | `push` to `main`, every `pull_request`, weekly `schedule` (Mondays 06:17 UTC), manual `workflow_dispatch`. |
 | `../dependabot.yml` | Weekly version-update PRs for the `pip`, `npm`, `github-actions`, and `docker` ecosystems. | GitHub's scheduler (weekly). |
 
@@ -38,7 +38,14 @@ pushing again to the same branch cancels the older run instead of queueing two.
 
 ## Frontend CI (`frontend-ci.yml`)
 
-- **Node 20**, matching the `node:20-alpine` base in `frontend/Dockerfile`.
+- **Node 24** (Active LTS until 2028-04), matching the `node:24-alpine` base in
+  `frontend/Dockerfile`.
+- **All JavaScript actions run on Node 24.** `actions/checkout@v7`,
+  `actions/setup-node@v7`, `actions/setup-python@v7` and
+  `actions/upload-artifact@v7` all declare `runs.using: node24`, so no action is
+  forced onto a newer runtime and the Node 20 deprecation warning does not appear.
+  When bumping an action, check its `action.yml` for `using: node24` rather than
+  assuming the highest tag is current.
 - **Steps:** `npm ci` → `npm run build` → `npx playwright install --with-deps chromium`
   → `npm test` → upload Playwright traces/results only on failure.
 - **No live backend is started.** The Playwright suite is fully mocked:

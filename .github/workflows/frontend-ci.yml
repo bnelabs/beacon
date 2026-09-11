@@ -29,7 +29,7 @@ jobs:
   #     interception happens in the browser before the request leaves.
   # The suite is therefore run standalone against the mocked API.
   build-and-e2e:
-    name: Build and Playwright e2e (Node 20)
+    name: Build and Playwright e2e (Node 24)
     runs-on: ubuntu-latest
     # why: browser download + vite build + the long mocked navigation spec; 30 minutes
     # gives headroom on a cold cache while bounding a hung run.
@@ -41,14 +41,16 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          # why: matches the node:20-alpine base used by frontend/Dockerfile and keeps
-          # CI on the same major as the shipped runtime.
-          node-version: "20"
+          # why: Node 24 is the current Active LTS (until 2028-04) and matches the
+          # node:24-alpine base used by frontend/Dockerfile, so CI builds on the same
+          # major as the shipped runtime. GitHub's own runners execute JavaScript
+          # actions on Node 24 now, so 24 is also the consistent target for tooling.
+          node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 

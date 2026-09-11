@@ -1,7 +1,7 @@
 # ======================
 # Stage 1: Dependencies
 # ======================
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -10,7 +10,7 @@ RUN npm install --legacy-peer-deps
 # ======================
 # Stage 2: Builder
 # ======================
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -25,7 +25,7 @@ RUN npm run build
 # ======================
 # Stage 3: Production
 # ======================
-FROM nginx:1.27-alpine
+FROM nginx:1.30-alpine
 WORKDIR /usr/share/nginx/html
 
 RUN rm -rf /etc/nginx/conf.d/default.conf
