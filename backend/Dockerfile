@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # GPU-enabled Dockerfile for Linux with NVIDIA GPU
 # For CPU-only systems, use Dockerfile.cpu instead
 # Ubuntu 24.04 is used so the image ships Python 3.12 natively: the pinned
@@ -29,7 +30,9 @@ RUN ln -sf /usr/bin/python3.12 /usr/bin/python && \
 COPY requirements.txt .
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
-RUN uv pip install --system --no-cache -r requirements.txt
+# Cache mount, not a layer: wheels survive a base-image change. See Dockerfile.cpu.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements.txt
 
 # Copy backend application code
 COPY . .

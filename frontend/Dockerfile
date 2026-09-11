@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # ======================
 # Stage 1: Dependencies
 # ======================
@@ -10,7 +11,10 @@ COPY package.json package-lock.json* ./
 # `@deck.gl/widgets` (a peer of @deck.gl/react) was absent and `npm run build`
 # failed inside the image with "Rollup failed to resolve import
 # '@deck.gl/widgets'". `npm ci` is also faster and reproducible.
-RUN npm ci
+# The npm cache is a BuildKit cache mount so rebuilds reuse the downloaded
+# tarballs even when package-lock.json changes.
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
 
 # ======================
 # Stage 2: Builder

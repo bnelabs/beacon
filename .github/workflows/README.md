@@ -92,15 +92,30 @@ proportional to the change.
 
 ## Speed notes
 
-- **Backend installs use `uv`**, not pip. `uv pip install` resolves and installs
-  the pinned stack in seconds where pip took the better part of a minute, and
-  its cache is keyed on the two requirements files.
-- **The remaining dominant cost is the test run itself** (~98s for 150+ tests,
-  including a full offline pipeline execution that trains a model), not installs.
-- **Both Dockerfiles use `uv`**, and `frontend/Dockerfile` uses `npm ci`, which
-  is faster and reproducible.
-- **Docker builds are path-scoped and layer-cached**, so an ordinary code change
-  triggers no image build at all.
+Measured improvements, in order of impact:
+
+- **Coverage is off for pull requests.** Instrumentation slows this suite by
+  roughly **3.5x** (measured 0.63s → 2.19s on the fastest modules). PRs now run
+  plain pytest for a fast pass/fail signal; coverage is produced on `main` and
+  on manual dispatches, where the report and artifact are actually used.
+- **Backend installs use `uv`**, not pip: the CPU torch install went from 23s to
+  **3s** and the project dependencies from 39s to **4s** (62s → 7s total). The
+  uv cache is keyed on both requirements files.
+- **`backend/requirements*.txt` no longer triggers a Docker image build.**
+  Backend CI installs the same file on the same Python 3.12 interpreter, so a
+  bad pin is already caught in ~2 minutes. Treating it as a Docker trigger made
+  every Dependabot pip PR pay a ~10-minute image build.
+- **The Docker image builds are split and path-scoped** (`docker-backend.yml`,
+  `docker-frontend.yml`), so a frontend change never rebuilds the backend image
+  and vice versa.
+- **The Dockerfiles use BuildKit cache mounts** for the uv and npm caches. A
+  cache mount is keyed by path rather than by layer hash, so downloaded wheels
+  and tarballs survive a base-image change instead of being re-fetched.
+- **Docker builds keep `type=gha,mode=max` layer caching**, so only a run that
+  genuinely changes a layer pays the full install cost.
+
+What remains dominant is the test work itself: a full offline pipeline
+execution that trains a model, plus FastAPI application start-up.
 
 ## Security audit (`security.yml`)
 
@@ -177,7 +192,8 @@ TORCH_VERSION="$(grep -E '^torch==' backend/requirements.txt | head -1 | cut -d=
 uv pip install --system "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
 uv pip install --system -r backend/requirements.txt -r backend/requirements-dev.txt
 python -m compileall -q backend
-python -m pytest backend/tests --cov=backend --cov-report=term-missing
+python -m pytest backend/tests                       # fast, no coverage
+python -m pytest backend/tests --cov=backend --cov-report=term-missing   # optional
 ```
 
 **Frontend** (from `frontend/`):

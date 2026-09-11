@@ -94,22 +94,29 @@ jobs:
         # the slower test collection step.
         run: python -m compileall -q backend
 
-      - name: Run tests with coverage
+      - name: Run tests
         env:
           PYTHONUNBUFFERED: "1"
-        # why: the target and coverage flags are passed explicitly rather than relying
-        # solely on the root pytest.ini. pytest.ini now uses the correct `[pytest]`
-        # header and sets `testpaths = backend/tests`, but keeping the flags here makes
-        # the CI invocation self-describing and immune to future config drift.
+        # why: coverage instrumentation slows this suite by roughly 3.5x
+        # (measured 0.63s -> 2.19s on the fastest modules). A pull request needs a
+        # fast pass/fail signal, so coverage runs only on main and manual
+        # dispatches, where the report and artifact are actually consumed.
+        # pytest.ini no longer forces --cov, so this step fully controls it.
         run: |
-          python -m pytest backend/tests \
-            --cov=backend \
-            --cov-report=xml \
-            --cov-report=html \
-            --cov-report=term-missing
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "Pull request: running tests without coverage."
+            python -m pytest backend/tests
+          else
+            echo "Running tests with coverage."
+            python -m pytest backend/tests \
+              --cov=backend \
+              --cov-report=xml \
+              --cov-report=html \
+              --cov-report=term-missing
+          fi
 
       - name: Upload coverage artifact
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v7
         with:
           name: backend-coverage

@@ -10,19 +10,26 @@ name: Docker backend image
 # workflow with a shared `paths:` filter would rebuild this (expensive, torch
 # install) image whenever a frontend file changed. Scoping the trigger to
 # backend and compose paths keeps the cost proportional to the change.
+#
+# `backend/requirements*.txt` is deliberately NOT a trigger.
+#
+# Backend CI already installs the same file on the same Python 3.12 interpreter,
+# so a requirements change that cannot install is caught there in ~2 minutes.
+# Rebuilding this image for it cost ~10 minutes and fired on every Dependabot pip
+# PR, which is exactly the kind of wait this workflow should not create.
+# What actually needs a real build is a Dockerfile change - the base interpreter,
+# apt packages, COPY layout - and those are rare and still validated on PRs.
 on:
   push:
     branches: [main]
     paths:
       - "backend/Dockerfile*"
-      - "backend/requirements*.txt"
       - "docker-compose*.yml"
       - "configs/**"
       - ".github/workflows/docker-backend.yml"
   pull_request:
     paths:
       - "backend/Dockerfile*"
-      - "backend/requirements*.txt"
       - "docker-compose*.yml"
       - "configs/**"
       - ".github/workflows/docker-backend.yml"

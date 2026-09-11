@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # CPU-only Dockerfile for macOS, Linux without GPU, and general use
 # Python 3.12 is required by the pinned scientific stack (scipy 1.18,
 # scikit-learn 1.9, matplotlib 3.11 all require >= 3.12/3.11).
@@ -23,11 +24,14 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 
 # Install Python packages into the system interpreter.
-# UV_COMPILE_BYTECODE keeps application start-up fast; caching is disabled
-# because the layer cache already covers rebuilds.
+# UV_COMPILE_BYTECODE keeps application start-up fast. The uv cache is a BuildKit
+# cache mount rather than a layer: it is keyed by path, not by layer hash, so the
+# downloaded wheels survive even a base-image change and rebuilds do not re-fetch
+# several hundred MB of torch.
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
-RUN uv pip install --system --no-cache -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements.txt
 
 # Copy backend application code to backend/ subdirectory
 COPY . backend/
