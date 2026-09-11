@@ -92,6 +92,10 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "celery"
         update-types: ["version-update:semver-major"]
+      # redis-py 5 -> 8 is three majors of client API change against a Celery
+      # integration; it needs a deliberate upgrade, not a bot PR.
+      - dependency-name: "redis"
+        update-types: ["version-update:semver-major"]
 
   # --- JavaScript (frontend) -------------------------------------------------
   - package-ecosystem: npm
@@ -149,9 +153,17 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     ignore:
-      # nginx majors are a mainline/stable line change; take them deliberately.
+      # The Node major is the frontend's runtime contract: it must match CI and
+      # the base image, and it should track an Active LTS line, not the newest
+      # release. Dependabot opened a 24-alpine -> 26-alpine PR as soon as this
+      # entry existed, and Node 26 is not LTS until 2026-10-28. Deliberate move.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # nginx publishes both a stable line (even minor, e.g. 1.30) and a
+      # mainline line (odd minor, e.g. 1.31). A minor bump therefore switches
+      # from stable to mainline, which is not a routine update.
       - dependency-name: "nginx"
-        update-types: ["version-update:semver-major"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
 # NOTE: there is deliberately NO `docker` entry for the repository root.
 #
