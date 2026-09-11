@@ -25,7 +25,7 @@ RUN npm run build
 # ======================
 # Stage 3: Production
 # ======================
-FROM nginx:1.30-alpine
+FROM nginx:1.31-alpine
 WORKDIR /usr/share/nginx/html
 
 RUN rm -rf /etc/nginx/conf.d/default.conf
