@@ -9,6 +9,27 @@ import LoadingSpinner from './ui/LoadingSpinner'
 // hooks/useCountries.js for why localhost:3456 is the wrong default here.
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
+// Fetch and refuse a non-2xx response. Previously the queries returned
+// res.json() unconditionally, so a 404 yielded {"detail": "Not Found"} and the
+// category silently came back empty — which is how a wrong URL went unnoticed.
+async function fetchJson(url) {
+  const res = await fetch(url)
+  if (!res.ok) {
+    throw new Error(`${url} returned HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+// The list endpoints are inconsistent: /jobs and /models and /catalogue answer
+// with a bare array, while /countries wraps it in a `countries` key. Normalise
+// both shapes rather than assuming one, and treat anything else as no results
+// instead of throwing inside a render.
+function asList(data, key) {
+  if (Array.isArray(data)) return data
+  if (data && key && Array.isArray(data[key])) return data[key]
+  return []
+}
+
 // Fuzzy match scoring
 function fuzzyMatch(str, pattern) {
   const patternLower = pattern.toLowerCase()
@@ -42,43 +63,37 @@ export default function GlobalSearch() {
   const inputRef = useRef(null)
   const { navigate } = useRouter()
 
-  // Fetch searchable data
+  // Fetch searchable data. Each query is independent, so a category whose
+  // endpoint is unavailable degrades on its own rather than emptying the palette.
+  // URLs match the existing hooks in useApi.js: a trailing slash is not required
+  // by any of them, and /api/models is the path the rest of the app uses for the
+  // model catalogue (the backend mounts it at both /api/models and /api/v1/models).
   const { data: jobsData } = useQuery({
     queryKey: ['jobs'],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/api/v1/jobs/`)
-      return res.json()
-    },
+    queryFn: () => fetchJson(`${API_BASE}/api/v1/jobs`),
     enabled: isOpen,
     staleTime: 30000
   })
 
   const { data: modelsData } = useQuery({
     queryKey: ['models'],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/api/v1/models/`)
-      return res.json()
-    },
+    queryFn: () => fetchJson(`${API_BASE}/api/models`),
     enabled: isOpen,
     staleTime: 60000
   })
 
+  // Was /api/v1/data-catalogue/, which does not exist. The catalogue route is
+  // /api/v1/catalogue (see docs/api-endpoints.md).
   const { data: catalogueData } = useQuery({
     queryKey: ['catalogue'],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/api/v1/data-catalogue/`)
-      return res.json()
-    },
+    queryFn: () => fetchJson(`${API_BASE}/api/v1/catalogue`),
     enabled: isOpen,
     staleTime: 60000
   })
 
   const { data: countriesData } = useQuery({
     queryKey: ['countries-search'],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE}/api/v1/countries/`)
-      return res.json()
-    },
+    queryFn: () => fetchJson(`${API_BASE}/api/v1/countries/`),
     enabled: isOpen,
     staleTime: 60000
   })
@@ -100,65 +115,59 @@ export default function GlobalSearch() {
       { id: 'help', title: 'Help', category: 'Page', page: 'help', icon: '❓' }
     )
 
-    // Jobs
-    if (jobsData?.jobs) {
-      jobsData.jobs.forEach(job => {
-        items.push({
-          id: `job-${job.id}`,
-          title: `Job #${job.id} - ${job.job_type}`,
-          subtitle: job.status,
-          category: 'Job',
-          page: 'jobs',
-          icon: job.status === 'completed' ? '✅' : job.status === 'running' ? '▶️' : job.status === 'failed' ? '❌' : '⏸️',
-          meta: `${job.model_name || 'N/A'}`
-        })
+    // Jobs — GET /api/v1/jobs answers with a bare array of JobResponse.
+    asList(jobsData, 'jobs').forEach(job => {
+      items.push({
+        id: `job-${job.id}`,
+        title: `Job #${job.id} - ${job.job_type}`,
+        subtitle: job.status,
+        category: 'Job',
+        page: 'jobs',
+        icon: job.status === 'completed' ? '✅' : job.status === 'running' ? '▶️' : job.status === 'failed' ? '❌' : '⏸️',
+        meta: `${Math.round(job.progress ?? 0)}%`
       })
-    }
+    })
 
-    // Models
-    if (modelsData?.models) {
-      modelsData.models.forEach(model => {
-        items.push({
-          id: `model-${model.id}`,
-          title: model.model_name,
-          subtitle: model.model_type,
-          category: 'Model',
-          page: 'models',
-          icon: '🧠',
-          meta: model.version
-        })
+    // Models — ModelSummary exposes model_id / name / model_version. The previous
+    // code read id / model_name / version, none of which exist on that schema.
+    asList(modelsData, 'models').forEach(model => {
+      items.push({
+        id: `model-${model.model_id}`,
+        title: model.name,
+        subtitle: model.model_type,
+        category: 'Model',
+        page: 'models',
+        icon: '🧠',
+        meta: model.model_version
       })
-    }
+    })
 
-    // Catalogue
-    if (catalogueData?.items) {
-      catalogueData.items.forEach(item => {
-        items.push({
-          id: `catalogue-${item.id}`,
-          title: item.name || item.series_id,
-          subtitle: item.description,
-          category: 'Data Catalogue',
-          page: 'datasources',
-          icon: '📁',
-          meta: item.source
-        })
+    // Catalogue — DataCatalogueItemResponse; the source is a nested object, and
+    // there is no `series_id` field on it.
+    asList(catalogueData, 'items').forEach(item => {
+      items.push({
+        id: `catalogue-${item.id}`,
+        title: item.name,
+        subtitle: item.description,
+        category: 'Data Catalogue',
+        page: 'datasources',
+        icon: '📁',
+        meta: item.data_source?.name
       })
-    }
+    })
 
-    // Countries
-    if (countriesData?.countries) {
-      countriesData.countries.forEach(country => {
-        items.push({
-          id: `country-${country.id}`,
-          title: country.country_name,
-          subtitle: country.region,
-          category: 'Country',
-          page: 'countries',
-          icon: '🏴',
-          meta: country.country_code
-        })
+    // Countries — CountryListResponse is a wrapper object, so this one needs the key.
+    asList(countriesData, 'countries').forEach(country => {
+      items.push({
+        id: `country-${country.id}`,
+        title: country.country_name,
+        subtitle: country.region,
+        category: 'Country',
+        page: 'countries',
+        icon: '🏴',
+        meta: country.country_code
       })
-    }
+    })
 
     return items
   }, [jobsData, modelsData, catalogueData, countriesData])

@@ -28,6 +28,16 @@ matplotlib==3.11.1
 seaborn==0.13.2
 networkx==3.6.1
 plotly==7.0.0
+# Toto 2.0, the frozen node encoder (Apache-2.0; see TOTO_LICENSE in
+# modules/engine/foundation_encoders.py). The import lives inside
+# TotoEncoder.__init__ rather than at module scope, which is why the AST audit
+# recorded in docs/EXECUTIVE_REVIEW_REMEDIATION.md - which inspected module-level
+# imports - did not flag it. Undeclared, the encoder could not load at all: the
+# backend image had no `toto2` module, so every TotoEncoder construction raised
+# ModuleNotFoundError in the deployed stack while the README advertised the
+# encoder as a working feature. Its own dependencies (einops, gluonts[torch],
+# safetensors, jaxtyping, dd-unit-scaling, huggingface-hub) arrive with it.
+toto-2==2.0.0
 
 # Data Sources
 yfinance==0.2.46

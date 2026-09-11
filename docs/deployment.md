@@ -223,4 +223,39 @@ BEACON_MODEL_DIR=/home/komedi/models/beacon/toto \
 /home/komedi/Denemeler/beacon-venv/bin/python -m ruff check backend --select E9,F63,F7,F82
 ```
 
+Then at the container level:
+
+```bash
+docker compose ps                      # frontend must be (healthy), not merely Up
+
+# The Toto encoder must load inside the image. Its Python package is declared in
+# backend/requirements.txt; if that pin is ever dropped, construction raises
+# ModuleNotFoundError rather than failing at first prediction.
+docker compose exec backend python -c "
+from backend.modules.engine.foundation_encoders import TotoEncoder
+e = TotoEncoder(model_id='Datadog/Toto-2.0-313m', device='cpu')
+print('encoder OK:', e.n_parameters(), e.embed_dim)"
+```
+
+### Rebuilding: `backend` and `celery-worker` are separate images
+
+They are built from the same context (`./backend`) but are **distinct images**,
+so `docker compose build backend` does not update the worker. Rebuilding only the
+API leaves the worker on the previous code, and because the worker is where job
+progress is produced, live updates then appear half-broken in a way that is easy
+to misread. Rebuild everything, or name both:
+
+```bash
+docker compose build backend celery-worker frontend
+docker compose up -d
+```
+
+### The frontend healthcheck
+
+`beacon-frontend` probes `http://127.0.0.1/health`, **not** `localhost`. nginx
+listens on IPv4 only, while the image's `/etc/hosts` maps `localhost` to `::1`
+first, so a `localhost` probe is refused and the container reports unhealthy for
+its whole life while serving every real request correctly. If the frontend shows
+`(unhealthy)`, check that probe first.
+
 See `docs/data_connectors.md` for the NBFI/CCP ingestion feeds.

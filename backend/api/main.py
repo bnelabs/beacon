@@ -9,7 +9,8 @@ Copyright © 2025 BNE (Banking Network Engine). All rights reserved.
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import asyncio
 import logging
 import os
 
@@ -38,6 +39,7 @@ from .routes import (
 )
 from backend.database import init_db, close_db
 from backend.exceptions import BeaconError
+from backend.api.job_events import relay_job_updates
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +69,20 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Relay job updates from the bus to this process's WebSocket clients.
+    # Job progress is written by the Celery worker — a different process — so the
+    # socket cannot be driven by in-process calls alone. See
+    # backend/api/job_events.py and docs/api.md.
+    relay_task = asyncio.create_task(
+        relay_job_updates(jobs_ws.manager.broadcast), name="job-update-relay"
+    )
+
     logger.info("Application startup complete")
     yield
     # Shutdown
+    relay_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await relay_task
     logger.info("Closing database connections...")
     close_db()
     logger.info("Application shutdown complete")

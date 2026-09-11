@@ -272,3 +272,44 @@ test('navigates the application and exercises primary interactions', async ({ pa
   await expect(page.getByText('Popular walkthroughs')).toBeVisible()
   await expect(page.getByText('Ask Beacon Support')).toBeVisible()
 })
+
+// Regression guard for the global search palette. The previous version read
+// `.jobs` / `.models` / `.items` off endpoints that return bare arrays, and
+// fetched /api/v1/data-catalogue, which does not exist — so three of its four
+// live categories silently returned nothing. The old test opened the palette and
+// pressed Escape without ever asserting that a result appeared, which is why the
+// breakage was invisible in CI.
+test('global search finds jobs, models and catalogue items', async ({ page }) => {
+  await page.goto('/')
+
+  const maybeLaterButton = page.getByRole('button', { name: 'Maybe Later' })
+  if (await maybeLaterButton.isVisible()) {
+    await maybeLaterButton.click()
+  }
+
+  const openSearch = async () => {
+    await page.keyboard.press('Control+k')
+    const input = page.getByPlaceholder('Search pages, jobs, models, countries...')
+    await expect(input).toBeVisible()
+    return input
+  }
+
+  const input = await openSearch()
+
+  // A job, from the bare array that /api/v1/jobs returns.
+  await input.fill('data_collection')
+  await expect(page.getByText('Job #101 - data_collection')).toBeVisible()
+
+  // A model, from the bare array that /api/models returns. Read from
+  // `model_id`/`name`, which is what ModelSummary actually declares.
+  await input.fill('Liquidity Forecaster')
+  await expect(page.getByText('Liquidity Forecaster').first()).toBeVisible()
+
+  // A catalogue item, from /api/v1/catalogue — the URL that previously 404'd.
+  await input.fill('FDIC Liquidity Coverage')
+  await expect(page.getByText('FDIC Liquidity Coverage')).toBeVisible()
+
+  // A query that matches nothing must say so rather than render a blank panel.
+  await input.fill('zzzz-no-such-thing')
+  await expect(page.getByText(/No results found/)).toBeVisible()
+})

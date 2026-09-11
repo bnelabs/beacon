@@ -2,13 +2,13 @@
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
-from typing import Dict, Set
+from typing import Set
 import asyncio
 import json
 import logging
 
 from backend.database import get_db
-from backend.models.job import Job
+from backend.api.job_events import job_payload
 
 logger = logging.getLogger(__name__)
 
@@ -108,10 +108,12 @@ async def websocket_endpoint(
 
 
 async def broadcast_job_update(job_data: dict):
-    """
-    Broadcast job update to all connected clients.
+    """Send one job update to every client attached to **this** process.
 
-    This should be called when a job's status or progress changes.
+    Local fan-out only. Job progress is normally written by the Celery worker, a
+    separate process, so callers should publish through
+    ``backend.api.job_events.publish_job_update`` instead; the relay task started
+    in ``backend/api/main.py`` subscribes to that bus and calls this.
     """
     message = {
         "type": "job_update",
@@ -120,23 +122,5 @@ async def broadcast_job_update(job_data: dict):
     await manager.broadcast(message)
 
 
-def serialize_job(job: Job) -> dict:
-    """Serialize job model to dict for WebSocket transmission"""
-    return {
-        "id": job.id,
-        "job_id": job.id,
-        "model_id": job.model_id,
-        "job_type": job.job_type,
-        "status": job.status,
-        "progress": job.progress,
-        "config": job.config,
-        "result": job.result,
-        "error": job.error_message,
-        "created_at": job.created_at.isoformat() if job.created_at else None,
-        "started_at": job.started_at.isoformat() if job.started_at else None,
-        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-    }
-
-
 # Export for use in other modules
-__all__ = ['router', 'broadcast_job_update', 'serialize_job', 'manager']
+__all__ = ['router', 'broadcast_job_update', 'job_payload', 'manager']

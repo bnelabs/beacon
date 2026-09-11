@@ -8,6 +8,7 @@ import json
 
 from backend.models.job import Job
 from backend.schemas.job import JobCreate
+from backend.api.job_events import job_payload, publish_job_update
 from .enhanced_error_translator import translate_error_enhanced
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,16 @@ class JobService:
 
     def __init__(self, db: Session):
         self.db = db
+
+    def _publish(self, job: Job) -> None:
+        """Broadcast a committed job state to the WebSocket bus.
+
+        Best-effort by construction: ``publish_job_update`` never raises, so a
+        Redis outage cannot fail a job or mask the real result of this call.
+        Called only after a commit, so the payload never advertises state that
+        was rolled back.
+        """
+        publish_job_update(job_payload(job))
 
     def list_jobs(
         self,
@@ -78,6 +89,9 @@ class JobService:
             self.db.commit()
             logger.error(f"Failed to submit job {db_job.id} to Celery: {e}")
 
+        # Publishes whichever state was committed above, so a dispatch failure is
+        # pushed to listeners as promptly as a success.
+        self._publish(db_job)
         return db_job
 
     def update_job_status(
@@ -118,6 +132,9 @@ class JobService:
 
         self.db.commit()
         self.db.refresh(db_job)
+        # The single choke point for job state: every progress tick from the
+        # Celery worker and every API-driven change passes through here.
+        self._publish(db_job)
         return db_job
 
     def cancel_job(self, job_id: int) -> bool:
@@ -142,4 +159,7 @@ class JobService:
 
         self.db.commit()
         logger.info(f"Cancelled job {job_id}")
+        # cancel_job writes status directly rather than via update_job_status, so
+        # it needs its own publish to keep listeners in step.
+        self._publish(db_job)
         return True

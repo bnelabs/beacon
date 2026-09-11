@@ -71,22 +71,35 @@ three pages render no breadcrumb.
 ## Global search (⌘K / Ctrl+K)
 
 `components/GlobalSearch.jsx` opens on ⌘K and searches a merged list, navigable
-with ↑/↓ and Enter.
+with ↑/↓ and Enter. It merges nine static *Page* entries with four live
+categories: Jobs, Models, Data Catalogue and Countries.
 
-**Only two of its four live categories actually return results.** The static
-*Page* entries (nine of them) and *Countries* work. The other three are broken
-by two separate mismatches with the API:
+The live endpoints are **inconsistent about their envelope**, so the component
+normalises rather than assumes: `/api/v1/jobs`, `/api/models` and
+`/api/v1/catalogue` answer with a bare array, while `/api/v1/countries/` wraps
+its rows in a `countries` key. `asList(data, key)` accepts either.
 
-| Category | What the component does | Reality |
+Responses are read through a small `fetchJson` helper that **throws on a non-2xx
+status**. That is deliberate: these queries previously called `res.json()`
+unconditionally, and a 404 body of `{"detail": "Not Found"}` parses perfectly
+well, so a wrong URL produced a silently empty category instead of an error.
+
+That is exactly what had happened — all four categories were once broken, in two
+different ways, and none of it was visible:
+
+| Category | Was | Now |
 |---|---|---|
-| Jobs | reads `jobsData.jobs` from `/api/v1/jobs/` | that endpoint returns a bare **array** (`List[JobResponse]`), so `.jobs` is `undefined` |
-| Models | reads `modelsData.models` from `/api/v1/models/` | likewise a bare **array** (`List[ModelSummary]`) |
-| Data Catalogue | fetches `/api/v1/data-catalogue/` | that route does not exist — it is `/api/v1/catalogue/` (a **404**) |
+| Jobs | read `jobsData.jobs` off a bare array | `asList(jobsData, 'jobs')` |
+| Models | read `modelsData.models`, and `id`/`model_name`/`version` instead of `model_id`/`name`/`model_version` | `asList(modelsData, 'models')` with the real field names |
+| Data Catalogue | fetched `/api/v1/data-catalogue/`, which does not exist | `/api/v1/catalogue` |
 
-None of the three checks `res.ok`, so all three fail silently and the search
-simply shows fewer categories than it claims. Only *Countries* matches the
-component's assumption, because `CountryListResponse` really is an object with a
-`countries` key.
+Only *Countries* had matched the component's assumption. The e2e mocks had been
+written to match the broken caller — one served `/api/v1/data-catalogue` with
+`{items: [...]}`, and the mock's default fallback answered **200 with `{}`** for
+any unknown path, so a wrong URL looked like a successful empty result. Both are
+corrected: the mocks now mirror the real API and unknown paths 404, and
+`full-frontend.spec.js` asserts that a search for a job, a model and a catalogue
+item actually returns each one.
 
 ## Onboarding tour
 
@@ -120,26 +133,31 @@ with a per-job reason (`BatchCancelResponse`: `cancelled`, `failed`,
 `total_requested`, `total_cancelled`). The Jobs page drives it through
 `useBatchCancelJobs()` with a multi-select mode.
 
-**Real-time updates do not.** The Jobs page calls `useJobsWebSocket`, but
-neither half is connected:
+**Real-time updates work, over Redis.** The socket lives in the API process but
+most progress is written by the Celery worker, so the delivery is routed through
+Redis rather than done in-process — `JobService.update_job_status` publishes, and
+a relay task in the API lifespan fans out to connected clients. The full
+protocol and the reasoning are in the WebSocket section of [`api.md`](api.md).
 
-1. The server never broadcasts. `broadcast_job_update()` exists in
-   `backend/api/routes/jobs_ws.py` and is listed in `__all__`, but nothing calls
-   it, so no `job_update` frame is ever sent.
-2. The client dials the wrong port. The hook builds
-   `ws://${window.location.hostname}:8000/api/v1/jobs/ws`, but the backend is
-   published on **3456** and nginx proxies `/api/` from **9876**. Nothing
-   listens on 8000 in the Docker deployment.
+The client dials **same-origin** (`${protocol}//${window.location.host}/api/v1/jobs/ws`),
+which nginx proxies. Two earlier defects are worth remembering because neither
+produced an error: the server had no publisher at all (`broadcast_job_update`
+was exported but called from nowhere), and the hook hard-coded port `8000`, which
+nothing listens on — the backend is on 3456 and reached through the proxy on 9876.
 
-The handshake and heartbeats are implemented and would work — see the
-WebSocket section of [`api.md`](api.md) for the protocol. What is missing is a
-caller for the broadcaster and a same-origin URL.
+Two further details are easy to reintroduce:
 
-The user-visible consequence is mild, which is why this went unnoticed: after
-five failed reconnects the hook falls back to invalidating `['jobs']` every
-5 seconds, so the page does refresh. It refreshes by polling, not by push. The
-green "Live updates active" badge never appears — `isConnected` is read from a
-ref during render, and nothing triggers a re-render when the socket opens.
+- `isConnected` is React **state**, not a read of `wsRef` during render. A ref
+  mutation does not re-render, so the earlier version could never light up the
+  "Live updates active" badge even with the socket open.
+- The `onUpdate`/`onError` callbacks are held in refs. The Jobs page passes an
+  inline arrow, which changes identity every render; without the refs, `connect`
+  would change identity too and the socket would be torn down and re-established
+  in a loop.
+
+If the socket cannot stay up, the hook retries five times and then polls
+`['jobs']` every 5 seconds, so the page keeps refreshing. Polling stops as soon as
+a socket opens.
 
 ## Notifications
 
