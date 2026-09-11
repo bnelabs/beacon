@@ -15,7 +15,7 @@
 # plugin would only add an unused dependency.
 
 # Test runner + coverage (mirrors backend/requirements.txt)
-pytest==8.3.4
+pytest==9.1.1
 pytest-cov==6.0.0
 
 # HTTP client used by starlette's TestClient (mirrors backend/requirements.txt)
