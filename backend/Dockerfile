@@ -4,7 +4,7 @@
 # Ubuntu 24.04 is used so the image ships Python 3.12 natively: the pinned
 # scientific stack (scipy 1.18, scikit-learn 1.9, matplotlib 3.11) requires
 # Python >= 3.12. CUDA stays on 12.6 to match the PyTorch build.
-FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu24.04
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
 
 # uv installs the pinned stack far faster than pip; see Dockerfile.cpu.
 COPY --from=ghcr.io/astral-sh/uv:0.12.13 /uv /uvx /bin/
