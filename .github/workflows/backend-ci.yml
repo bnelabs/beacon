@@ -31,7 +31,7 @@ jobs:
   # A postgres:15 service would therefore add container startup time without exercising
   # a single additional test.
   test:
-    name: Compile and test (Python 3.10)
+    name: Compile and test (Python 3.12)
     runs-on: ubuntu-latest
     # why: the CPU torch wheel plus the scientific stack makes this the slow leg;
     # 30 minutes leaves headroom for a cold cache while still bounding a hung job.
@@ -44,9 +44,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          # why: matches backend/Dockerfile.cpu (FROM python:3.10-slim) and the
-          # python3.10 interpreter installed by backend/Dockerfile.
-          python-version: "3.10"
+          # why: matches backend/Dockerfile.cpu (FROM python:3.12-slim) and the
+          # python3.12 interpreter installed by backend/Dockerfile. The pinned
+          # scientific stack (scipy 1.18, scikit-learn 1.9, matplotlib 3.11)
+          # requires >= 3.12, so CI must not run an older interpreter than the
+          # image ships.
+          python-version: "3.12"
           cache: pip
           cache-dependency-path: |
             backend/requirements.txt
@@ -56,12 +59,18 @@ jobs:
         run: python -m pip install --upgrade pip
 
       - name: Install CPU-only PyTorch
-        # why: the default PyPI torch==2.5.1 wheel pulls multi-GB CUDA runtime
-        # packages. The CPU wheel index keeps the runner image small and the job fast
-        # on a GPU-less runner. Installing torch first means the following
-        # requirements install sees it already satisfied and never re-fetches it from
-        # PyPI.
-        run: pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+        # why: the default PyPI torch wheel pulls multi-GB CUDA runtime packages.
+        # The CPU wheel index keeps the runner image small and the job fast on a
+        # GPU-less runner. The version is read from requirements.txt rather than
+        # hard-coded so the two can never drift apart again.
+        run: |
+          TORCH_VERSION="$(grep -E '^torch==' backend/requirements.txt | head -1 | cut -d= -f3)"
+          if [ -z "$TORCH_VERSION" ]; then
+            echo "Could not determine the torch pin from backend/requirements.txt" >&2
+            exit 1
+          fi
+          echo "Installing CPU-only torch==${TORCH_VERSION}"
+          pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install project and dev dependencies
         run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt

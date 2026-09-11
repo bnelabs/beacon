@@ -1,14 +1,17 @@
 # GPU-enabled Dockerfile for Linux with NVIDIA GPU
 # For CPU-only systems, use Dockerfile.cpu instead
-FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04
+# Ubuntu 24.04 is used so the image ships Python 3.12 natively: the pinned
+# scientific stack (scipy 1.18, scikit-learn 1.9, matplotlib 3.11) requires
+# Python >= 3.12. CUDA stays on 12.6 to match the PyTorch build.
+FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu24.04
 
 # Set working directory
 WORKDIR /app
 
-# Install Python 3.10 and system dependencies
+# Install Python 3.12 and system dependencies
 RUN apt-get update && apt-get install -y \
-    python3.10 \
-    python3.10-dev \
+    python3.12 \
+    python3.12-dev \
     python3-pip \
     build-essential \
     curl \
@@ -16,8 +19,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create symlinks for python commands
-RUN ln -sf /usr/bin/python3.10 /usr/bin/python && \
-    ln -sf /usr/bin/python3.10 /usr/bin/python3
+RUN ln -sf /usr/bin/python3.12 /usr/bin/python && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python3
 
 # Upgrade pip
 RUN python -m pip install --upgrade pip

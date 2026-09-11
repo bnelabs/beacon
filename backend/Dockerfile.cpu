@@ -1,5 +1,7 @@
 # CPU-only Dockerfile for macOS, Linux without GPU, and general use
-FROM python:3.10-slim
+# Python 3.12 is required by the pinned scientific stack (scipy 1.18,
+# scikit-learn 1.9, matplotlib 3.11 all require >= 3.12/3.11).
+FROM python:3.12-slim
 
 # Set working directory
 WORKDIR /app

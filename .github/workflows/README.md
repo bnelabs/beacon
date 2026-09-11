@@ -5,7 +5,7 @@ workflows plus Dependabot configuration, and a pull-request template.
 
 | File | Purpose | Triggers |
 | --- | --- | --- |
-| `backend-ci.yml` | Compile and test the FastAPI/Celery/PyTorch backend on Python 3.10 and upload a coverage report. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
+| `backend-ci.yml` | Compile and test the FastAPI/Celery/PyTorch backend on Python 3.12 and upload a coverage report. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
 | `frontend-ci.yml` | Build the React/Vite app on Node 20 and run the Playwright end-to-end suite. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
 | `security.yml` | Advisory dependency audits: `pip-audit` for `backend/requirements.txt` and `npm audit` for `frontend/`. Never blocks a merge. | `push` to `main`, every `pull_request`, weekly `schedule` (Mondays 06:17 UTC), manual `workflow_dispatch`. |
 | `../dependabot.yml` | Weekly version-update PRs for the `pip`, `npm`, `github-actions`, and `docker` ecosystems. | GitHub's scheduler (weekly). |
@@ -15,11 +15,14 @@ pushing again to the same branch cancels the older run instead of queueing two.
 
 ## Backend CI (`backend-ci.yml`)
 
-- **Python 3.10** — the same minor version as `backend/Dockerfile.cpu`
-  (`FROM python:3.10-slim`) and the interpreter installed by `backend/Dockerfile`.
-- **CPU-only PyTorch.** `torch==2.5.1` is installed from
-  `https://download.pytorch.org/whl/cpu` *before* the requirements files, so the runner
-  does not download the multi-GB CUDA bundles.
+- **Python 3.12** — the same minor version as `backend/Dockerfile.cpu`
+  (`FROM python:3.12-slim`) and the interpreter installed by `backend/Dockerfile`.
+  The pinned scientific stack (scipy 1.18, scikit-learn 1.9, matplotlib 3.11)
+  requires Python >= 3.12.
+- **CPU-only PyTorch.** The torch version is read from `backend/requirements.txt`
+  and installed from `https://download.pytorch.org/whl/cpu` *before* the
+  requirements files, so the runner does not download the multi-GB CUDA bundles
+  and can never drift from the pinned version.
 - **No database service.** The suite does not need a live PostgreSQL. The tests force
   SQLite through `USE_SQLITE=true` (`test_api_smoke.py`, `test_pipeline_integration.py`)
   and drive the app with FastAPI's in-process `TestClient`. The only Docker/Postgres test,
