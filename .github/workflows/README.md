@@ -10,7 +10,7 @@ workflows, Dependabot configuration, and a pull-request template.
 | `docker-backend.yml` | Validate every compose file and build the backend CPU image. **Manual only.** | `workflow_dispatch` (*Actions → Docker backend image → Run workflow*). |
 | `docker-frontend.yml` | Build the frontend image. **Manual only.** | `workflow_dispatch` (*Actions → Docker frontend image → Run workflow*). |
 | `security.yml` | Advisory dependency audits: `pip-audit` for `backend/requirements.txt` and `npm audit` for `frontend/`. Never blocks a merge. | `push` to `main`, every `pull_request`, weekly `schedule` (Mondays 06:17 UTC), manual `workflow_dispatch`. |
-| `../dependabot.yml` | Version-update PRs for `github-actions`, `pip`, `npm`, and `docker`. | GitHub's scheduler (see the policy below). |
+| `../dependabot.yml` | Version-update PRs for `github-actions`; security-update PRs for `pip` and `npm`. No `docker` entry. | GitHub's scheduler (see the policy below). |
 
 ## Concurrency
 
@@ -159,17 +159,38 @@ execution that trains a model, plus FastAPI application start-up.
 ## Dependabot (`../dependabot.yml`)
 
 Short answer to "do we actually need this?": **yes, but only for the parts that
-work.** Routine version updates are disabled for the two ecosystems that
-repeatedly caused damage or failed outright; security updates remain enabled
-everywhere.
+work.** Routine version updates are disabled for the ecosystems that repeatedly
+caused damage or failed outright, and the `docker` ecosystem is gone entirely.
+Security updates remain enabled wherever they are actually supported.
 
 | Ecosystem | Routine version updates | Policy |
 | --- | --- | --- |
 | `github-actions` (`/`) | **Yes** — weekly, grouped, limit 3 | Low risk, high value, no application code. |
-| `docker` (`/backend`) | **Yes** — monthly, limit 2 | `python` and `nvidia/cuda` exempt from minor **and** major bumps. These PRs are no longer image-built automatically: run *Docker backend image → Run workflow* before merging one. |
-| `docker` (`/frontend`) | **Yes** — monthly, limit 2 | `node` and `nginx` exempt from minor **and** major bumps. Same manual-validation caveat. |
 | `pip` (`/backend`) | **No** — `open-pull-requests-limit: 0` | Security updates only. |
 | `npm` (`/frontend`) | **No** — `open-pull-requests-limit: 0` | Security updates only. |
+| `docker` (`/backend`, `/frontend`) | **No — the entry is removed entirely** | Base images (`python`, `nvidia/cuda`, `node`, `nginx`) are bumped by hand and the image built on demand. |
+
+**Why `docker` has no entry at all.** Two reasons. First, base images define the
+interpreter, CUDA line and runtime contract the whole stack is compiled against,
+so they move deliberately rather than monthly; the entries that used to exist
+opened patch PRs for tags already pinned on purpose, and raised `24-alpine →
+26-alpine` the moment they existed (Node 26 is not LTS until 2026-10-28).
+Second, nothing in CI builds the image any more, so those PRs could not be
+validated before merging. **This costs no vulnerability coverage:** Dependabot
+*security* updates do not support the `docker` ecosystem at all — only version
+updates — per the supported-ecosystems table
+([docs.github.com](https://docs.github.com/en/code-security/reference/supply-chain-security/supported-ecosystems-and-repositories),
+Docker: version updates ✓, security updates ✗).
+
+| Base image | Where | Move it how |
+| --- | --- | --- |
+| `python:3.12-slim` | `backend/Dockerfile.cpu` | Interpreter contract for the whole ML stack. Check torch/numpy publish wheels for the new minor before moving. |
+| `nvidia/cuda:12.6.x` | `backend/Dockerfile` | Must match the PyTorch build; a patch bump is safe, a minor is not. |
+| `node:24-alpine` | `frontend/Dockerfile` | Must track an Active LTS line and match `frontend-ci.yml`. |
+| `nginx:1.30-alpine` | `frontend/Dockerfile` | Even minor = stable line, odd minor = mainline. A "minor" bump can switch lines. |
+
+After editing any of them, build the real image before merging:
+`gh workflow run docker-backend.yml --ref main` or `... docker-frontend.yml ...`.
 
 **Why `pip` routine updates are off.** Dependabot classified `torch` 2.5.1 →
 2.14.0, `scipy` 1.13 → 1.18, `scikit-learn` 1.5 → 1.9 and `matplotlib` 3.9 →
@@ -194,18 +215,20 @@ Frontend CI catches real breakage. The image-build gap is covered on demand:
 `docker-frontend.yml` is the only thing that resolves peers *inside the image*, so
 run it manually when a frontend dependency changes.
 
-**Base images are exempt where the version is contractual.** `python` defines
-the interpreter the whole stack is compiled against (Dependabot called
-`3.10 → 3.14` a *minor* bump; it cannot build — no cp314 wheels for
-torch/numpy). `node` must track an Active LTS line, not the newest release
-(26 is not LTS until 2026-10-28). `nginx` publishes stable (even minor) and
+**Base images are hand-managed, not exempt.** They used to be `ignore`d within a
+`docker` entry; now there is no entry, so there is nothing to exempt. The table
+above records what each one is coupled to. `python` defines the interpreter the
+whole stack is compiled against (Dependabot called `3.10 → 3.14` a *minor* bump;
+it cannot build — no cp314 wheels for torch/numpy). `node` must track an Active
+LTS line, not the newest release. `nginx` publishes stable (even minor) and
 mainline (odd minor) lines, so a minor bump silently switches release lines.
 
 **What is left alone deliberately.** There is no `docker` entry for the
-repository root: Dependabot's docker ecosystem scans Dockerfiles, not compose
-files, and no root Dockerfile exists. The previous entry failed on every run
-with *"No Dockerfiles nor Kubernetes YAML found in /"*. Compose images
-(`postgres`/`timescaledb`, `redis`) are therefore bumped by hand.
+repository root either: Dependabot's docker ecosystem scans Dockerfiles, not
+compose files, and no root Dockerfile exists. The previous entry failed on every
+run with *"No Dockerfiles nor Kubernetes YAML found in /"*. Compose images
+(`postgres`/`timescaledb`, `redis`) are therefore bumped by hand; the
+`Docker backend image` workflow runs `docker compose config` before it builds.
 
 `ignore` rules and `open-pull-requests-limit` do **not** affect **security**
 updates, which have their own internal limit — so this policy costs no

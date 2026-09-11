@@ -5,23 +5,28 @@
 # grouped one could not build):
 #
 #   * github-actions  -> keep automatic. Low risk, high value, no application code.
-#   * npm             -> grouped minor/patch only; majors are migrations.
-#   * pip             -> grouped minor/patch, but the scientific/ML stack is exempt:
-#                        its "minor" bumps are breaking in practice.
-#   * docker          -> the Python base image only moves when a human decides.
+#   * pip             -> SECURITY UPDATES ONLY. The scientific/ML stack moves as
+#                        one coordinated migration, not as a bot PR.
+#   * npm             -> SECURITY UPDATES ONLY. Dependabot's npm updater cannot
+#                        resolve this dependency graph at all.
+#   * docker          -> NO ENTRY. Base images are bumped deliberately by hand,
+#                        and the image is built on demand, because nothing in CI
+#                        builds it automatically any more.
 #
-# Why the ML stack is exempt from automatic bumps:
+# Why the pip/npm stacks are exempt from automatic bumps:
 #   Dependabot classified torch 2.5.1->2.14.0, scipy 1.13->1.18, scikit-learn
 #   1.5->1.9 and matplotlib 3.9->3.11 as *minor* updates and grouped them into a
 #   single PR. That PR was not installable: scipy 1.18 requires numpy>=2.0 while
 #   numpy was pinned to 1.26, and scikit-learn/matplotlib/scipy all require Python
 #   >=3.12 while the image shipped 3.10. Resolving it required moving the Python
-#   version and the numpy major together. Those are deliberal migrations, not
+#   version and the numpy major together. Those are deliberate migrations, not
 #   chores, so they are done by hand.
 #
 # Security updates are NOT affected by any `ignore` rule or by
 # `open-pull-requests-limit`. They continue to open PRs under their own limit, so
-# suppressing routine version noise does not cost us vulnerability alerts.
+# suppressing routine version noise does not cost us vulnerability alerts - for
+# the ecosystems that support them. See the note at the foot of this file about
+# docker, which does not support them at all.
 
 version: 2
 
@@ -148,61 +153,38 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
-  # --- Backend base images ---------------------------------------------------
-  - package-ecosystem: docker
-    directory: /backend
-    schedule:
-      interval: monthly
-    open-pull-requests-limit: 2
-    labels:
-      - dependencies
-      - docker
-    commit-message:
-      prefix: "chore(deps)"
-    ignore:
-      # The interpreter and CUDA version define the whole dependency contract.
-      # Dependabot flagged python:3.10 -> 3.14 as a *minor* bump; it cannot build
-      # because torch/numpy publish no cp314 wheels. Always a human decision.
-      - dependency-name: "python"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      - dependency-name: "nvidia/cuda"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+  # --- Base images: deliberately absent --------------------------------------
+  #
+  # There is no `docker` ecosystem entry for /backend or /frontend any more.
+  #
+  # Base images (python, nvidia/cuda, node, nginx) define the interpreter, the
+  # CUDA line and the runtime contract the whole stack is compiled against, so
+  # they move as deliberate, coordinated changes rather than on a bot's schedule.
+  # The two entries that used to exist opened monthly patch PRs for tags that were
+  # already pinned on purpose, and nothing in CI built the image, so the PR could
+  # not be validated before merging.
+  #
+  # This costs no vulnerability coverage: Dependabot SECURITY updates do not
+  # support the `docker` ecosystem - only version updates - per the supported-
+  # ecosystems table (Docker: version updates yes, security updates no).
+  # https://docs.github.com/en/code-security/reference/supply-chain-security/supported-ecosystems-and-repositories
+  #
+  # To bump a base image by hand: edit the Dockerfile, then build the real image
+  # before merging it:
+  #   gh workflow run docker-backend.yml  --ref main
+  #   gh workflow run docker-frontend.yml --ref main
 
-  # --- Frontend base images (node, nginx) -------------------------------------
-  - package-ecosystem: docker
-    directory: /frontend
-    schedule:
-      interval: monthly
-    open-pull-requests-limit: 2
-    labels:
-      - dependencies
-      - docker
-    commit-message:
-      prefix: "chore(deps)"
-    ignore:
-      # The Node major is the frontend's runtime contract: it must match CI and
-      # the base image, and it should track an Active LTS line, not the newest
-      # release. Dependabot opened a 24-alpine -> 26-alpine PR as soon as this
-      # entry existed, and Node 26 is not LTS until 2026-10-28. Deliberate move.
-      - dependency-name: "node"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      # nginx publishes both a stable line (even minor, e.g. 1.30) and a
-      # mainline line (odd minor, e.g. 1.31). A minor bump therefore switches
-      # from stable to mainline, which is not a routine update.
-      - dependency-name: "nginx"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
-
-# NOTE: there is deliberately NO `docker` entry for the repository root.
+# NOTE: there is deliberately NO `docker` entry for the repository root either.
 #
 # Dependabot's docker ecosystem scans Dockerfiles and Kubernetes manifests - not
 # docker-compose files - and there is no Dockerfile at the repo root. The
 # previous `/` entry therefore failed on EVERY scheduled run with
 #   "No Dockerfiles nor Kubernetes YAML found in /"
-# It has been removed rather than kept as a permanently red job.
+# It was removed rather than kept as a permanently red job.
 #
 # Consequence: the images referenced by docker-compose.yml (postgres/
-# timescaledb, redis) are not covered by Dependabot. Bump them by hand and
-# validate with the `Docker build` workflow (`docker compose config`). Both pin a
-# major version whose upgrade needs a data migration, so an automated PR would
-# not be actionable anyway.
+# timescaledb, redis) are not covered by Dependabot either. Bump them by hand and
+# validate with the `Docker backend image` workflow, which runs
+# `docker compose config` before it builds. Both pin a major version whose upgrade
+# needs a data migration, so an automated PR would not be actionable anyway.
 
