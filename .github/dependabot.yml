@@ -137,9 +137,9 @@ updates:
       - dependency-name: "nvidia/cuda"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
-  # --- Compose images (postgres/timescaledb, redis, nginx) --------------------
+  # --- Frontend base images (node, nginx) -------------------------------------
   - package-ecosystem: docker
-    directory: /
+    directory: /frontend
     schedule:
       interval: monthly
     open-pull-requests-limit: 2
@@ -149,13 +149,21 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     ignore:
-      # A datastore major upgrade (PostgreSQL/TimescaleDB, Redis) needs a
-      # migration and a restore plan, not an automatic PR.
-      - dependency-name: "postgres"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "timescale/timescaledb"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "redis"
-        update-types: ["version-update:semver-major"]
+      # nginx majors are a mainline/stable line change; take them deliberately.
       - dependency-name: "nginx"
         update-types: ["version-update:semver-major"]
+
+# NOTE: there is deliberately NO `docker` entry for the repository root.
+#
+# Dependabot's docker ecosystem scans Dockerfiles and Kubernetes manifests - not
+# docker-compose files - and there is no Dockerfile at the repo root. The
+# previous `/` entry therefore failed on EVERY scheduled run with
+#   "No Dockerfiles nor Kubernetes YAML found in /"
+# It has been removed rather than kept as a permanently red job.
+#
+# Consequence: the images referenced by docker-compose.yml (postgres/
+# timescaledb, redis) are not covered by Dependabot. Bump them by hand and
+# validate with the `Docker build` workflow (`docker compose config`). Both pin a
+# major version whose upgrade needs a data migration, so an automated PR would
+# not be actionable anyway.
+
