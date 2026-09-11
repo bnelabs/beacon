@@ -1,31 +1,23 @@
-"""Walk-forward backtesting and quantitative metrics for liquidity-risk models.
+"""Walk-forward backtesting and evaluation metrics for liquidity-risk models.
 
-Signal-to-return convention
-===========================
-BEACON models predict a *liquidity-risk level*, not a financial return. For
-liquidity risk a RISE in predicted risk is a NEGATIVE return::
-
-    return_t = -(risk_t - risk_{t-1})
-
-Every return-based metric in this module (Sharpe, Sortino, drawdown, Calmar,
-VaR/CVaR) consumes that sign-flipped series. The public helper
-:func:`risk_signal_to_returns` implements the convention so callers do not have
-to restate it.
+BEACON predicts a per-timestep *liquidity-risk level*, a bounded state rather
+than a financial return. The two are not interchangeable, so return-based
+portfolio statistics (Sharpe, Sortino, drawdown, Calmar, volatility, VaR/CVaR)
+are not defined on a risk score and are deliberately not computed here. The
+module reports only the supervised metrics that are meaningful for a state
+series: MSE/MAE/RMSE/R^2 and the directional hit rate.
 
 Fold-boundary handling
 ======================
 :class:`WalkForwardBacktester` evaluates the model on disjoint out-of-sample
-test blocks. Naively concatenating those blocks and differencing the result
-creates one synthetic risk-change at every fold boundary -- a transition that
-never occurred in the underlying series -- which biases Sharpe, Sortino,
-drawdown, Calmar, volatility, and VaR/CVaR.
+test blocks. Naively concatenating those blocks and scoring the result creates
+one synthetic change at every fold boundary -- a transition that never occurred
+in the underlying series -- which biases the directional score.
 
-The backtester therefore converts each fold's predictions into returns *inside*
-that fold and concatenates the resulting per-fold return series:
-:func:`risk_signal_to_returns` takes a ``boundaries`` argument, and
-:func:`hit_rate` pools its directional score across the same segments instead of
-scoring across the seams. Aggregate metrics are consequently free of the
-artefact by construction rather than annotated with a caveat: the result records
+The backtester therefore records the interior fold seams and asks the
+directional score to pool within the same segments instead of across them:
+:func:`hit_rate` takes a ``boundaries`` argument and measures agreement inside
+each segment, weighting the pool by the number of comparisons. The result records
 ``boundaries`` and ``n_boundary_transitions_removed`` so the correction is
 auditable.
 
@@ -34,18 +26,16 @@ Degenerate-input policy
 Every metric tolerates empty, constant, and single-element input and never
 raises ``ZeroDivisionError``. The deliberate return values are:
 
-* Empty input -> ``float('nan')`` for ratios, error metrics, and tail-risk
-  metrics (the statistic is undefined); :func:`max_drawdown` returns ``0.0``
-  because an empty curve has no drawdown by definition.
-* Constant / zero-variance input -> ``0.0`` for Sharpe, Sortino, and
-  annualized volatility (there is no dispersion to reward or penalise), and for
-  R^2 against a constant target.
-* Zero downside deviation -> Sortino ``0.0`` rather than ``inf`` so results
-  stay JSON-serialisable.
+* Empty input -> ``float('nan')`` for the error metrics and R^2, because there
+  is nothing to score; :func:`hit_rate` is also ``nan``.
 * Constant series -> ``nan`` for :func:`hit_rate`, because a series with no
-  non-zero changes carries no directional signal to score.
-* Single element -> ``nan`` for dispersion-based metrics (sample variance needs
-  at least two observations).
+  non-zero changes carries no directional signal to score; R^2 against a
+  constant target is ``0.0``.
+* Single element -> ``0.0`` for ``mse``/``mae``/``rmse``/R^2 (there is no
+  misprediction to measure) and ``nan`` for :func:`hit_rate` (there is no
+  change to compare).
+* A segment whose changes are all zero is skipped rather than counted as a run
+  of mismatches.
 
 Metrics align their inputs on the common prefix, so slightly mismatched series
 degrade instead of raising. :meth:`WalkForwardBacktester.run` is stricter and
@@ -81,13 +71,6 @@ _METRIC_KEYS: Tuple[str, ...] = (
     "r2",
     "directional_accuracy",
     "hit_rate",
-    "sharpe_ratio",
-    "sortino_ratio",
-    "max_drawdown",
-    "calmar_ratio",
-    "annualized_volatility",
-    "var_95",
-    "cvar_95",
 )
 
 
@@ -139,13 +122,6 @@ def _json_safe(value: Any) -> Any:
     return number
 
 
-def _validate_level(level: float) -> float:
-    level = float(level)
-    if not 0.0 < level < 1.0:
-        raise ValueError(f"level must be strictly between 0 and 1, got {level!r}")
-    return level
-
-
 def _validate_periods(periods_per_year: float) -> float:
     periods = float(periods_per_year)
     if not math.isfinite(periods) or periods <= 0.0:
@@ -154,7 +130,7 @@ def _validate_periods(periods_per_year: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Signal / return transformations
+# Boundary / segment helpers
 # ---------------------------------------------------------------------------
 def _normalise_boundaries(boundaries: Optional[Sequence[int]], size: int) -> List[int]:
     """Validate interior segment starts; return them sorted and de-duplicated.
@@ -212,124 +188,9 @@ def boundaries_from_group_sizes(sizes: Sequence[int]) -> np.ndarray:
     return np.cumsum(non_empty)[:-1].astype(int)
 
 
-def risk_signal_to_returns(
-    risk_signal: ArrayLike, boundaries: Optional[Sequence[int]] = None
-) -> np.ndarray:
-    """Convert a predicted risk level into returns via ``-(risk_t - risk_{t-1})``.
-
-    A rise in liquidity risk is treated as a negative return. Fewer than two
-    observations produce an empty return series.
-
-    ``boundaries`` names interior segment starts (see
-    :func:`_normalise_boundaries`). When supplied, the difference is taken
-    *within* each segment and the per-segment return series are concatenated, so
-    no return spans a segment seam. Use this whenever the input series is a
-    concatenation of separately generated blocks -- for example walk-forward
-    out-of-sample folds. A segment with fewer than two points contributes
-    nothing, so the result can be shorter than ``len(signal) - 1``.
-    """
-    risk = _as_1d(risk_signal)
-    if risk.size < 2:
-        return np.array([], dtype=float)
-    if boundaries is None:
-        return -np.diff(risk)
-    chunks = [(-np.diff(risk[segment])) for segment in segment_slices(boundaries, risk.size)]
-    chunks = [chunk for chunk in chunks if chunk.size]
-    return np.concatenate(chunks) if chunks else np.array([], dtype=float)
-
-
-def equity_curve_from_returns(returns: ArrayLike, initial: float = 1.0) -> np.ndarray:
-    """Compound a return series into a normalised equity curve.
-
-    The returned array has ``len(returns) + 1`` points and starts at
-    ``initial``.
-    """
-    series = _as_1d(returns)
-    start = float(initial)
-    if series.size == 0:
-        return np.array([start], dtype=float)
-    compounded = start * np.cumprod(1.0 + series)
-    return np.concatenate(([start], compounded))
-
-
 # ---------------------------------------------------------------------------
-# Quantitative metrics
+# Evaluation metrics
 # ---------------------------------------------------------------------------
-def sharpe_ratio(returns: ArrayLike, risk_free: float = 0.0, periods_per_year: int = 252) -> float:
-    """Annualised Sharpe ratio of a per-period return series.
-
-    ``risk_free`` is an *annual* rate and is de-annualised before subtracting.
-    """
-    series = _as_1d(returns)
-    if series.size < 2:
-        return float("nan")
-    periods = _validate_periods(periods_per_year)
-    excess = series - float(risk_free) / periods
-    std = float(np.std(excess, ddof=1))
-    if not math.isfinite(std) or std == 0.0:
-        return 0.0
-    return float(np.mean(excess) / std * math.sqrt(periods))
-
-
-def sortino_ratio(returns: ArrayLike, risk_free: float = 0.0, periods_per_year: int = 252) -> float:
-    """Annualised Sortino ratio (downside-deviation adjusted)."""
-    series = _as_1d(returns)
-    if series.size < 2:
-        return float("nan")
-    periods = _validate_periods(periods_per_year)
-    excess = series - float(risk_free) / periods
-    downside = np.minimum(excess, 0.0)
-    downside_deviation = float(np.sqrt(np.mean(downside**2)))
-    if not math.isfinite(downside_deviation) or downside_deviation == 0.0:
-        return 0.0
-    return float(np.mean(excess) / downside_deviation * math.sqrt(periods))
-
-
-def max_drawdown(equity_curve: ArrayLike) -> float:
-    """Maximum peak-to-trough drawdown as a positive magnitude (e.g. 0.25 = 25%)."""
-    equity = _as_1d(equity_curve)
-    if equity.size < 2:
-        return 0.0
-    peak = np.maximum.accumulate(equity)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        drawdown = np.where(peak > 0.0, (peak - equity) / peak, 0.0)
-    return float(np.max(drawdown))
-
-
-def annualized_volatility(returns: ArrayLike, periods_per_year: int = 252) -> float:
-    """Annualised sample standard deviation of a per-period return series."""
-    series = _as_1d(returns)
-    if series.size < 2:
-        return float("nan")
-    periods = _validate_periods(periods_per_year)
-    std = float(np.std(series, ddof=1))
-    if not math.isfinite(std) or std == 0.0:
-        return 0.0
-    return float(std * math.sqrt(periods))
-
-
-def calmar_ratio(
-    returns: ArrayLike,
-    equity_curve: Optional[ArrayLike] = None,
-    risk_free: float = 0.0,
-    periods_per_year: int = 252,
-) -> float:
-    """Annualised arithmetic return divided by maximum drawdown magnitude.
-
-    Returns ``0.0`` when there is no drawdown (rather than ``inf``).
-    """
-    series = _as_1d(returns)
-    if series.size == 0:
-        return float("nan")
-    periods = _validate_periods(periods_per_year)
-    curve = equity_curve if equity_curve is not None else equity_curve_from_returns(series)
-    drawdown = max_drawdown(curve)
-    if not math.isfinite(drawdown) or drawdown == 0.0:
-        return 0.0
-    annualized_return = (float(np.mean(series)) - float(risk_free) / periods) * periods
-    return float(annualized_return / drawdown)
-
-
 def hit_rate(
     actual: ArrayLike,
     predicted: ArrayLike,
@@ -341,8 +202,8 @@ def hit_rate(
     left out of the pooled score; ``nan`` is returned when no segment carries
     signal.
 
-    ``boundaries`` names interior segment starts, exactly as in
-    :func:`risk_signal_to_returns`: agreement is measured inside each segment and
+    ``boundaries`` names interior segment starts (see
+    :func:`_normalise_boundaries`): agreement is measured inside each segment and
     pooled with the number of comparisons as the weight, so a seam between two
     separately generated blocks is never scored. A boundary at or beyond the
     common prefix of the two series starts no non-empty segment and is ignored.
@@ -430,32 +291,6 @@ def r2_score_(actual: ArrayLike, predicted: ArrayLike) -> float:
     if total == 0.0:
         return 0.0
     return float(1.0 - residual / total)
-
-
-def value_at_risk(returns: ArrayLike, level: float = 0.95) -> float:
-    """Historical Value-at-Risk at ``level``, reported as a loss magnitude.
-
-    ``-quantile(returns, 1 - level)``; may be negative when the tail is
-    profitable.
-    """
-    series = _as_1d(returns)
-    if series.size == 0:
-        return float("nan")
-    level = _validate_level(level)
-    return float(-np.quantile(series, 1.0 - level))
-
-
-def conditional_value_at_risk(returns: ArrayLike, level: float = 0.95) -> float:
-    """Historical CVaR (expected shortfall) at ``level``, as a loss magnitude."""
-    series = _as_1d(returns)
-    if series.size == 0:
-        return float("nan")
-    level = _validate_level(level)
-    threshold = np.quantile(series, 1.0 - level)
-    tail = series[series <= threshold]
-    if tail.size == 0:
-        return float(-threshold)
-    return float(-np.mean(tail))
 
 
 # ---------------------------------------------------------------------------
@@ -587,10 +422,6 @@ LOWER_IS_BETTER: Tuple[str, ...] = (
     "mse",
     "mae",
     "rmse",
-    "max_drawdown",
-    "annualized_volatility",
-    "var_95",
-    "cvar_95",
 )
 
 
@@ -613,60 +444,35 @@ def baseline_factory(kind: str = "persistence") -> Callable[[], Any]:
 def compute_metrics(
     actual: Optional[ArrayLike] = None,
     predicted: Optional[ArrayLike] = None,
-    returns: Optional[ArrayLike] = None,
     boundaries: Optional[Sequence[int]] = None,
-    risk_free: float = 0.0,
-    periods_per_year: int = 252,
-    var_level: float = 0.95,
 ) -> Dict[str, float]:
-    """Compute the full ML + quantitative metric bundle.
+    """Compute the supervised metric bundle for a predicted risk series.
 
-    Either ``predicted`` (a risk signal, from which returns are derived via the
-    module convention) or an explicit ``returns`` series is required. ``actual``
-    is optional; without it the supervised ML metrics are ``nan`` but the
-    return-based metrics are still reported.
+    ``predicted`` is required. ``actual`` is optional; without it every metric is
+    ``nan`` because there is no target to score against.
 
-    ``boundaries`` names interior segment starts in ``predicted``/``actual``
-    (see :func:`risk_signal_to_returns`). It makes both the derived return
-    series and the directional score seam-free, which is what a caller that
-    concatenates out-of-sample blocks wants. Combining it with an explicit
-    ``returns`` series is rejected: those returns are already final, so the
-    combination would be ambiguous.
+    ``boundaries`` names interior segment starts in ``actual``/``predicted``
+    (see :func:`_normalise_boundaries`). The directional score is then pooled
+    within each segment rather than across the seams, which is what a caller that
+    concatenates out-of-sample blocks wants. A boundary at or beyond the common
+    prefix of the two series starts no non-empty segment and is ignored.
     """
-    if predicted is None and returns is None:
-        raise ValueError("Either 'predicted' or 'returns' must be provided")
-    if actual is not None and predicted is None:
-        raise ValueError("'predicted' is required when 'actual' is provided")
-    if returns is not None and boundaries is not None:
-        raise ValueError("Pass either an explicit 'returns' series or 'boundaries', not both")
+    if predicted is None:
+        raise ValueError("'predicted' must be provided")
 
-    if returns is None:
-        returns = risk_signal_to_returns(predicted, boundaries=boundaries)
-    return_series = _as_1d(returns)
-    equity = equity_curve_from_returns(return_series)
+    if actual is None:
+        return {
+            "mse": float("nan"),
+            "mae": float("nan"),
+            "rmse": float("nan"),
+            "r2": float("nan"),
+            "directional_accuracy": float("nan"),
+            "hit_rate": float("nan"),
+        }
 
-    if actual is not None:
-        actual_series = _as_1d(actual)
-        if actual_series.size == 0:
-            ml_metrics = {
-                "mse": float("nan"),
-                "mae": float("nan"),
-                "rmse": float("nan"),
-                "r2": float("nan"),
-                "directional_accuracy": float("nan"),
-                "hit_rate": float("nan"),
-            }
-        else:
-            ml_metrics = {
-                "mse": mean_squared_error(actual_series, predicted),
-                "mae": mae(actual_series, predicted),
-                "rmse": rmse(actual_series, predicted),
-                "r2": r2_score_(actual_series, predicted),
-                "directional_accuracy": directional_accuracy(actual_series, predicted, boundaries),
-                "hit_rate": hit_rate(actual_series, predicted, boundaries),
-            }
-    else:
-        ml_metrics = {
+    actual_series = _as_1d(actual)
+    if actual_series.size == 0:
+        return {
             "mse": float("nan"),
             "mae": float("nan"),
             "rmse": float("nan"),
@@ -676,16 +482,12 @@ def compute_metrics(
         }
 
     return {
-        **ml_metrics,
-        "sharpe_ratio": sharpe_ratio(return_series, risk_free=risk_free, periods_per_year=periods_per_year),
-        "sortino_ratio": sortino_ratio(return_series, risk_free=risk_free, periods_per_year=periods_per_year),
-        "max_drawdown": max_drawdown(equity),
-        "calmar_ratio": calmar_ratio(
-            return_series, equity_curve=equity, risk_free=risk_free, periods_per_year=periods_per_year
-        ),
-        "annualized_volatility": annualized_volatility(return_series, periods_per_year=periods_per_year),
-        "var_95": value_at_risk(return_series, level=var_level),
-        "cvar_95": conditional_value_at_risk(return_series, level=var_level),
+        "mse": mean_squared_error(actual_series, predicted),
+        "mae": mae(actual_series, predicted),
+        "rmse": rmse(actual_series, predicted),
+        "r2": r2_score_(actual_series, predicted),
+        "directional_accuracy": directional_accuracy(actual_series, predicted, boundaries),
+        "hit_rate": hit_rate(actual_series, predicted, boundaries),
     }
 
 
@@ -891,7 +693,7 @@ class FoldResult:
 
 @dataclass
 class BacktestMetrics:
-    """Quantitative and ML metrics computed over one out-of-sample series."""
+    """Supervised metrics computed over one out-of-sample series."""
 
     mse: float = float("nan")
     mae: float = float("nan")
@@ -899,13 +701,6 @@ class BacktestMetrics:
     r2: float = float("nan")
     directional_accuracy: float = float("nan")
     hit_rate: float = float("nan")
-    sharpe_ratio: float = float("nan")
-    sortino_ratio: float = float("nan")
-    max_drawdown: float = 0.0
-    calmar_ratio: float = float("nan")
-    annualized_volatility: float = float("nan")
-    var_95: float = float("nan")
-    cvar_95: float = float("nan")
 
     @classmethod
     def from_dict(cls, values: Mapping[str, Any]) -> "BacktestMetrics":
@@ -919,20 +714,22 @@ class BacktestMetrics:
 class BacktestResult:
     """Full walk-forward backtest output.
 
-    ``predictions``/``actuals`` are the concatenated out-of-sample series.
-    ``returns`` is the sign-flipped risk-change series derived from
-    ``predictions`` *within each fold* (never across a fold seam), and
-    ``equity_curve`` is its compounded curve. ``boundaries`` records the
-    interior fold seams in concatenated index space so the aggregation can be
-    audited and reproduced.
+    ``predictions``/``actuals`` are the concatenated out-of-sample series and
+    ``boundaries`` records the interior fold seams in concatenated index space so
+    the directional score can be pooled within each fold.
+
+    There is no ``returns`` or ``equity_curve`` field. A risk score is a latent
+    state, not a price: producing a "return" series required sign-flipping
+    consecutive scores and differencing them, and those differences then had to
+    be aggregated across fold seams where no economic transition occurs. The
+    fields existed only to feed the Sharpe/Sortino/drawdown/VaR statistics that
+    have themselves been removed.
     """
 
     config: WalkForwardConfig
     folds: List[FoldResult]
     predictions: np.ndarray
     actuals: np.ndarray
-    returns: np.ndarray
-    equity_curve: np.ndarray
     metrics: BacktestMetrics
     boundaries: np.ndarray = field(default_factory=lambda: np.array([], dtype=int))
 
@@ -942,7 +739,7 @@ class BacktestResult:
 
     @property
     def n_boundary_transitions_removed(self) -> int:
-        """Across-fold transitions that per-fold aggregation suppressed."""
+        """Across-fold transitions that the seam-aware directional score suppressed."""
         boundary_count = int(np.asarray(self.boundaries).size)
         return boundary_count
 
@@ -956,14 +753,12 @@ class BacktestResult:
             "folds": fold_dicts,
             "walk_forward": {"config": config_dict, "folds": fold_dicts},
             "aggregation": {
-                "returns": "per_fold",
+                "strategy": "directional_score_pooled_within_segment",
                 "boundaries": [int(value) for value in np.asarray(self.boundaries).ravel()],
                 "n_boundary_transitions_removed": self.n_boundary_transitions_removed,
             },
             "predictions": [_json_safe(value) for value in np.asarray(self.predictions).ravel()],
             "actuals": [_json_safe(value) for value in np.asarray(self.actuals).ravel()],
-            "returns": [_json_safe(value) for value in np.asarray(self.returns).ravel()],
-            "equity_curve": [_json_safe(value) for value in np.asarray(self.equity_curve).ravel()],
         }
 
 
@@ -1076,8 +871,6 @@ class WalkForwardBacktester:
                     metrics=compute_metrics(
                         actual=target[test_idx],
                         predicted=fold_predictions,
-                        risk_free=self.risk_free,
-                        periods_per_year=self.periods_per_year,
                     ),
                 )
             )
@@ -1087,18 +880,14 @@ class WalkForwardBacktester:
         )
         oos_actuals = np.concatenate(actuals) if actuals else np.array([], dtype=float)
 
-        # Fold seams are not observations. Returns, the equity curve, and the
-        # directional score are all computed segment-by-segment so no metric ever
-        # sees a transition that did not happen in the underlying series.
+        # Fold seams are not observations: the directional score is pooled
+        # segment-by-segment so it never sees a transition that did not happen in
+        # the underlying series.
         boundaries = boundaries_from_group_sizes([chunk.size for chunk in predictions])
-        returns = risk_signal_to_returns(oos_predictions, boundaries=boundaries)
-        equity_curve = equity_curve_from_returns(returns)
         metrics = compute_metrics(
             actual=oos_actuals,
             predicted=oos_predictions,
             boundaries=boundaries,
-            risk_free=self.risk_free,
-            periods_per_year=self.periods_per_year,
         )
 
         return BacktestResult(
@@ -1106,8 +895,6 @@ class WalkForwardBacktester:
             folds=fold_results,
             predictions=oos_predictions,
             actuals=oos_actuals,
-            returns=returns,
-            equity_curve=equity_curve,
             metrics=BacktestMetrics.from_dict(metrics),
             boundaries=np.asarray(boundaries, dtype=int),
         )

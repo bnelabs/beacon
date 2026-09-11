@@ -95,20 +95,52 @@ class TimeSeriesDataset(Dataset):
 
         self.feature_cols = feature_cols
 
-        # Extract features and target
-        self.features = data[feature_cols].ffill().fillna(0).values
-        self.target = data[target_col].ffill().fillna(0).values
+        # Extract features and target. Gaps stay as NaN and are imputed with each
+        # column's own observed mean below -- never forward-filled, which would
+        # carry a stale level across the gap and present the model with values
+        # that had not been published at those timestamps.
+        self.features = (
+            data[feature_cols]
+            .apply(pd.to_numeric, errors='coerce')
+            .to_numpy(dtype=float)
+        )
+        self.target = pd.to_numeric(data[target_col], errors='coerce').to_numpy(dtype=float)
 
-        # Store original stats BEFORE normalization
-        self.target_mean = float(np.mean(self.target))
-        self.target_std = float(np.std(self.target) + 1e-8)
+        # Statistics are computed from observed values only. Treating a gap as
+        # zero would drag the mean toward zero and inflate the variance.
+        target_observed_mask = np.isfinite(self.target)
+        target_observed = self.target[target_observed_mask]
+        self.target_mean = float(target_observed.mean()) if target_observed.size else 0.0
+        self.target_std = float(target_observed.std()) + 1e-8 if target_observed.size else 1.0
 
-        # Normalize
-        self.feature_mean = self.features.mean(axis=0)
-        self.feature_std = self.features.std(axis=0) + 1e-8
-        self.features = (self.features - self.feature_mean) / self.feature_std
+        feature_observed_mask = np.isfinite(self.features)
+        feature_counts = feature_observed_mask.sum(axis=0)
+        feature_sums = np.where(feature_observed_mask, self.features, 0.0).sum(axis=0)
+        self.feature_mean = np.divide(
+            feature_sums,
+            feature_counts,
+            out=np.zeros_like(feature_sums, dtype=float),
+            where=feature_counts > 0,
+        )
 
-        self.target = (self.target - self.target_mean) / self.target_std
+        centered = np.where(
+            feature_observed_mask, self.features - self.feature_mean, 0.0
+        )
+        feature_variance = np.divide(
+            (centered ** 2).sum(axis=0),
+            feature_counts,
+            out=np.zeros_like(feature_sums, dtype=float),
+            where=feature_counts > 0,
+        )
+        self.feature_std = np.sqrt(feature_variance) + 1e-8
+
+        # Impute at the observed mean (standardised value 0) rather than carrying
+        # the previous observation forward.
+        self.features = centered / self.feature_std
+        self.target = (
+            np.where(target_observed_mask, self.target - self.target_mean, 0.0)
+            / self.target_std
+        )
 
         # Create sequences
         self.sequences = []
@@ -184,7 +216,9 @@ class ModelTrainer:
 
         # Create model
         input_size = len(train_dataset.feature_cols)
-        self.model = create_model(self.model_type, input_size, self.config).to(self.device)
+        self.model = create_model(
+            self.model_type, self.config, input_size=input_size
+        ).to(self.device)
 
         logger.info(f"Model created: {self.model_type}, input_size={input_size}")
         logger.info(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")

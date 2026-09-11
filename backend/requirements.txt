@@ -2,8 +2,9 @@
 # The stack targets Python 3.12 (see backend/Dockerfile.cpu and the CI matrix).
 # numpy is on the 2.x line because scipy 1.18 requires numpy>=2.0,<2.8; the
 # codebase uses no legacy numpy aliases removed in 2.0.
+# torch-geometric was removed with the static-graph models (HGTConv, GATConv).
+# It was imported by exactly one module, which no longer exists.
 torch==2.14.0
-torch-geometric==2.8.0.post1
 pandas==2.2.3
 numpy==2.5.3
 scikit-learn==1.9.0

@@ -246,11 +246,15 @@ def run_training(self, job_id: int, parameters: dict):
         output_dir = f"/app/data/jobs/{job_id}"
         os.makedirs(output_dir, exist_ok=True)
 
-        raw_config = parameters.get('config', {'model': 'HGT'})
-        config = dict(raw_config) if isinstance(raw_config, dict) else {'model': 'HGT'}
+        raw_config = parameters.get('config', {'model': 'temporal_attention'})
+        config = dict(raw_config) if isinstance(raw_config, dict) else {'model': 'temporal_attention'}
         if 'num_epochs' in config and 'epochs' not in config:
             config['epochs'] = config['num_epochs']
-        config.setdefault('model', 'HGT')
+        # The old default here was "HGT", but MultiScaleTrainer never built a
+        # graph model: it warned that HGT was "not fully integrated" and trained
+        # MultiScaleTemporalAttentionModel, while the job result still reported
+        # model_type="HGT". The default now names the model that is trained.
+        config.setdefault('model', 'temporal_attention')
         orchestrator = EngineOrchestrator(f"job_{job_id}", output_dir, config)
 
         # For training, we need existing data package
@@ -893,12 +897,11 @@ def run_backtest(self, job_id: int, parameters: dict):
                 backtest_metrics["risk_series_skipped"],
             )
 
-        # Quantitative extension: risk-signal returns, tail-risk statistics, and
-        # walk-forward fold diagnostics. Purely additive to backtest_metrics.
+        # Evaluation extension: directional agreement between the risk series and
+        # any available ground truth, plus walk-forward fold diagnostics.
         #
-        # These metrics are return- and transition-based, so they require a series
-        # ordered in time. The series is source-major, so `boundaries` marks the
-        # seam between sources and no metric differences across it.
+        # The series is ordered in time and source-major, so `boundaries` marks
+        # the seam between sources and no metric differences across it.
         wf_raw = parameters.get("walk_forward")
         if not isinstance(wf_raw, dict):
             wf_raw = {}
@@ -914,26 +917,30 @@ def run_backtest(self, job_id: int, parameters: dict):
             logger.warning(f"Invalid walk_forward parameters for job {job_id}, using defaults: {config_exc}")
             wf_config = WalkForwardConfig()
 
+        # Only metrics that are meaningful for a risk state. Sharpe, Sortino,
+        # max drawdown, Calmar, volatility and VaR/CVaR were deleted: they
+        # characterise the return of a priced asset, and a risk score is a latent
+        # state, not a price. The "return" series they consumed was manufactured
+        # by sign-flipping that state, so the statistics described an artefact.
         quant_keys = (
-            "sharpe_ratio",
-            "sortino_ratio",
-            "max_drawdown",
-            "calmar_ratio",
-            "annualized_volatility",
+            "directional_accuracy",
             "hit_rate",
-            "var_95",
-            "cvar_95",
+            "mse",
+            "mae",
+            "rmse",
+            "r2",
         )
 
         # A series is scoreable when it is ordered in time and has more than one
-        # point. A ground-truth target is optional: without it the return-based
-        # metrics still describe the model's own risk trajectory.
+        # point. A ground-truth target is optional: without it the error metrics
+        # are undefined and only the direction-free diagnostics are reported.
         if series_usable:
             quant_metrics = compute_metrics(
                 actual=actuals, predicted=pred_values, boundaries=boundaries or None
             )
             for quant_key in quant_keys:
-                backtest_metrics[quant_key] = quant_metrics[quant_key]
+                if quant_key in quant_metrics:
+                    backtest_metrics[quant_key] = quant_metrics[quant_key]
 
             # Folds are generated inside each source's own contiguous span: folding
             # across a concatenation of sources would train on one entity and test

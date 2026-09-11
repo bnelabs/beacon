@@ -75,20 +75,33 @@ class MultiSourceDataset(Dataset):
             source_data = self.data[self.data['source_code'] == source].copy()
             source_data = source_data.sort_values('Date')
 
-            # Extract values - use 'Close' column from timeseries data
+            # Extract values - use 'Close' column from timeseries data. Gaps are
+            # preserved and imputed with the observed mean below, never carried
+            # forward: forward-filling would present the encoder with a level
+            # that had not been published at that timestamp.
             value_column = 'Close' if 'Close' in source_data.columns else 'Value'
-            values = source_data[value_column].ffill().fillna(0).values
+            values = (
+                pd.to_numeric(source_data[value_column], errors='coerce')
+                .to_numpy(dtype=float)
+            )
             if len(values) < 2:
                 logger.warning("Skipping source '%s' – not enough points (%d)", source, len(values))
                 continue
 
-            # Store normalization stats PER SOURCE
-            mean = float(np.mean(values))
-            std = float(np.std(values) + 1e-8)
+            observed = np.isfinite(values)
+            observed_values = values[observed]
+            if observed_values.size == 0:
+                logger.warning("Skipping source '%s' – no observed values", source)
+                continue
+
+            # Store normalization stats PER SOURCE, from observed values only.
+            mean = float(observed_values.mean())
+            std = float(observed_values.std() + 1e-8)
             self.source_stats[source] = {'mean': mean, 'std': std}
 
-            # Normalize
+            # Normalize, then impute unobserved entries at the standardised mean.
             normalized = (values - mean) / std
+            normalized = np.where(np.isfinite(normalized), normalized, 0.0)
 
             # Create sequences for this source
             # Skip sources not in the mapping (can happen in test/val sets)
@@ -103,6 +116,11 @@ class MultiSourceDataset(Dataset):
                 continue
 
             for i in range(len(normalized) - window):
+                # Never train on an imputed target: the label would be a
+                # substituted mean rather than an observation, and the model
+                # would be rewarded for reproducing it.
+                if not observed[i + window]:
+                    continue
                 seq = normalized[i:i + window]
                 if len(seq) < sequence_length:
                     pad_width = sequence_length - len(seq)

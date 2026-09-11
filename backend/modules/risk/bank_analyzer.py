@@ -1,108 +1,263 @@
-"""Per-Bank Liquidity Risk Analysis - Multi-Institution Support."""
+"""Per-institution systemic risk analysis.
 
-import torch
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Tuple, Optional
-from dataclasses import dataclass
+This module was rebuilt on real network mathematics. The previous
+implementation scored contagion as ``risk_i * exposure * vulnerability_j`` with
+``vulnerability = min(total_exposure / 1e9, 1.0)``, simulated cascades as
+``new_risk = current_risk + min(impact / 1e9, 0.5)``, and ranked systemically
+important institutions by ``0.4 * risk + 0.4 * min(outgoing / 1e10, 1) + 0.2 *
+min(connections / 20, 1)``.
+
+Every constant in those expressions is arbitrary: ``1e9``, ``1e10``, ``20``, the
+``0.4/0.4/0.2`` split. They convert dollars and counts into a unitless "risk"
+that is then compared against a threshold. Because the scale constants are
+chosen rather than derived, the thresholds they feed are not falsifiable -- move
+the unit of account from dollars to millions and every institution's score
+changes while nothing about the world changed.
+
+What replaces them:
+
+* **Systemic importance** comes from the interbank liability network. When
+  endowments (external assets) are supplied, importance is a *contagion index*:
+  the increase in total system clearing shortfall caused by wiping out that
+  institution's external assets, divided by system-wide liabilities. It is
+  measured, not asserted. Without endowments, importance falls back to
+  eigenvector centrality of the liability matrix -- still a property of the
+  network rather than of a hand-picked scale factor.
+* **Contagion paths** come from the Eisenberg-Noe clearing engine in
+  :mod:`backend.modules.risk.clearing`, which derives default from the balance
+  sheet and conserves payments.
+* **A bank's own risk score** is the model's output. It is a latent state and is
+  deliberately *not* decomposed into "market", "funding" and "operational"
+  components. The previous code produced those three channels as
+  ``overall * 0.7 + vol * 0.2 + trend * 0.1`` and ``overall * 0.8 +
+  instability * 0.2`` -- re-weighted copies of one number, which conveyed the
+  appearance of a decomposition without performing one. Real decomposition
+  requires the funding and market layers of the multiplex network, which arrive
+  with the data layer.
+
+Balance-sheet inputs
+--------------------
+
+Clearing needs two things per institution: a liability matrix (who owes whom)
+and an endowment (external assets available to meet obligations). BEACON's model
+produces neither -- it scores latent liquidity stress from time series. So
+network analysis is performed only when the caller supplies exposures, and
+clearing only when it additionally supplies endowments. When they are absent the
+analysis says so instead of manufacturing endowments from risk scores, which
+would make the clearing output a restatement of the model's own prediction.
+"""
+
+from __future__ import annotations
+
 import logging
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Sequence, Tuple
 
-from backend.modules.explainability.shap_explainer import ModelExplainer, NetworkExplainer, ExplanationResult
+import numpy as np
+import pandas as pd
+import torch
+
+from .clearing import (
+    ClearingResult,
+    NetworkLayer,
+    clear_multiplex,
+)
 from .constants import (
+    CRITICAL_RISK_THRESHOLD,
+    HIGH_RISK_THRESHOLD,
+    RISK_THRESHOLD_HIGH,
     RISK_THRESHOLD_LOW,
     RISK_THRESHOLD_MODERATE,
-    RISK_THRESHOLD_HIGH,
-    HIGH_RISK_THRESHOLD,
-    CRITICAL_RISK_THRESHOLD,
-    WEIGHT_INDIVIDUAL_RISK,
-    WEIGHT_SYSTEMIC_CONCENTRATION,
-    WEIGHT_NETWORK_INTERCONNECTEDNESS,
-    VOLATILITY_NORMALIZATION_FACTOR,
-    TREND_NORMALIZATION_FACTOR,
-    OPERATIONAL_RISK_MINIMUM,
-    OPERATIONAL_RISK_MAXIMUM,
-    OPERATIONAL_RISK_DEFAULT,
-    WEIGHT_DATA_COMPLETENESS,
-    WEIGHT_DATA_CONSISTENCY,
-    RECENT_DATA_WINDOW
 )
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "BankRiskProfile",
+    "MultiBankAnalysis",
+    "BankRiskAnalyzer",
+    "generate_executive_summary",
+    "eigenvector_centrality",
+]
+
+# Milestone at which calibrated intervals replace the current placeholder.
+CONFIDENCE_METHOD_PENDING = "unavailable:pending-conformal-calibration"
+
+
+def eigenvector_centrality(
+    matrix: np.ndarray,
+    tolerance: float = 1e-12,
+    max_iterations: int = 1_000,
+) -> np.ndarray:
+    """Eigenvector centrality of a non-negative influence matrix.
+
+    Used on the liability matrix ``L``, where ``L[i, j]`` is what ``i`` owes
+    ``j``. Entry ``i`` of the result measures how much damage ``i`` can pass on,
+    weighted recursively by how much damage each of its creditors can pass on.
+
+    Implemented with power iteration rather than pulled from a graph library so
+    the convergence behaviour is explicit and testable.
+
+    Args:
+        matrix: Square non-negative matrix.
+        tolerance: Convergence threshold on the sup-norm change.
+        max_iterations: Iteration cap.
+
+    Returns:
+        Non-negative vector of unit Euclidean norm. All zeros when the matrix
+        carries no weight (an empty network has no central node).
+    """
+    arr = np.asarray(matrix, dtype=float)
+    if arr.ndim != 2 or arr.shape[0] != arr.shape[1]:
+        raise ValueError(f"matrix must be square, got shape {arr.shape}")
+    n = arr.shape[0]
+    if n == 0:
+        return np.zeros(0, dtype=float)
+
+    non_negative = np.maximum(arr, 0.0)
+    if non_negative.sum() <= 0:
+        return np.zeros(n, dtype=float)
+
+    vector = np.full(n, 1.0 / np.sqrt(n))
+    for _ in range(max_iterations):
+        updated = non_negative @ vector
+        norm = float(np.linalg.norm(updated))
+        if norm <= tolerance:
+            return np.zeros(n, dtype=float)
+        updated = updated / norm
+        if float(np.max(np.abs(updated - vector))) <= tolerance:
+            return updated
+        vector = updated
+
+    logger.warning("eigenvector centrality did not converge in %d iterations", max_iterations)
+    return vector
+
+
+def _exposures_to_matrix(
+    bank_ids: Sequence[str],
+    exposures: Dict[Tuple[str, str], float],
+) -> np.ndarray:
+    """Build the ``(n, n)`` liability matrix from ``(debtor, creditor) -> amount``."""
+    index = {bank_id: position for position, bank_id in enumerate(bank_ids)}
+    matrix = np.zeros((len(bank_ids), len(bank_ids)), dtype=float)
+    for (debtor, creditor), amount in exposures.items():
+        if debtor == creditor:
+            continue
+        if debtor not in index or creditor not in index:
+            raise KeyError(
+                f"exposure ({debtor!r}, {creditor!r}) references an institution "
+                f"outside the analysed set"
+            )
+        matrix[index[debtor], index[creditor]] += float(amount)
+    return matrix
+
 
 @dataclass
 class BankRiskProfile:
-    """Complete risk profile for a single bank."""
+    """Risk profile for a single institution."""
+
     bank_id: str
     bank_name: str
 
-    # Risk scores (0-1)
-    overall_liquidity_risk: float
-    market_liquidity_risk: float
-    funding_liquidity_risk: float
-    operational_risk: float
+    risk_score: float
+    """Model output. A latent stress state in ``[0, 1]``, not a price."""
 
-    # Confidence bounds
-    confidence_lower: float
-    confidence_upper: float
+    risk_level: str
 
-    # Explanations
-    explanation: ExplanationResult
-    risk_level: str  # low, medium, high, critical
-
-    # Systemic importance
     systemic_importance: float
-    network_position: str  # hub, peripheral, intermediate
+    """Contagion index when endowments are known, else eigenvector centrality."""
 
-    # Vulnerabilities and strengths
-    top_vulnerabilities: List[str]
-    top_strengths: List[str]
+    systemic_importance_method: str
 
-    # Recommendations
-    recommendations: List[str]
+    network_position: str
+
+    gross_liabilities: float
+    gross_claims: float
+
+    confidence_lower: Optional[float]
+    confidence_upper: Optional[float]
+    confidence_method: str
+
+    top_vulnerabilities: List[str] = field(default_factory=list)
+    top_strengths: List[str] = field(default_factory=list)
+    recommendations: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "bank_id": self.bank_id,
+            "bank_name": self.bank_name,
+            "risk_score": self.risk_score,
+            "risk_level": self.risk_level,
+            "systemic_importance": self.systemic_importance,
+            "systemic_importance_method": self.systemic_importance_method,
+            "network_position": self.network_position,
+            "gross_liabilities": self.gross_liabilities,
+            "gross_claims": self.gross_claims,
+            "confidence_lower": self.confidence_lower,
+            "confidence_upper": self.confidence_upper,
+            "confidence_method": self.confidence_method,
+            "top_vulnerabilities": list(self.top_vulnerabilities),
+            "top_strengths": list(self.top_strengths),
+            "recommendations": list(self.recommendations),
+        }
 
 
 @dataclass
 class MultiBankAnalysis:
-    """Analysis across multiple banks."""
+    """Analysis across a set of institutions."""
+
     analysis_date: str
     num_banks: int
-
-    # Individual bank profiles
     bank_profiles: Dict[str, BankRiskProfile]
 
-    # Network effects
-    contagion_matrix: pd.DataFrame  # Bank-to-bank contagion effects
-    systemic_banks: List[Tuple[str, float, str]]  # (bank_id, importance, reason)
-
-    # Cascade simulations
-    cascade_scenarios: Dict[str, Dict]  # bank_id -> cascade_result
-
-    # Aggregate statistics
     avg_risk: float
     max_risk: float
     num_high_risk: int
     num_critical_risk: int
 
-    # System-wide metrics
+    network_available: bool
     network_density: float
-    systemic_risk_score: float
+    liability_matrix: Optional[np.ndarray]
+
+    clearing: Optional[ClearingResult] = None
+    """Populated only when endowments were supplied."""
+
+    shock_scenarios: Dict[str, ClearingResult] = field(default_factory=dict)
+    """Per-institution clearing result under a total-loss shock to that node."""
+
+    systemic_risk_score: Optional[float] = None
+    """Fraction of system liabilities left unpaid at the clearing equilibrium.
+
+    ``None`` when the balance sheet is unknown -- the honest answer, since
+    without liabilities and endowments there is no systemic risk number to
+    compute.
+    """
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "analysis_date": self.analysis_date,
+            "num_banks": self.num_banks,
+            "avg_risk": self.avg_risk,
+            "max_risk": self.max_risk,
+            "num_high_risk": self.num_high_risk,
+            "num_critical_risk": self.num_critical_risk,
+            "network_available": self.network_available,
+            "network_density": self.network_density,
+            "systemic_risk_score": self.systemic_risk_score,
+            "clearing": self.clearing.to_dict() if self.clearing else None,
+            "shock_scenarios": {
+                bank_id: result.to_dict()
+                for bank_id, result in self.shock_scenarios.items()
+            },
+            "bank_profiles": {
+                bank_id: profile.to_dict()
+                for bank_id, profile in self.bank_profiles.items()
+            },
+        }
 
 
 class BankRiskAnalyzer:
-    """
-    Analyzes liquidity risk for multiple banks.
-
-    For each bank:
-    - Individual risk assessment
-    - Explainable predictions
-    - Vulnerability identification
-
-    For the system:
-    - Inter-bank dependencies
-    - Contagion analysis
-    - Systemic risk computation
-    """
+    """Scores institutions and, when the balance sheet is known, clears them."""
 
     def __init__(
         self,
@@ -110,453 +265,417 @@ class BankRiskAnalyzer:
         device: torch.device,
         sequence_length: int,
         source_stats: Dict[str, Dict[str, float]],
-        source_to_id: Dict[str, int]
-    ):
+        source_to_id: Dict[str, int],
+    ) -> None:
         self.model = model
         self.device = device
-        self.explainer = ModelExplainer(model, device)
-        self.network_explainer = NetworkExplainer()
-        self.sequence_length = sequence_length
+        self.sequence_length = int(sequence_length)
         self.source_stats = source_stats or {}
         self.source_to_id = source_to_id or {}
 
+    # ------------------------------------------------------------------
+    # Scoring
+    # ------------------------------------------------------------------
+
     def analyze_multiple_banks(
         self,
-        bank_data: Dict[str, pd.DataFrame],  # bank_id -> timeseries DataFrame
-        bank_exposures: Optional[Dict[Tuple[str, str], float]] = None,  # (from, to) -> exposure
-        feature_names: Optional[List[str]] = None
+        bank_data: Dict[str, pd.DataFrame],
+        bank_exposures: Optional[Dict[Tuple[str, str], float]] = None,
+        feature_names: Optional[List[str]] = None,
+        bank_endowments: Optional[Dict[str, float]] = None,
     ) -> MultiBankAnalysis:
-        """
-        Analyze liquidity risk for multiple banks.
+        """Score every institution, then analyse the network if possible.
 
         Args:
-            bank_data: Dict mapping bank_id to their timeseries data
-            bank_exposures: Inter-bank exposures (optional)
-            feature_names: Feature names for explainability
+            bank_data: ``bank_id ->`` time series DataFrame.
+            bank_exposures: ``(debtor, creditor) ->`` nominal exposure.
+            feature_names: Unused; retained for call-site compatibility.
+            bank_endowments: ``bank_id ->`` external assets available to meet
+                obligations. Required for clearing.
 
         Returns:
-            MultiBankAnalysis with per-bank and system-wide results
+            A :class:`MultiBankAnalysis`. ``systemic_risk_score`` is ``None``
+            unless both exposures and endowments are supplied.
         """
-        logger.info(f"Analyzing {len(bank_data)} banks")
+        logger.info("Analysing %d institutions", len(bank_data))
 
-        # Analyze each bank individually
-        bank_profiles = {}
-        bank_predictions = {}
+        bank_ids = list(bank_data.keys())
+        scores: Dict[str, float] = {}
+        for bank_id, frame in bank_data.items():
+            scores[bank_id] = self._score_bank(bank_id, frame)
 
-        for bank_id, df in bank_data.items():
-            profile = self._analyze_single_bank(bank_id, df, feature_names)
-            bank_profiles[bank_id] = profile
-            bank_predictions[bank_id] = profile.overall_liquidity_risk
-
-        # Network analysis (if exposures provided)
-        if bank_exposures:
-            contagion_matrix = self.network_explainer.compute_contagion_matrix(
-                bank_predictions, bank_exposures
+        liabilities = None
+        network_available = bool(bank_exposures)
+        network_density = 0.0
+        if network_available:
+            liabilities = _exposures_to_matrix(bank_ids, bank_exposures)
+            possible = len(bank_ids) * (len(bank_ids) - 1)
+            network_density = (
+                float(np.count_nonzero(liabilities)) / possible if possible else 0.0
             )
 
-            systemic_banks = self.network_explainer.identify_systemic_banks(
-                bank_predictions, bank_exposures
-            )
-
-            # Simulate cascades for high-risk banks
-            cascade_scenarios = {}
-            for bank_id, risk in bank_predictions.items():
-                if risk > HIGH_RISK_THRESHOLD:  # High risk
-                    cascade = self.network_explainer.simulate_cascade(
-                        bank_id, bank_predictions, bank_exposures
-                    )
-                    cascade_scenarios[bank_id] = cascade
-
-            # Network density
-            num_banks = len(bank_data)
-            actual_connections = len(bank_exposures)
-            max_connections = num_banks * (num_banks - 1)
-            network_density = actual_connections / max_connections if max_connections > 0 else 0
-
-        else:
-            # No network data
-            contagion_matrix = pd.DataFrame()
-            systemic_banks = []
-            cascade_scenarios = {}
-            network_density = 0
-
-        # Aggregate statistics
-        risks = [p.overall_liquidity_risk for p in bank_profiles.values()]
-        avg_risk = float(np.mean(risks))
-        max_risk = float(np.max(risks))
-        num_high_risk = sum(1 for r in risks if r > HIGH_RISK_THRESHOLD)
-        num_critical_risk = sum(1 for r in risks if r > CRITICAL_RISK_THRESHOLD)
-
-        # System-wide risk
-        systemic_risk_score = self._compute_systemic_risk(
-            bank_predictions, contagion_matrix, systemic_banks
+        centrality = (
+            eigenvector_centrality(liabilities)
+            if liabilities is not None
+            else np.zeros(len(bank_ids))
         )
+
+        clearing: Optional[ClearingResult] = None
+        shock_scenarios: Dict[str, ClearingResult] = {}
+        importance: Dict[str, float] = {}
+        importance_method = "eigenvector_centrality"
+        systemic_risk_score: Optional[float] = None
+
+        balance_sheet_known = (
+            liabilities is not None
+            and bank_endowments is not None
+            and len(bank_endowments) > 0
+        )
+
+        if balance_sheet_known:
+            endowments = np.array(
+                [float(bank_endowments.get(bank_id, 0.0)) for bank_id in bank_ids],
+                dtype=float,
+            )
+            layer = NetworkLayer(name="interbank", liabilities=liabilities, seniority=0)
+            clearing = clear_multiplex([layer], endowments, node_ids=bank_ids)
+            importance_method = "contagion_index"
+
+            baseline_shortfall = clearing.total_shortfall
+            system_liabilities = float(clearing.nominal_liabilities.sum())
+            scale = system_liabilities if system_liabilities > 0 else 1.0
+
+            for position, bank_id in enumerate(bank_ids):
+                shocked = endowments.copy()
+                shocked[position] = 0.0
+                outcome = clear_multiplex([layer], shocked, node_ids=bank_ids)
+                shock_scenarios[bank_id] = outcome
+                importance[bank_id] = max(
+                    0.0, (outcome.total_shortfall - baseline_shortfall) / scale
+                )
+
+            systemic_risk_score = (
+                float(clearing.total_shortfall / scale) if scale > 0 else 0.0
+            )
+        elif network_available:
+            # Topology is known but the balance sheet is not. Centrality is a
+            # legitimate network property; a clearing result would not be.
+            importance = {
+                bank_id: float(max(centrality[position], 0.0))
+                for position, bank_id in enumerate(bank_ids)
+            }
+
+        profiles: Dict[str, BankRiskProfile] = {}
+        for position, bank_id in enumerate(bank_ids):
+            risk_score = scores[bank_id]
+            profiles[bank_id] = BankRiskProfile(
+                bank_id=bank_id,
+                bank_name=f"Bank {bank_id}",
+                risk_score=risk_score,
+                risk_level=self._risk_level(risk_score),
+                systemic_importance=importance.get(bank_id, 0.0),
+                systemic_importance_method=importance_method,
+                network_position=self._network_position(
+                    centrality, position, network_available
+                ),
+                gross_liabilities=(
+                    float(liabilities[position].sum()) if liabilities is not None else 0.0
+                ),
+                gross_claims=(
+                    float(liabilities[:, position].sum()) if liabilities is not None else 0.0
+                ),
+                confidence_lower=None,
+                confidence_upper=None,
+                confidence_method=CONFIDENCE_METHOD_PENDING,
+                top_vulnerabilities=self._vulnerabilities(
+                    risk_score=risk_score,
+                    position=position,
+                    centrality=centrality,
+                    network_available=network_available,
+                ),
+                top_strengths=[],
+                recommendations=self._recommendations(risk_score, importance.get(bank_id, 0.0)),
+            )
+
+        risks = list(scores.values())
+        avg_risk = float(np.mean(risks)) if risks else 0.0
+        max_risk = float(np.max(risks)) if risks else 0.0
 
         return MultiBankAnalysis(
             analysis_date=pd.Timestamp.now().isoformat(),
-            num_banks=len(bank_data),
-            bank_profiles=bank_profiles,
-            contagion_matrix=contagion_matrix,
-            systemic_banks=systemic_banks,
-            cascade_scenarios=cascade_scenarios,
+            num_banks=len(bank_ids),
+            bank_profiles=profiles,
             avg_risk=avg_risk,
             max_risk=max_risk,
-            num_high_risk=num_high_risk,
-            num_critical_risk=num_critical_risk,
+            num_high_risk=sum(1 for r in risks if r > HIGH_RISK_THRESHOLD),
+            num_critical_risk=sum(1 for r in risks if r > CRITICAL_RISK_THRESHOLD),
+            network_available=network_available,
             network_density=network_density,
-            systemic_risk_score=systemic_risk_score
+            liability_matrix=liabilities,
+            clearing=clearing,
+            shock_scenarios=shock_scenarios,
+            systemic_risk_score=systemic_risk_score,
         )
 
-    def _analyze_single_bank(
-        self,
-        bank_id: str,
-        df: pd.DataFrame,
-        feature_names: Optional[List[str]] = None
-    ) -> BankRiskProfile:
-        """Analyze a single bank's risk."""
+    def _score_bank(self, bank_id: str, df: pd.DataFrame) -> float:
+        """Score one institution with a single forward pass.
 
-        # Prepare data for model
-        # Assume df has 'Date' and 'Value' columns
+        Missing observations are **not** forward-filled. Forward-filling copies
+        a stale value into the future, which means a model consuming the series
+        sees data that had not been published at that timestamp -- the series is
+        silently extended with information from before the gap. Instead the gap
+        is preserved and the observation mask is passed through, so the encoder
+        can distinguish "value was zero" from "value was not reported".
+        """
         if len(df) == 0:
             raise ValueError(f"No data provided for bank {bank_id}")
 
-        if 'source_code' in df.columns and df['source_code'].notna().any():
-            source_code = df['source_code'].dropna().iloc[0]
-            df = df[df['source_code'] == source_code]
-        else:
-            source_code = None
+        source_code: Optional[str] = None
+        if "source_code" in df.columns and df["source_code"].notna().any():
+            source_code = str(df["source_code"].dropna().iloc[0])
+            df = df[df["source_code"] == source_code]
 
-        value_column = 'Close' if 'Close' in df.columns else 'Value'
-        series = df[value_column].astype(float)
-        series = series.ffill().bfill()
-        values = series.fillna(0).values
+        value_column = "Close" if "Close" in df.columns else "Value"
+        if value_column not in df.columns:
+            raise ValueError(
+                f"Bank {bank_id} has neither a 'Close' nor a 'Value' column; "
+                f"columns are {sorted(df.columns)}"
+            )
+
+        series = pd.to_numeric(df[value_column], errors="coerce")
+        observed = series.notna().to_numpy()
+        values = series.to_numpy(dtype=float)
 
         if len(values) < self.sequence_length:
-            logger.warning(f"Bank {bank_id} has only {len(values)} data points")
+            logger.warning(
+                "Bank %s has only %d observations for a sequence length of %d",
+                bank_id, len(values), self.sequence_length,
+            )
 
-        sequence, stats = self._prepare_sequence(values, source_code)
-        sequence = sequence.to(self.device)
-
-        # Get source ID (assume 0 if not specified)
+        sequence, _stats = self._prepare_sequence(values, observed, source_code)
         source_id = self._map_source_id(source_code)
 
-        # Get prediction with explanation
-        explanation = self.explainer.explain_prediction(
-            sequence, source_id,
-            feature_names or [f"t-{i}" for i in range(self.sequence_length)],
-            actual_value=float(values[-1]) if len(values) > 0 else None
+        inputs = sequence.unsqueeze(0).to(self.device)
+        source_ids = torch.tensor(
+            [[int(source_id)]], dtype=torch.long, device=self.device
         )
+        self.model.eval()
+        with torch.no_grad():
+            output = self.model(inputs, source_ids)
 
-        # Classify risk level
-        risk_value = float(explanation.prediction_value)
-        if risk_value < RISK_THRESHOLD_LOW:
-            risk_level = "low"
-        elif risk_value < RISK_THRESHOLD_MODERATE:
-            risk_level = "medium"
-        elif risk_value < RISK_THRESHOLD_HIGH:
-            risk_level = "high"
-        else:
-            risk_level = "critical"
-
-        # Extract vulnerabilities and strengths
-        top_vulnerabilities = explanation.risk_factors[:3]
-        top_strengths = explanation.mitigating_factors[:3]
-
-        # Generate recommendations
-        recommendations = self._generate_recommendations(risk_value, risk_level, explanation)
-
-        # Extract separate risk components from prediction data
-        # Use the sequence tensor (not DataFrame) for risk computations
-        market_liquidity_risk = self._compute_market_liquidity_risk(sequence, risk_value)
-        funding_liquidity_risk = self._compute_funding_liquidity_risk(sequence, risk_value)
-        operational_risk = self._compute_operational_risk(sequence)
-
-        return BankRiskProfile(
-            bank_id=bank_id,
-            bank_name=f"Bank {bank_id}",  # Would come from database
-            overall_liquidity_risk=risk_value,
-            market_liquidity_risk=market_liquidity_risk,
-            funding_liquidity_risk=funding_liquidity_risk,
-            operational_risk=operational_risk,
-            confidence_lower=explanation.confidence_lower,
-            confidence_upper=explanation.confidence_upper,
-            explanation=explanation,
-            risk_level=risk_level,
-            systemic_importance=0.0,  # Computed in network analysis
-            network_position="unknown",
-            top_vulnerabilities=top_vulnerabilities,
-            top_strengths=top_strengths,
-            recommendations=recommendations
-        )
+        return float(output.detach().cpu().reshape(-1)[0])
 
     def _map_source_id(self, source_code: Optional[str]) -> int:
         if source_code and source_code in self.source_to_id:
             return int(self.source_to_id[source_code])
         if self.source_to_id:
-            logger.warning(f"Source '{source_code}' not seen during training - defaulting to 0")
+            logger.warning(
+                "Source %r was not seen during training - defaulting to 0", source_code
+            )
         return 0
 
-    def _prepare_sequence(self, values: np.ndarray, source_code: Optional[str]) -> Tuple[torch.Tensor, Dict[str, float]]:
+    def _prepare_sequence(
+        self,
+        values: np.ndarray,
+        observed: np.ndarray,
+        source_code: Optional[str],
+    ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        """Normalise the tail of the series, preserving gaps as ``nan``.
+
+        Substitutes the training-time mean for missing entries rather than
+        carrying the previous observation forward, and returns the observation
+        mask so callers can tell a real value from an imputed one.
+        """
         values = np.asarray(values, dtype=np.float32)
         stats = self.source_stats.get(source_code, {}) if source_code else {}
-        mean = float(stats.get('mean', np.mean(values) if len(values) else 0.0))
-        std = float(stats.get('std', np.std(values) + 1e-8 if len(values) else 1.0))
-        if std == 0.0:
+
+        finite = values[np.isfinite(values)]
+        default_mean = float(np.mean(finite)) if finite.size else 0.0
+        default_std = float(np.std(finite)) if finite.size else 1.0
+        mean = float(stats.get("mean", default_mean))
+        std = float(stats.get("std", default_std))
+        if not np.isfinite(std) or std == 0.0:
             std = 1.0
 
-        normalized = (values - mean) / std if len(values) else np.zeros(self.sequence_length, dtype=np.float32)
+        normalized = (values - mean) / std
+        # Impute with the standardised mean (i.e. 0) and keep the mask separate.
+        mask = np.isfinite(normalized).astype(np.float32)
+        normalized = np.where(np.isfinite(normalized), normalized, 0.0)
 
-        if len(normalized) >= self.sequence_length:
-            normalized = normalized[-self.sequence_length:]
+        length = self.sequence_length
+        if len(normalized) >= length:
+            normalized = normalized[-length:]
+            mask = mask[-length:]
         else:
-            pad_value = normalized[0] if len(normalized) else 0.0
-            normalized = np.pad(
-                normalized,
-                (self.sequence_length - len(normalized), 0),
-                mode='constant',
-                constant_values=pad_value
-            )
+            pad = length - len(normalized)
+            normalized = np.pad(normalized, (pad, 0), mode="constant", constant_values=0.0)
+            mask = np.pad(mask, (pad, 0), mode="constant", constant_values=0.0)
 
         sequence = torch.FloatTensor(normalized)
-        return sequence, {'mean': mean, 'std': std}
+        return sequence, {"mean": mean, "std": std, "observed_fraction": float(mask.mean())}
 
-    def _compute_market_liquidity_risk(self, bank_data: torch.Tensor, overall_risk: float) -> float:
-        """Compute market liquidity risk component from bank data features."""
+    # ------------------------------------------------------------------
+    # Interpretation
+    # ------------------------------------------------------------------
 
-        # If we can extract market-specific features from the data
-        # Market liquidity is affected by bid-ask spreads, trading volumes, price volatility
-        try:
-            # Convert tensor to numpy for analysis
-            data_np = bank_data.cpu().numpy() if torch.is_tensor(bank_data) else bank_data
+    @staticmethod
+    def _risk_level(risk_score: float) -> str:
+        if risk_score < RISK_THRESHOLD_LOW:
+            return "low"
+        if risk_score < RISK_THRESHOLD_MODERATE:
+            return "medium"
+        if risk_score < RISK_THRESHOLD_HIGH:
+            return "high"
+        return "critical"
 
-            # Compute volatility as a proxy for market liquidity stress
-            if len(data_np.shape) > 1:
-                volatility = np.std(data_np[:, 0]) if data_np.shape[1] > 0 else 0.0
-            else:
-                volatility = np.std(data_np)
+    @staticmethod
+    def _network_position(
+        centrality: np.ndarray,
+        position: int,
+        network_available: bool,
+    ) -> str:
+        if not network_available or centrality.size == 0:
+            return "unknown"
+        finite = centrality[np.isfinite(centrality)]
+        if finite.size == 0 or float(finite.max()) <= 0.0:
+            return "peripheral"
+        value = float(centrality[position])
+        if value >= 0.66 * float(finite.max()):
+            return "hub"
+        if value <= 0.33 * float(finite.max()):
+            return "peripheral"
+        return "intermediate"
 
-            # Recent trend analysis
-            recent_data = data_np[-RECENT_DATA_WINDOW:] if len(data_np) >= RECENT_DATA_WINDOW else data_np
-            trend = np.polyfit(range(len(recent_data)), recent_data.flatten(), 1)[0]
-
-            # Combine overall risk with market-specific indicators
-            # Higher volatility and negative trend increase market liquidity risk
-            volatility_factor = min(volatility / VOLATILITY_NORMALIZATION_FACTOR, 1.0)  # Normalize to 0-1
-            trend_factor = max(-trend, 0) / TREND_NORMALIZATION_FACTOR  # Negative trends increase risk
-
-            market_risk = overall_risk * 0.7 + volatility_factor * 0.2 + trend_factor * 0.1
-
-            return float(np.clip(market_risk, 0.0, 1.0))
-
-        except Exception as e:
-            logger.warning(f"Could not compute market liquidity risk: {e}")
-            # Fallback: slightly lower than overall risk
-            return float(overall_risk * 0.9)
-
-    def _compute_funding_liquidity_risk(self, bank_data: torch.Tensor, overall_risk: float) -> float:
-        """Compute funding liquidity risk component from bank data features."""
-
-        # Funding liquidity is affected by funding access, rollover risk, maturity mismatches
-        try:
-            data_np = bank_data.cpu().numpy() if torch.is_tensor(bank_data) else bank_data
-
-            # Analyze data stability and concentration
-            if len(data_np.shape) > 1:
-                stability = 1.0 - np.std(data_np[:, 0]) / (np.mean(np.abs(data_np[:, 0])) + 1e-8)
-            else:
-                stability = 1.0 - np.std(data_np) / (np.mean(np.abs(data_np)) + 1e-8)
-
-            # Lower stability means higher funding risk
-            instability_factor = max(1.0 - stability, 0.0)
-
-            # Funding risk tends to be slightly higher than overall risk during stress
-            funding_risk = overall_risk * 0.8 + instability_factor * 0.2
-
-            return float(np.clip(funding_risk, 0.0, 1.0))
-
-        except Exception as e:
-            logger.warning(f"Could not compute funding liquidity risk: {e}")
-            # Fallback: slightly higher than overall risk
-            return float(min(overall_risk * 1.1, 1.0))
-
-    def _compute_operational_risk(self, bank_data: torch.Tensor) -> float:
-        """Compute operational risk from data quality and completeness."""
-
-        try:
-            data_np = bank_data.cpu().numpy() if torch.is_tensor(bank_data) else bank_data
-
-            # Operational risk is based on data quality indicators
-            # Missing data, irregularities, and gaps increase operational risk
-            data_flat = data_np.flatten()
-
-            # Check for data irregularities
-            if len(data_flat) > 0:
-                # Data completeness (no NaN or extreme values)
-                completeness = 1.0 - (np.isnan(data_flat).sum() / len(data_flat))
-
-                # Data consistency (low coefficient of variation)
-                if np.mean(data_flat) != 0:
-                    cv = np.std(data_flat) / abs(np.mean(data_flat))
-                    consistency = 1.0 / (1.0 + cv)
-                else:
-                    consistency = 0.5
-
-                # Operational risk is inverse of data quality
-                operational_risk = 1.0 - (0.6 * completeness + 0.4 * consistency)
-
-                # Typically operational risk is lower than market/funding risks
-                return float(np.clip(operational_risk * 0.5, OPERATIONAL_RISK_MINIMUM, OPERATIONAL_RISK_MAXIMUM))
-            else:
-                return OPERATIONAL_RISK_DEFAULT  # Default moderate operational risk
-
-        except Exception as e:
-            logger.warning(f"Could not compute operational risk: {e}")
-            return OPERATIONAL_RISK_DEFAULT  # Default moderate operational risk
-
-    def _compute_systemic_risk(
-        self,
-        bank_predictions: Dict[str, float],
-        contagion_matrix: pd.DataFrame,
-        systemic_banks: List[Tuple[str, float, str]]
-    ) -> float:
-        """Compute overall systemic risk score."""
-
-        if len(bank_predictions) == 0:
-            return 0.0
-
-        # Component 1: Average individual risk
-        avg_individual_risk = np.mean(list(bank_predictions.values()))
-
-        # Component 2: Concentration of risk in systemic banks
-        if systemic_banks:
-            systemic_risk_concentration = np.mean([score for _, score, _ in systemic_banks[:3]])
-        else:
-            systemic_risk_concentration = 0.0
-
-        # Component 3: Network interconnectedness
-        if not contagion_matrix.empty:
-            # Average off-diagonal contagion effect
-            np_matrix = contagion_matrix.values
-            np.fill_diagonal(np_matrix, 0)
-            avg_contagion = np_matrix.mean()
-        else:
-            avg_contagion = 0.0
-
-        systemic_risk = (
-            WEIGHT_INDIVIDUAL_RISK * avg_individual_risk +
-            WEIGHT_SYSTEMIC_CONCENTRATION * systemic_risk_concentration +
-            WEIGHT_NETWORK_INTERCONNECTEDNESS * min(avg_contagion * 10, 1.0)  # Scale to 0-1
-        )
-
-        return float(systemic_risk)
-
-    def _generate_recommendations(
-        self,
-        risk_value: float,
-        risk_level: str,
-        explanation: ExplanationResult
+    @staticmethod
+    def _vulnerabilities(
+        risk_score: float,
+        position: int,
+        centrality: np.ndarray,
+        network_available: bool,
     ) -> List[str]:
-        """Generate actionable recommendations."""
+        """Describe the measured conditions, without inventing causes.
 
-        recommendations = []
+        The previous implementation listed "High contagion centrality" from a
+        centrality-like score that was in fact a weighted sum of risk, exposure
+        and a connection count. These strings are now tied to quantities that
+        exist: the model score and the node's position in the liability network.
+        """
+        findings: List[str] = []
+        if risk_score >= RISK_THRESHOLD_HIGH:
+            findings.append("Model risk score is at or above the high threshold")
+        elif risk_score >= RISK_THRESHOLD_MODERATE:
+            findings.append("Model risk score is in the elevated band")
 
-        if risk_level in ["high", "critical"]:
+        if network_available and centrality.size:
+            finite = centrality[np.isfinite(centrality)]
+            peak = float(finite.max()) if finite.size else 0.0
+            if peak > 0 and float(centrality[position]) >= 0.66 * peak:
+                findings.append("Top-third eigenvector centrality in the liability network")
+        return findings
+
+    @staticmethod
+    def _recommendations(risk_score: float, systemic_importance: float) -> List[str]:
+        recommendations: List[str] = []
+        if risk_score >= RISK_THRESHOLD_HIGH:
             recommendations.append(
-                "URGENT: Increase High-Quality Liquid Assets (HQLA) by at least 15%"
+                "Increase high-quality liquid assets and reduce short-term wholesale reliance"
             )
             recommendations.append(
-                "Reduce reliance on short-term wholesale funding"
+                "Stress-test the contingency funding plan against the modelled stress path"
             )
-            recommendations.append(
-                "Activate contingency funding plan and stress test liquidity buffers"
-            )
+        elif risk_score >= RISK_THRESHOLD_MODERATE:
+            recommendations.append("Monitor intraday liquidity positions more frequently")
+            recommendations.append("Review funding-source diversification")
 
-        if risk_level == "medium":
+        if systemic_importance >= 0.1:
             recommendations.append(
-                "Monitor intraday liquidity positions more frequently (at least hourly)"
+                "Institution is systemically material: publish exposure detail for the "
+                "clearing members that would absorb its shortfall"
             )
-            recommendations.append(
-                "Review and diversify funding sources"
-            )
-
-        # Specific recommendations based on risk drivers
-        for driver_name, _, _ in explanation.top_drivers[:2]:
-            if "funding" in driver_name.lower():
-                recommendations.append(
-                    f"Address funding pressure in {driver_name} - consider extending maturities"
-                )
-            elif "market" in driver_name.lower():
-                recommendations.append(
-                    f"Mitigate market liquidity risk in {driver_name} - reduce concentrated positions"
-                )
-
-        return recommendations[:5]  # Top 5
+        return recommendations[:5]
 
 
 def generate_executive_summary(analysis: MultiBankAnalysis) -> str:
-    """Generate non-technical executive summary."""
-
+    """Render a non-technical summary of a multi-institution analysis."""
     summary = f"""
 EXECUTIVE SUMMARY - Banking System Liquidity Risk Analysis
 Date: {analysis.analysis_date}
-Banks Analyzed: {analysis.num_banks}
+Institutions Analysed: {analysis.num_banks}
 
 OVERALL SYSTEM HEALTH:
-- Average Risk Level: {analysis.avg_risk * 100:.1f}% ({_risk_to_text(analysis.avg_risk)})
-- Highest Risk: {analysis.max_risk * 100:.1f}%
-- Banks Requiring Immediate Attention: {analysis.num_critical_risk}
-- Banks Under Elevated Stress: {analysis.num_high_risk}
-- Systemic Risk Score: {analysis.systemic_risk_score * 100:.1f}%
-
-CRITICAL FINDINGS:
+- Average Risk Score: {analysis.avg_risk * 100:.1f}% ({_risk_to_text(analysis.avg_risk)})
+- Highest Risk Score: {analysis.max_risk * 100:.1f}%
+- Institutions Requiring Immediate Attention: {analysis.num_critical_risk}
+- Institutions Under Elevated Stress: {analysis.num_high_risk}
 """
 
-    # Add critical banks
-    critical_banks = [
-        (bank_id, profile) for bank_id, profile in analysis.bank_profiles.items()
+    if analysis.systemic_risk_score is not None:
+        summary += f"- Unpaid fraction of system liabilities: {analysis.systemic_risk_score * 100:.2f}%\n"
+    else:
+        summary += (
+            "- Systemic clearing: UNAVAILABLE - interbank liabilities and institution\n"
+            "  endowments were not supplied, so no clearing equilibrium exists to report.\n"
+            "  The risk scores below are model outputs on individual time series and do\n"
+            "  not by themselves imply contagion.\n"
+        )
+
+    critical = [
+        (bank_id, profile)
+        for bank_id, profile in analysis.bank_profiles.items()
         if profile.risk_level == "critical"
     ]
+    if critical:
+        summary += f"\n{len(critical)} INSTITUTION(S) AT CRITICAL RISK LEVELS:\n"
+        for _bank_id, profile in critical[:5]:
+            summary += (
+                f"- {profile.bank_name}: {profile.risk_score * 100:.1f}% model risk\n"
+            )
 
-    if critical_banks:
-        summary += f"\n{len(critical_banks)} BANK(S) AT CRITICAL RISK LEVELS:\n"
-        for bank_id, profile in critical_banks[:5]:
-            summary += f"- {profile.bank_name}: {profile.overall_liquidity_risk * 100:.1f}% risk\n"
-            summary += f"  Key Issue: {profile.top_vulnerabilities[0] if profile.top_vulnerabilities else 'N/A'}\n"
+    if analysis.network_available:
+        ranked = sorted(
+            analysis.bank_profiles.values(),
+            key=lambda profile: profile.systemic_importance,
+            reverse=True,
+        )[:3]
+        if ranked:
+            summary += "\nMOST SYSTEMICALLY IMPORTANT INSTITUTIONS:\n"
+            for profile in ranked:
+                summary += (
+                    f"- {profile.bank_id}: importance {profile.systemic_importance * 100:.1f}% "
+                    f"({profile.systemic_importance_method})\n"
+                )
 
-    # Add systemic banks
-    if analysis.systemic_banks:
-        summary += f"\nSYSTEMICALLY IMPORTANT INSTITUTIONS:\n"
-        for bank_id, importance, reason in analysis.systemic_banks[:3]:
-            summary += f"- {bank_id}: Importance Score {importance * 100:.1f}% ({reason})\n"
+    if analysis.shock_scenarios:
+        summary += "\nCONTAGION SCENARIOS (total loss of external assets):\n"
+        for bank_id, result in list(analysis.shock_scenarios.items())[:2]:
+            sequence = result.default_sequence()
+            summary += (
+                f"- If {bank_id} loses all external assets: "
+                f"{result.n_defaults} institution(s) fail"
+            )
+            if sequence:
+                summary += f", in order: {' -> '.join(sequence)}"
+            summary += "\n"
 
-    # Add contagion warnings
-    if analysis.cascade_scenarios:
-        summary += f"\nCONTAGION RISK WARNINGS:\n"
-        for bank_id, cascade in list(analysis.cascade_scenarios.items())[:2]:
-            summary += f"- If {bank_id} fails: {cascade['total_failures']} other banks at risk\n"
-
-    summary += "\nRECOMMENDED ACTIONS:\n"
-    # Aggregate recommendations from all critical/high risk banks
-    all_recommendations = []
+    all_recommendations: List[str] = []
     for profile in analysis.bank_profiles.values():
-        if profile.risk_level in ["critical", "high"]:
+        if profile.risk_level in ("critical", "high"):
             all_recommendations.extend(profile.recommendations)
-
-    # Get unique recommendations
-    unique_recs = list(dict.fromkeys(all_recommendations))[:5]
-    for i, rec in enumerate(unique_recs, 1):
-        summary += f"{i}. {rec}\n"
+    unique_recommendations = list(dict.fromkeys(all_recommendations))[:5]
+    if unique_recommendations:
+        summary += "\nRECOMMENDED ACTIONS:\n"
+        for index, recommendation in enumerate(unique_recommendations, 1):
+            summary += f"{index}. {recommendation}\n"
 
     return summary
 
 
 def _risk_to_text(risk: float) -> str:
-    """Convert risk score to human-readable text."""
+    """Convert a risk score to human-readable text."""
     if risk < 0.3:
         return "LOW RISK"
-    elif risk < 0.6:
+    if risk < 0.6:
         return "MODERATE RISK"
-    elif risk < 0.85:
+    if risk < 0.85:
         return "HIGH RISK"
-    else:
-        return "CRITICAL RISK"
+    return "CRITICAL RISK"

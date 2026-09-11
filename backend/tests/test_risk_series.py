@@ -21,7 +21,10 @@ torch = pytest.importorskip("torch")
 
 from backend.exceptions import PredictionBlockedError, SchemaValidationError  # noqa: E402
 from backend.modules.data.quality_gate import QualityAttestation  # noqa: E402
-from backend.modules.engine.backtesting import risk_signal_to_returns  # noqa: E402
+from backend.modules.engine.backtesting import (  # noqa: E402
+    directional_accuracy,
+    segment_slices,
+)
 from backend.modules.engine.model_io import safe_torch_save  # noqa: E402
 from backend.modules.engine.multi_scale_trainer import (  # noqa: E402
     MultiScaleTemporalAttentionModel,
@@ -142,22 +145,33 @@ class TestRiskSeries:
             ].iloc[-1]
             assert last == pytest.approx(point_scores[source], rel=1e-4, abs=1e-6)
 
-    def test_returns_never_span_a_source_seam(self, engine):
+    def test_directional_score_never_spans_a_source_seam(self, engine):
         result = engine.predict_risk_series(_frame(), attestation=_attestation())
-        scores = result.frame["risk_score"].to_numpy(dtype=float)
 
-        naive = risk_signal_to_returns(scores)
-        segmented = risk_signal_to_returns(scores, boundaries=result.boundaries)
-
-        assert segmented.size == naive.size - 1
-        np.testing.assert_allclose(
-            segmented,
-            np.concatenate([
-                risk_signal_to_returns(scores[:WINDOWS_PER_SOURCE]),
-                risk_signal_to_returns(scores[WINDOWS_PER_SOURCE:]),
-            ]),
-        )
+        # The series reports the first row of the second source as its only seam,
+        # so the concatenated series splits into exactly one segment per source.
+        assert result.boundaries == [WINDOWS_PER_SOURCE]
         assert (result.boundaries[0] % WINDOWS_PER_SOURCE) == 0
+        assert segment_slices(result.boundaries, 2 * WINDOWS_PER_SOURCE) == [
+            slice(0, WINDOWS_PER_SOURCE),
+            slice(WINDOWS_PER_SOURCE, 2 * WINDOWS_PER_SOURCE),
+        ]
+
+        # Two sources with identical internal movement but a level jump at the
+        # seam: the boundary-aware score ignores the manufactured change, while the
+        # naive whole-series score is dragged down by it.
+        actual = np.tile(np.arange(WINDOWS_PER_SOURCE, dtype=float), 2)
+        predicted = actual + np.concatenate([
+            np.zeros(WINDOWS_PER_SOURCE),
+            np.full(WINDOWS_PER_SOURCE, 100.0),
+        ])
+
+        assert directional_accuracy(actual, predicted) == pytest.approx(
+            (2 * WINDOWS_PER_SOURCE - 2) / (2 * WINDOWS_PER_SOURCE - 1)
+        )
+        assert directional_accuracy(
+            actual, predicted, boundaries=result.boundaries
+        ) == pytest.approx(1.0)
 
     def test_max_steps_keeps_the_most_recent_timesteps(self, engine):
         result = engine.predict_risk_series(

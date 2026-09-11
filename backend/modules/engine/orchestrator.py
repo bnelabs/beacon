@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import torch
 import torch.nn as nn
@@ -55,14 +55,61 @@ class EngineStatus(str, Enum):
 
 @dataclass
 class RiskScores:
-    """Computed risk scores."""
-    market_liquidity: Dict[str, float]  # asset -> score
-    funding_liquidity: Dict[str, float]  # institution -> score
-    systemic_risk: Dict[str, float]  # network metrics
-    operational_risk: Dict[str, float]  # process risks
-    
-    overall_score: float  # 0-100
-    risk_level: str  # low, medium, high, critical
+    """Risk scores the engine can actually produce.
+
+    This dataclass previously exposed ``market_liquidity``, ``funding_liquidity``
+    and ``systemic_risk`` as three independent measurements. They were not. The
+    engine took one prediction array, rescaled it to 0-100, then returned it
+    three times: ``funding_liquidity = risk_scores * 0.95`` (commented "correlated
+    but slightly different") and ``systemic_risk = risk_scores * 1.05``
+    ("slightly amplified"). ``_compute_risk_scores`` then blended them
+    0.35/0.35/0.25 with an "operational risk" term weighted 0.05.
+
+    Because all three inputs were affine functions of the same array, that blend
+    collapsed to a single affine function of the model output. It carried no
+    information the model score did not already carry, and the 0.95/1.05 factors
+    had no economic meaning -- they were chosen so the three channels would look
+    different.
+
+    What exists is now named:
+
+    * ``model_score`` -- the model's output, summarised per window.
+    * ``systemic_risk`` -- populated only when a liability network was supplied
+      and cleared by :mod:`backend.modules.risk.clearing`. Empty otherwise,
+      because a network property cannot be derived from a single-institution
+      time series.
+    * ``operational_risk`` -- the DATA-stage quality verdict, a real measurement.
+
+    The three legacy attribute names are retained as properties for the
+    reporting layer, and map onto the above without inventing values.
+    """
+
+    model_score: Dict[str, float]
+    overall_score: float
+    risk_level: str
+
+    systemic_risk: Dict[str, float] = field(default_factory=dict)
+    operational_risk: Dict[str, float] = field(default_factory=dict)
+
+    @property
+    def market_liquidity(self) -> Dict[str, float]:
+        """Legacy alias for :attr:`model_score`.
+
+        Kept so the reporting layer keeps working. It is *not* a separate
+        market-liquidity measurement -- the model emits a single liquidity-stress
+        score and there is no second channel behind this name.
+        """
+        return self.model_score
+
+    @property
+    def funding_liquidity(self) -> Dict[str, float]:
+        """Empty: no funding-specific measurement exists.
+
+        Returns ``{}`` rather than a rescaled copy of the model score, so the
+        reporting layer reports absence instead of echoing the same number under
+        a second name.
+        """
+        return {}
 
 
 @dataclass
@@ -98,7 +145,15 @@ class EngineOrchestrator:
         self.status = EngineStatus.PENDING
         self.progress = 0.0
         self.start_time = None
-        self.model_name = self.config.get("model", "HGT")
+        # "HGT" was the old default, but the multi-scale trainer never built a
+        # graph model -- it silently substituted MultiScaleTemporalAttentionModel
+        # while results still reported HGT. The default now names the model that
+        # is actually trained.
+        self.model_name = self.config.get("model", "temporal_attention")
+        self.sequence_length = int(self.config.get("sequence_length", 30))
+        self.sources: list = []
+        self.source_to_id: Dict[str, int] = {}
+        self.source_stats: Dict[str, Dict[str, float]] = {}
 
         # Check GPU availability
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -233,8 +288,19 @@ class EngineOrchestrator:
         }
     
     def _get_model(self):
-        """Load or train model."""
-        from backend.modules.engine.models import HeterogeneousGraphTransformer
+        """Load the checkpoint the trainer persisted, else a fallback predictor.
+
+        The previous implementation imported ``HeterogeneousGraphTransformer``
+        and constructed it with ``input_dim``/``hidden_dim``/``output_dim``. Those
+        are not that class's parameters -- it took ``num_node_types``,
+        ``num_edge_types`` and ``hidden_channels`` -- so the call raised
+        ``TypeError`` whenever a checkpoint actually existed. The branch had never
+        run against a real checkpoint.
+
+        Loading now mirrors what the trainer writes: a
+        ``MultiScaleTemporalAttentionModel`` rebuilt from the checkpoint's own
+        ``config``, ``sources``, ``source_stats`` and ``sequence_length``.
+        """
         import os
 
         base_path = f"{self.output_dir}/{self.job_id}"
@@ -245,28 +311,37 @@ class EngineOrchestrator:
 
         model_path = next((path for path in candidate_paths if os.path.exists(path)), None)
 
-        # Check if trained model exists
         if model_path:
             logger.info(f"[{self.job_id}] Loading trained model from {model_path}")
             checkpoint = safe_torch_load(model_path, map_location=self.device)
-
-            # Extract model configuration
             config = checkpoint.get('config', self.config)
 
-            # Initialize model architecture
-            model = HeterogeneousGraphTransformer(
-                input_dim=config.get('input_dim', 1),
-                hidden_dim=config.get('hidden_dim', 128),
-                output_dim=config.get('output_dim', 1),
-                num_heads=config.get('num_heads', 8),
+            from backend.modules.engine.multi_scale_trainer import (
+                MultiScaleTemporalAttentionModel,
+            )
+
+            sources = checkpoint.get('sources', []) or []
+            sequence_length = int(
+                config.get('sequence_length', self.config.get('sequence_length', 30))
+            )
+
+            model = MultiScaleTemporalAttentionModel(
+                num_sources=max(len(sources), 1),
+                sequence_length=sequence_length,
+                d_model=config.get('d_model', 128),
+                nhead=config.get('nhead', 8),
                 num_layers=config.get('num_layers', 3),
-                dropout=config.get('dropout', 0.1)
+                dropout=config.get('dropout', 0.1),
             ).to(self.device)
 
-            # Load trained weights
             model.load_state_dict(checkpoint['model_state_dict'])
             model.eval()
-            self.model_name = config.get('model_name', self.model_name)
+
+            self.sequence_length = sequence_length
+            self.sources = list(sources)
+            self.source_to_id = {src: idx for idx, src in enumerate(self.sources)}
+            self.source_stats = checkpoint.get('source_stats', {}) or {}
+            self.model_name = config.get('model', self.model_name)
             logger.info(f"[{self.job_id}] Model loaded successfully")
             return model
 
@@ -289,17 +364,18 @@ class EngineOrchestrator:
         return fallback
     
     def _predict(self, model, data: Dict[str, Any]):
-        """Generate predictions using trained model."""
+        """Score every rolling window with the loaded model.
+
+        Returns the raw model scores. It deliberately does not manufacture
+        companion channels: the previous version returned ``market_liquidity``,
+        ``funding_liquidity`` and ``systemic_risk`` as one array multiplied by
+        1.0, 0.95 and 1.05, presenting a single measurement as three.
+        """
         import numpy as np
         import pandas as pd
 
         df = data["timeseries"]
 
-        # Prepare sequences for time-series prediction
-        requested_sequence = int(self.config.get('sequence_length', 30))
-        features_df = data["features"]
-
-        # Ensure we have numeric data
         value_col = None
         if 'value' in df.columns:
             value_col = 'value'
@@ -308,12 +384,16 @@ class EngineOrchestrator:
         else:
             raise ValueError("Timeseries data must contain 'value' or 'Value' column")
 
-        # Create sequences
-        values = pd.to_numeric(df[value_col], errors='coerce')
-        values = values.ffill().bfill().values
-        if len(values) == 0:
-            raise ValueError("Timeseries contains no numeric data after cleaning")
+        # Gaps are imputed at the observed mean, never carried forward. Forward
+        # filling would write a pre-gap level into the post-gap period, so the
+        # model would read a value that had not been published at that timestamp.
+        raw = pd.to_numeric(df[value_col], errors='coerce').to_numpy(dtype=float)
+        finite = raw[np.isfinite(raw)]
+        if finite.size == 0:
+            raise ValueError("Timeseries contains no numeric data")
+        values = np.where(np.isfinite(raw), raw, float(finite.mean()))
 
+        requested_sequence = int(self.config.get('sequence_length', self.sequence_length))
         sequence_length = max(2, min(requested_sequence, len(values) - 1))
         sequences = []
         timestamps = []
@@ -321,95 +401,72 @@ class EngineOrchestrator:
         date_col = 'date' if 'date' in df.columns else 'Date' if 'Date' in df.columns else None
 
         for i in range(len(values) - sequence_length):
-            sequences.append(values[i:i+sequence_length])
+            sequences.append(values[i:i + sequence_length])
             if date_col:
-                timestamps.append(df.iloc[i+sequence_length][date_col])
+                timestamps.append(df.iloc[i + sequence_length][date_col])
             else:
                 timestamps.append(i + sequence_length)
 
         if len(sequences) == 0:
-            baseline = values.astype(float)
-            normalized = (baseline - baseline.min()) / (baseline.max() - baseline.min() + 1e-8) * 100
-            fallback_timestamps = list(df[date_col]) if date_col else list(range(len(baseline)))
+            # Too short to form a single window. Report the observed series
+            # rather than a rescaled copy of it.
+            fallback_timestamps = list(df[date_col]) if date_col else list(range(len(values)))
             return {
                 "timestamps": fallback_timestamps,
-                "predictions": baseline,
-                "market_liquidity": normalized,
-                "funding_liquidity": normalized * 0.95,
-                "systemic_risk": normalized * 1.05,
+                "scores": np.asarray(values, dtype=float),
+                "insufficient_history": True,
             }
 
-        sequences = np.array(sequences)
-
-        # Convert to tensors
-        X = torch.FloatTensor(sequences).unsqueeze(-1).to(self.device)  # (batch, seq_len, 1)
-
-        # Generate predictions in batches
-        batch_size = self.config.get('batch_size', 32)
-        predictions = []
+        window_batch = np.asarray(sequences, dtype=np.float32)
+        batch_size = int(self.config.get('batch_size', 32))
+        scores = []
 
         model.eval()
         with torch.no_grad():
-            for i in range(0, len(X), batch_size):
-                batch = X[i:i+batch_size]
-                pred = model(batch)
-                predictions.append(pred.cpu().numpy())
-
-        predictions = np.concatenate(predictions, axis=0).flatten()
-
-        # Calculate risk scores from predictions
-        # Normalize predictions to risk scores (0-100)
-        risk_scores = (predictions - predictions.min()) / (predictions.max() - predictions.min() + 1e-8) * 100
+            for start in range(0, len(window_batch), batch_size):
+                chunk = window_batch[start:start + batch_size]
+                inputs = torch.FloatTensor(chunk).to(self.device)
+                source_ids = torch.zeros(
+                    (chunk.shape[0], 1), dtype=torch.long, device=self.device
+                )
+                # Two calling conventions exist: the multi-scale encoder takes
+                # (x, source_ids); the fallback predictor takes (batch, seq, dim).
+                try:
+                    output = model(inputs, source_ids)
+                except TypeError:
+                    output = model(inputs.unsqueeze(-1))
+                flat = output.detach().cpu().numpy().astype(float).reshape(chunk.shape[0], -1)
+                scores.append(flat[:, 0])
 
         return {
             "timestamps": timestamps,
-            "predictions": predictions,
-            "market_liquidity": risk_scores,
-            "funding_liquidity": risk_scores * 0.95,  # Correlated but slightly different
-            "systemic_risk": risk_scores * 1.05  # Slightly amplified for systemic risk
+            "scores": np.concatenate(scores),
+            "insufficient_history": False,
         }
     
     def _compute_risk_scores(self, predictions, data) -> RiskScores:
-        """Compute aggregated risk scores from predictions."""
+        """Aggregate the model's scores and attach real measurements.
+
+        No risk channel is synthesised here. See :class:`RiskScores` for what the
+        previous 0.95/1.05 rescaling and 0.35/0.35/0.25/0.05 blend were doing.
+        """
         import numpy as np
 
-        # Risk level thresholds
         RISK_LEVEL_LOW = 30
         RISK_LEVEL_MEDIUM = 60
         RISK_LEVEL_HIGH = 80
 
-        # Extract risk arrays
-        market_liq_scores = predictions["market_liquidity"]
-        funding_liq_scores = predictions["funding_liquidity"]
-        systemic_scores = predictions["systemic_risk"]
+        scores = np.asarray(predictions["scores"], dtype=float).reshape(-1)
+        if scores.size == 0:
+            raise PredictionBlockedError(
+                "The model produced no scores to aggregate",
+                context={"job_id": self.job_id},
+            )
 
-        # Compute aggregate metrics
-        market_liq = {
-            "overall": float(np.mean(market_liq_scores)),
-            "current": float(market_liq_scores[-1]),  # Most recent
-            "trend": float(np.polyfit(range(len(market_liq_scores)), market_liq_scores, 1)[0]),
-            "volatility": float(np.std(market_liq_scores)),
-            "percentile_95": float(np.percentile(market_liq_scores, 95))
-        }
+        overall = float(np.mean(scores))
 
-        funding_liq = {
-            "overall": float(np.mean(funding_liq_scores)),
-            "current": float(funding_liq_scores[-1]),
-            "trend": float(np.polyfit(range(len(funding_liq_scores)), funding_liq_scores, 1)[0]),
-            "volatility": float(np.std(funding_liq_scores)),
-            "percentile_95": float(np.percentile(funding_liq_scores, 95))
-        }
-
-        systemic = {
-            "network_risk": float(np.mean(systemic_scores)),
-            "current": float(systemic_scores[-1]),
-            "trend": float(np.polyfit(range(len(systemic_scores)), systemic_scores, 1)[0]),
-            "max_risk": float(np.max(systemic_scores))
-        }
-
-        # Operational risk based on data quality and model performance. The score
-        # must come from the gate's attestation; defaulting it to a comfortable
-        # 80 silently manufactured a risk number out of nothing.
+        # Operational risk comes from the DATA stage's own verdict. Defaulting
+        # this to a comfortable value would manufacture a risk number.
         data_quality = (data.get("metadata") or {}).get("quality_score")
         if data_quality is None:
             raise PredictionBlockedError(
@@ -417,20 +474,7 @@ class EngineOrchestrator:
                 "metadata carries none",
                 context={"job_id": self.job_id, "metadata_keys": sorted((data.get("metadata") or {}))},
             )
-        operational = {
-            "process_risk": float(100 - data_quality),
-            "data_quality_score": float(data_quality)
-        }
 
-        # Compute overall risk score (weighted average)
-        overall = (
-            market_liq["overall"] * 0.35 +
-            funding_liq["overall"] * 0.35 +
-            systemic["network_risk"] * 0.25 +
-            operational["process_risk"] * 0.05
-        )
-
-        # Determine risk level
         if overall < RISK_LEVEL_LOW:
             risk_level = "low"
         elif overall < RISK_LEVEL_MEDIUM:
@@ -441,12 +485,20 @@ class EngineOrchestrator:
             risk_level = "critical"
 
         return RiskScores(
-            market_liquidity=market_liq,
-            funding_liquidity=funding_liq,
-            systemic_risk=systemic,
-            operational_risk=operational,
+            model_score={
+                "overall": overall,
+                "current": float(scores[-1]),
+                "n_windows": int(scores.size),
+            },
             overall_score=overall,
-            risk_level=risk_level
+            risk_level=risk_level,
+            # Empty: no interbank liability network reaches the engine, and a
+            # network property cannot be inferred from one institution's series.
+            systemic_risk={},
+            operational_risk={
+                "process_risk": float(100 - data_quality),
+                "data_quality_score": float(data_quality),
+            },
         )
     
     def _evaluate(self, predictions, data) -> Dict[str, float]:
@@ -463,7 +515,7 @@ class EngineOrchestrator:
             target_col = 'actual_risk' if 'actual_risk' in df.columns else 'target'
             actual = df[target_col].values
 
-            pred_array = predictions.get("predictions", predictions.get("market_liquidity"))
+            pred_array = np.asarray(predictions.get("scores", []), dtype=float)
 
             # Align lengths
             min_len = min(len(actual), len(pred_array))
@@ -488,7 +540,7 @@ class EngineOrchestrator:
             }
         else:
             # No ground truth available - compute prediction quality metrics
-            pred_array = predictions.get("predictions", predictions.get("market_liquidity"))
+            pred_array = np.asarray(predictions.get("scores", []), dtype=float)
 
             metrics = {
                 "prediction_mean": float(np.mean(pred_array)),
@@ -511,28 +563,34 @@ class EngineOrchestrator:
         return path
     
     def _save_explanations(self, model, predictions) -> Optional[str]:
-        """Save model explanations and attention weights."""
+        """Save score statistics.
+
+        No attribution is produced here. The previous implementation looked for a
+        ``get_attention_weights`` method the models never defined, so the branch
+        never fired, and it reported the raw prediction array as "feature
+        importance based on predictions" -- a statistic, not an attribution.
+        """
         import pandas as pd
+        import numpy as np
         import os
 
         try:
             explanations = {}
 
-            # Extract attention weights if model has them
-            if hasattr(model, 'get_attention_weights'):
-                attention_weights = model.get_attention_weights()
-                explanations['attention_weights'] = attention_weights
-
-            # Save feature importance based on predictions
             if 'timestamps' in predictions:
                 explanations['timestamps'] = predictions['timestamps']
 
-            explanations['prediction_stats'] = {
-                'mean': float(predictions['predictions'].mean()) if 'predictions' in predictions else None,
-                'std': float(predictions['predictions'].std()) if 'predictions' in predictions else None,
-                'min': float(predictions['predictions'].min()) if 'predictions' in predictions else None,
-                'max': float(predictions['predictions'].max()) if 'predictions' in predictions else None
+            scores = np.asarray(predictions.get('scores', []), dtype=float)
+            explanations['score_stats'] = {
+                'mean': float(scores.mean()) if scores.size else None,
+                'std': float(scores.std()) if scores.size else None,
+                'min': float(scores.min()) if scores.size else None,
+                'max': float(scores.max()) if scores.size else None,
             }
+            explanations['attribution'] = (
+                'unavailable: SubgraphX attribution over the temporal multiplex '
+                'is pending; no approximate attribution is substituted'
+            )
 
             # Save to file
             path = f"{self.output_dir}/{self.job_id}/explanations.parquet"

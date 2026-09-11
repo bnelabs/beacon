@@ -18,15 +18,17 @@ from backend.services.error_logger import ErrorLogger
 
 router = APIRouter()
 
+# Metrics that are meaningful for a risk state. The portfolio statistics that
+# used to be listed here (Sharpe, Sortino, max drawdown, Calmar, volatility,
+# VaR/CVaR) were removed: they describe returns on a priced asset, and a risk
+# score is a latent state, not a price.
 _QUANT_METRIC_KEYS = (
-    "sharpe_ratio",
-    "sortino_ratio",
-    "max_drawdown",
-    "calmar_ratio",
-    "annualized_volatility",
+    "directional_accuracy",
     "hit_rate",
-    "var_95",
-    "cvar_95",
+    "mse",
+    "mae",
+    "rmse",
+    "r2",
 )
 
 

@@ -102,92 +102,16 @@ class DataFormatter:
 
         return features
 
-    def build_graph(self, data: pd.DataFrame) -> dict:
-        """Build graph structure for GNN models based on temporal and feature correlations."""
-        import networkx as nx
-        from scipy.stats import pearsonr
-
-        if data.empty:
-            logger.warning(f"[{self.job_id}] Empty data provided for graph building")
-            return {"nodes": [], "edges": [], "node_features": {}, "edge_weights": {}}
-
-        # Correlation threshold for edge creation
-        CORRELATION_THRESHOLD = 0.5
-
-        # Create nodes from unique data sources
-        nodes = []
-        node_features = {}
-
-        value_col = 'value' if 'value' in data.columns else 'Value' if 'Value' in data.columns else None
-        date_col = 'date' if 'date' in data.columns else 'Date' if 'Date' in data.columns else None
-
-        if 'source_code' in data.columns and value_col:
-            unique_sources = data['source_code'].unique()
-
-            for source in unique_sources:
-                source_data = data[data['source_code'] == source]
-
-                # Compute node features
-                values = pd.to_numeric(source_data[value_col], errors='coerce').dropna()
-
-                if len(values) > 0:
-                    node_features[source] = {
-                        'mean': float(values.mean()),
-                        'std': float(values.std()),
-                        'min': float(values.min()),
-                        'max': float(values.max()),
-                        'count': int(len(values))
-                    }
-                    nodes.append(source)
-
-        # Build edges based on correlations between time series
-        edges = []
-        edge_weights = {}
-
-        if len(nodes) > 1 and value_col and date_col:
-            # Pivot data to have sources as columns
-            try:
-                pivot_data = data.pivot_table(
-                    index=date_col,
-                    columns='source_code',
-                    values=value_col,
-                    aggfunc='mean'
-                )
-
-                # Compute pairwise correlations
-                for i, source1 in enumerate(nodes):
-                    for source2 in nodes[i+1:]:
-                        if source1 in pivot_data.columns and source2 in pivot_data.columns:
-                            series1 = pivot_data[source1].dropna()
-                            series2 = pivot_data[source2].dropna()
-
-                            # Align series
-                            common_idx = series1.index.intersection(series2.index)
-
-                            if len(common_idx) > 2:
-                                corr, p_value = pearsonr(
-                                    series1.loc[common_idx],
-                                    series2.loc[common_idx]
-                                )
-
-                                # Add edge if correlation is significant
-                                if abs(corr) >= CORRELATION_THRESHOLD and p_value < 0.05:
-                                    edge_id = f"{source1}_{source2}"
-                                    edges.append({
-                                        "source": source1,
-                                        "target": source2,
-                                        "weight": float(abs(corr))
-                                    })
-                                    edge_weights[edge_id] = float(abs(corr))
-
-            except Exception as e:
-                logger.warning(f"[{self.job_id}] Could not compute correlations: {e}")
-
-        logger.info(f"[{self.job_id}] Built graph with {len(nodes)} nodes and {len(edges)} edges")
-
-        return {
-            "nodes": nodes,
-            "edges": edges,
-            "node_features": node_features,
-            "edge_weights": edge_weights
-        }
+    # ``build_graph`` was removed. It produced one static adjacency per data
+    # package by thresholding pairwise Pearson correlation at 0.5, and the
+    # result was pickled to ``graph.pkl`` for a GNN that never read it.
+    #
+    # Two things were wrong with it. Correlation is co-movement, not exposure:
+    # a correlation matrix is not a liability matrix, so no clearing or
+    # cascade algorithm can be run on it -- there is no "who owes whom" in it.
+    # And the graph was frozen for the whole window, which asserts that the
+    # funding network is constant across days when it re-prices intraday.
+    #
+    # Graph construction returns in Phase 2 as a rolling-window multiplex whose
+    # layers are separate economic relations (funding, balance-sheet
+    # similarity, CCP clearing), each updated at its own frequency.

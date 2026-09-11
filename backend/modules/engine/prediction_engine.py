@@ -1,4 +1,39 @@
-"""Prediction engine with EU AI Act compliant explainability."""
+"""Prediction engine: model inference, risk series, and systemic analysis.
+
+On explainability
+-----------------
+
+This module previously advertised "EU AI Act compliant explainability" while
+delegating to a hand-rolled attribution routine that computed
+``gradient * input * attention``, normalised it to sum to one, and presented the
+result as SHAP values. It did not satisfy EU AI Act expectations and was not
+SHAP:
+
+* The attention term was fake. When the model had no ``transformer`` attribute
+  the helper returned ``None``; when it did, it returned *uniform* weights
+  (``np.ones(seq_len) / seq_len``). The "attention-weighted attribution" was
+  therefore gradient attribution multiplied by a constant, which changes nothing
+  about the ranking while implying a mechanism that was never read.
+* ``gradient * input`` is a local linear surrogate. It is not a Shapley value:
+  it carries no efficiency, symmetry, dummy or additivity guarantee, and it
+  misattributes features whose effect on the output is non-monotone. The module
+  docstring of the removed explainer claimed it worked "without black boxes"
+  while producing attributions that are themselves unverifiable.
+* The reported "confidence intervals" came from MC-dropout over a network whose
+  dropout was switched on by calling ``model.train()`` on a model that had been
+  loaded for inference -- so the intervals described a different network from
+  the one that produced the prediction.
+
+Local attributions return with SubgraphX over the temporal multiplex in the
+explainability phase, where the attribution is a subgraph with a defined
+objective rather than a per-feature scalar. Until then this module reports no
+per-feature attribution rather than an unverifiable one, and
+``feature_importances`` is left empty.
+
+Uncertainty intervals are likewise reported as unavailable until conformal
+calibration is in place; the confidence fields are ``None`` and
+``confidence_method`` records why.
+"""
 
 import torch
 import pandas as pd
@@ -17,7 +52,6 @@ from backend.modules.data.quality_gate import (
 )
 from backend.modules.engine.backtesting import boundaries_from_group_sizes
 from backend.modules.engine.model_io import safe_torch_load
-from backend.modules.explainability.shap_explainer import ModelExplainer
 from backend.modules.risk.bank_analyzer import BankRiskAnalyzer, MultiBankAnalysis, generate_executive_summary
 
 logger = logging.getLogger(__name__)
@@ -25,18 +59,19 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PredictionResult:
-    """Prediction result with explainability."""
+    """Prediction result, systemic analysis, and an honest provenance record."""
     job_id: str
     model_path: str
 
     # Predictions
-    predictions_df: pd.DataFrame  # All predictions with explanations
+    predictions_df: pd.DataFrame  # All predictions, one row per source
 
     # Risk analysis
     per_bank_risks: Dict[str, Any]  # bank_id -> risk profile
     multi_bank_analysis: Optional[MultiBankAnalysis]
 
-    # Explainability (EU AI Act compliant)
+    # Attribution. Empty until SubgraphX lands: see the module docstring for why
+    # the previous gradient*attention values were removed rather than kept.
     feature_importances: Dict[str, float]
     confidence_intervals: Dict[str, tuple]
     explanation_report: str
@@ -102,9 +137,10 @@ class RealPredictionEngine:
 
     Responsibilities:
     1. Load a trained model and refuse to run without a data-quality attestation
-    2. EU AI Act compliant explainability
-    3. Per-bank risk analysis
-    4. Contagion/cascade simulation
+    2. Per-source risk scoring and rolled per-timestep risk series
+    3. Per-institution and network-level risk analysis
+    4. Multiplex clearing of supplied interbank exposures when a balance sheet
+       is available (see :mod:`backend.modules.risk.clearing`)
     5. Human-readable reports
     """
 
@@ -147,8 +183,10 @@ class RealPredictionEngine:
         self.model = self._load_model(model_path)
         self.model.eval()
 
-        # Initialize explainability
-        self.explainer = ModelExplainer(self.model, device)
+        # BankRiskAnalyzer scores institutions directly from the model and runs
+        # clearing on supplied exposures. There is no separate explainer: local
+        # attribution was removed rather than reimplemented, because the previous
+        # gradient*attention routine produced unverifiable numbers.
         self.bank_analyzer = BankRiskAnalyzer(
             self.model,
             device,
@@ -395,23 +433,30 @@ class RealPredictionEngine:
         self,
         input_data: pd.DataFrame,
         bank_exposures: Optional[Dict[tuple, float]] = None,
+        bank_endowments: Optional[Dict[str, float]] = None,
         *,
         attestation: Optional[QualityAttestation] = None,
     ) -> PredictionResult:
         """
-        Make predictions with full explainability.
+        Score the payload and, when a balance sheet is supplied, clear the network.
 
         Args:
             input_data: DataFrame with Date, Value, source_code (and optionally bank_id)
-            bank_exposures: Inter-bank exposures for contagion analysis
+            bank_exposures: Inter-bank exposures, ``(debtor, creditor) ->`` amount.
+                Enables the topological part of the network analysis.
+            bank_endowments: ``bank_id ->`` external assets available to meet
+                obligations. Required together with ``bank_exposures`` for the
+                Eisenberg-Noe clearing equilibrium and contagion paths; without
+                it the analysis reports that the balance sheet is unknown rather
+                than substituting the model's own risk score for capital.
             attestation: DATA-stage quality verdict for this payload. Overrides the
                 engine-level default; pass it explicitly when the frame has been
                 transformed since the gate ran.
 
         Returns:
-            PredictionResult with predictions and explanations
+            PredictionResult with per-source risk scores and network analysis
         """
-        logger.info("Starting prediction with explainability")
+        logger.info("Starting prediction")
 
         self._enforce_data_quality(attestation)
 
@@ -420,7 +465,7 @@ class RealPredictionEngine:
 
         if has_bank_id:
             # Multi-bank analysis
-            return self._predict_multi_bank(input_data, bank_exposures)
+            return self._predict_multi_bank(input_data, bank_exposures, bank_endowments)
         else:
             # Single entity analysis
             return self._predict_single(input_data)
@@ -498,12 +543,13 @@ class RealPredictionEngine:
                     f"{source_code}"
                 )
 
+            # Gaps stay as NaN here. They are imputed with the standardised mean
+            # below, after normalisation -- never forward-filled, which would
+            # carry a pre-gap level across the gap and let the rolling window see
+            # values that were not published at those timestamps.
             values = (
-                ordered[value_column]
+                pd.to_numeric(ordered[value_column], errors='coerce')
                 .astype(float)
-                .ffill()
-                .bfill()
-                .fillna(0.0)
                 .to_numpy(dtype=float)
             )
             if step_cap is not None and values.size > step_cap:
@@ -534,6 +580,9 @@ class RealPredictionEngine:
             mean = float(stats.get('mean', 0.0))
             std = float(stats.get('std', 1.0)) or 1.0
             normalized = (values - mean) / std
+            # Impute unobserved entries at the standardised mean rather than
+            # carrying the previous value forward.
+            normalized = np.where(np.isfinite(normalized), normalized, 0.0)
 
             windows = np.lib.stride_tricks.sliding_window_view(normalized, sequence_length)
             scores = self._score_windows(
@@ -617,8 +666,7 @@ class RealPredictionEngine:
 
         # Group by source
         predictions_list = []
-        explanations = {}
-        feature_importances_total = {}
+        confidence_intervals: Dict[str, tuple] = {}
 
         for source_code in input_data['source_code'].unique():
             source_data = input_data[input_data['source_code'] == source_code]
@@ -627,40 +675,30 @@ class RealPredictionEngine:
             # Get source ID
             source_id = self._map_source_id(source_code)
 
-            # Prepare sequence - use 'Close' column from timeseries data
+            # Prepare sequence from the 'Close' column when present. Gaps are
+            # preserved rather than forward-filled: carrying a stale observation
+            # into the future feeds the model values that were not published at
+            # that timestamp, which is look-ahead.
             value_column = 'Close' if 'Close' in source_data.columns else 'Value'
-            series = source_data[value_column].astype(float)
-            series = series.ffill().bfill()
-            values = series.fillna(0).values
+            values = pd.to_numeric(
+                source_data[value_column], errors='coerce'
+            ).to_numpy(dtype=float)
             sequence, stats = self._prepare_sequence(values, source_code)
 
-            # Get explanation
-            explanation = self.explainer.explain_prediction(
-                sequence,
-                source_id,
-                [f"t-{i}" for i in range(self.sequence_length)],
-                actual_value=float(values[-1]) if len(values) else None
-            )
-
-            normalized_prediction = float(explanation.prediction_value)
+            normalized_prediction = self._score_sequence(sequence, source_id)
             denorm_prediction = self._denormalize_prediction(normalized_prediction, stats)
 
             predictions_list.append({
                 'source': source_code,
                 'prediction': denorm_prediction,
                 'risk_score': normalized_prediction,
-                'confidence_lower': explanation.confidence_lower,
-                'confidence_upper': explanation.confidence_upper,
-                'explanation': explanation.explanation_text
+                # No calibrated interval exists yet. Reported as None rather
+                # than as an MC-dropout interval, which described a different
+                # network from the one that produced this score.
+                'confidence_lower': None,
+                'confidence_upper': None,
             })
-
-            explanations[source_code] = explanation
-
-            # Aggregate feature importances
-            for feature, importance in explanation.feature_contributions.items():
-                if np.isnan(importance):
-                    continue
-                feature_importances_total[feature] = feature_importances_total.get(feature, 0.0) + importance
+            confidence_intervals[source_code] = (None, None)
 
         predictions_df = pd.DataFrame(predictions_list)
 
@@ -680,10 +718,11 @@ Maximum Risk: {max_risk * 100:.1f}%
 Data Sources Analyzed: {len(predictions_df)}
 
 KEY FINDINGS:
-{self._generate_key_findings(predictions_df, explanations)}
+{self._generate_key_findings(predictions_df)}
 
-This analysis is EU AI Act compliant with full explainability.
-All predictions include confidence intervals and feature attributions.
+Attribution and calibrated uncertainty are not reported: local feature
+attribution returns with SubgraphX, and prediction intervals with conformal
+calibration. Both are absent rather than approximated.
 """
 
         return PredictionResult(
@@ -692,12 +731,9 @@ All predictions include confidence intervals and feature attributions.
             predictions_df=predictions_df,
             per_bank_risks={},
             multi_bank_analysis=None,
-            feature_importances=feature_importances_total,
-            confidence_intervals={
-                src: (exp.confidence_lower, exp.confidence_upper)
-                for src, exp in explanations.items()
-            },
-            explanation_report=self._generate_explanation_report(explanations),
+            feature_importances={},
+            confidence_intervals=confidence_intervals,
+            explanation_report=self._generate_explanation_report(predictions_df),
             metrics={
                 'avg_risk_score': avg_risk,
                 'max_risk_score': max_risk,
@@ -712,22 +748,25 @@ All predictions include confidence intervals and feature attributions.
     def _predict_multi_bank(
         self,
         input_data: pd.DataFrame,
-        bank_exposures: Optional[Dict[tuple, float]]
+        bank_exposures: Optional[Dict[tuple, float]],
+        bank_endowments: Optional[Dict[str, float]] = None,
     ) -> PredictionResult:
-        """Predict for multiple banks with contagion analysis."""
+        """Predict for multiple institutions and clear the network if possible."""
 
-        logger.info("Multi-bank prediction with contagion analysis")
+        logger.info("Multi-bank prediction with network analysis")
 
         # Group data by bank
         bank_data = {}
         for bank_id in input_data['bank_id'].unique():
             bank_data[bank_id] = input_data[input_data['bank_id'] == bank_id]
 
-        # Run multi-bank analysis
+        # Run multi-bank analysis. Clearing runs only when both exposures and
+        # endowments are supplied; otherwise the analysis reports network
+        # topology and says plainly that the balance sheet is unknown.
         multi_bank_analysis = self.bank_analyzer.analyze_multiple_banks(
             bank_data,
             bank_exposures,
-            feature_names=[f"t-{i}" for i in range(self.sequence_length)]
+            bank_endowments=bank_endowments,
         )
 
         # Extract predictions
@@ -738,15 +777,19 @@ All predictions include confidence intervals and feature attributions.
             predictions_list.append({
                 'bank_id': bank_id,
                 'bank_name': profile.bank_name,
-                'overall_risk': profile.overall_liquidity_risk,
-                'market_liquidity_risk': profile.market_liquidity_risk,
-                'funding_liquidity_risk': profile.funding_liquidity_risk,
+                'overall_risk': profile.risk_score,
                 'risk_level': profile.risk_level,
                 'systemic_importance': profile.systemic_importance,
+                'systemic_importance_method': profile.systemic_importance_method,
+                'network_position': profile.network_position,
+                'gross_liabilities': profile.gross_liabilities,
+                'gross_claims': profile.gross_claims,
                 'confidence_lower': profile.confidence_lower,
                 'confidence_upper': profile.confidence_upper,
-                'explanation': profile.explanation.explanation_text,
-                'top_vulnerability': profile.top_vulnerabilities[0] if profile.top_vulnerabilities else 'N/A'
+                'confidence_method': profile.confidence_method,
+                'top_vulnerability': (
+                    profile.top_vulnerabilities[0] if profile.top_vulnerabilities else 'N/A'
+                ),
             })
 
             per_bank_risks[bank_id] = asdict(profile)
@@ -756,19 +799,13 @@ All predictions include confidence intervals and feature attributions.
         # Generate executive summary
         executive_summary = generate_executive_summary(multi_bank_analysis)
 
-        # Aggregate feature importances
-        feature_importances = {}
-        for profile in multi_bank_analysis.bank_profiles.values():
-            for feature, importance in profile.explanation.feature_contributions.items():
-                feature_importances[feature] = feature_importances.get(feature, 0) + abs(importance)
-
         return PredictionResult(
             job_id=self.config.get('job_id', 'unknown'),
             model_path=self.model_path,
             predictions_df=predictions_df,
             per_bank_risks=per_bank_risks,
             multi_bank_analysis=multi_bank_analysis,
-            feature_importances=feature_importances,
+            feature_importances={},
             confidence_intervals={
                 bank_id: (profile.confidence_lower, profile.confidence_upper)
                 for bank_id, profile in multi_bank_analysis.bank_profiles.items()
@@ -792,127 +829,187 @@ All predictions include confidence intervals and feature attributions.
             return 0
         return 0
 
+    def _score_sequence(self, sequence: torch.Tensor, source_id: int) -> float:
+        """Single forward pass for one window, with no attribution machinery."""
+        inputs = sequence.unsqueeze(0).to(self.device)
+        source_ids = torch.tensor(
+            [[int(source_id)]], dtype=torch.long, device=self.device
+        )
+        self.model.eval()
+        with torch.no_grad():
+            output = self.model(inputs, source_ids)
+        return float(output.detach().cpu().reshape(-1)[0])
+
     def _prepare_sequence(self, values: np.ndarray, source_code: str) -> tuple[torch.Tensor, Dict[str, float]]:
+        """Normalise the tail of a series, keeping gaps as an explicit mask.
+
+        Missing entries are **not** forward-filled. Carrying the previous
+        observation forward presents the model with a value that had not been
+        published at that timestamp: a series with a reporting gap would have its
+        pre-gap level copied across the gap, so the model sees the future through
+        a hole in the past. Instead missing entries are set to the standardised
+        mean (``0``) and the observed fraction is reported, so a window that is
+        mostly imputed is distinguishable from one that was fully observed.
+        """
         values = np.asarray(values, dtype=np.float32)
         stats = self.source_stats.get(source_code, {})
-        mean = float(stats.get('mean', np.mean(values) if len(values) else 0.0))
-        std = float(stats.get('std', np.std(values) + 1e-8 if len(values) else 1.0))
-        if std == 0.0:
+
+        finite = values[np.isfinite(values)]
+        default_mean = float(finite.mean()) if finite.size else 0.0
+        default_std = float(finite.std()) if finite.size else 1.0
+        mean = float(stats.get('mean', default_mean))
+        std = float(stats.get('std', default_std))
+        if not np.isfinite(std) or std == 0.0:
             std = 1.0
 
-        normalized = (values - mean) / std if len(values) else np.zeros(self.sequence_length, dtype=np.float32)
+        if len(values):
+            normalized = (values - mean) / std
+            observed = np.isfinite(normalized)
+            normalized = np.where(observed, normalized, 0.0).astype(np.float32)
+        else:
+            normalized = np.zeros(0, dtype=np.float32)
+            observed = np.zeros(0, dtype=bool)
 
         if len(normalized) >= self.sequence_length:
             normalized = normalized[-self.sequence_length:]
+            observed = observed[-self.sequence_length:]
         else:
-            pad_value = normalized[0] if len(normalized) else 0.0
+            pad = self.sequence_length - len(normalized)
             normalized = np.pad(
-                normalized,
-                (self.sequence_length - len(normalized), 0),
-                mode='constant',
-                constant_values=pad_value
+                normalized, (pad, 0), mode='constant', constant_values=0.0
             )
+            observed = np.pad(observed, (pad, 0), mode='constant', constant_values=False)
 
         sequence = torch.FloatTensor(normalized)
-        return sequence, {'mean': mean, 'std': std}
+        return sequence, {
+            'mean': mean,
+            'std': std,
+            'observed_fraction': float(observed.mean()) if observed.size else 0.0,
+        }
 
     def _denormalize_prediction(self, normalized_value: float, stats: Dict[str, float]) -> float:
         mean = stats.get('mean', 0.0)
         std = stats.get('std', 1.0)
         return float(normalized_value * std + mean)
 
-    def _generate_key_findings(self, predictions_df: pd.DataFrame, explanations: Dict) -> str:
-        """Generate key findings text."""
+    def _generate_key_findings(self, predictions_df: pd.DataFrame) -> str:
+        """Summarise the scored sources without inventing drivers.
+
+        A "primary risk driver" and a HIGH/MODERATE/LOW confidence label were
+        removed along with the attribution routine. Both descended from the
+        gradient*attention values, so they inherited its unreliability -- and the
+        confidence label read an interval produced by a different network than
+        the one that scored the payload.
+        """
         findings = []
 
-        # Find highest risk source (skip if all NaN)
-        valid_predictions = predictions_df['prediction'].dropna()
-        if len(valid_predictions) > 0:
-            max_risk_row = predictions_df.loc[valid_predictions.idxmax()]
-            findings.append(f"- Highest risk in: {max_risk_row['source']} ({max_risk_row['prediction'] * 100:.1f}%)")
+        if predictions_df.empty or 'prediction' not in predictions_df:
+            return "- No predictions were produced"
+
+        valid = predictions_df['prediction'].dropna()
+        if len(valid) > 0:
+            peak = predictions_df.loc[valid.idxmax()]
+            findings.append(
+                f"- Highest risk score: {peak['source']} ({peak['risk_score'] * 100:.1f}%)"
+            )
+            findings.append(
+                f"- Mean risk score across {len(valid)} source(s): {valid.mean() * 100:.1f}%"
+            )
         else:
             findings.append("- No valid risk predictions available")
 
-        # Find most important features
-        all_features = {}
-        for exp in explanations.values():
-            for feature, importance in exp.feature_contributions.items():
-                all_features[feature] = all_features.get(feature, 0) + abs(importance)
-
-        top_feature = max(all_features.items(), key=lambda x: x[1])
-        findings.append(f"- Primary risk driver: {top_feature[0]}")
-
-        # Confidence assessment
-        avg_confidence_width = predictions_df.apply(
-            lambda row: row['confidence_upper'] - row['confidence_lower'], axis=1
-        ).mean()
-
-        if avg_confidence_width < 0.1:
-            findings.append("- Model confidence: HIGH (narrow prediction intervals)")
-        elif avg_confidence_width < 0.3:
-            findings.append("- Model confidence: MODERATE")
-        else:
-            findings.append("- Model confidence: LOW (wide prediction intervals - more data needed)")
-
+        findings.append(
+            "- Per-feature attribution and calibrated prediction intervals are not "
+            "reported (see the module docstring)"
+        )
         return "\n".join(findings)
 
-    def _generate_explanation_report(self, explanations: Dict) -> str:
-        """Generate detailed explanation report."""
-        report = "DETAILED EXPLANATION REPORT\n" + "="*50 + "\n\n"
+    def _generate_explanation_report(self, predictions_df: pd.DataFrame) -> str:
+        """Report the scores, and state plainly what is not yet attributable."""
+        report = "MODEL OUTPUT REPORT\n" + "=" * 50 + "\n\n"
+        report += (
+            "Local feature attribution is not reported. The previous implementation\n"
+            "presented gradient*input scaled by uniform attention weights as SHAP\n"
+            "values; that routine was removed rather than re-tuned. SubgraphX over\n"
+            "the temporal multiplex is the intended replacement.\n\n"
+        )
 
-        for source, exp in explanations.items():
-            report += f"Source: {source}\n"
-            report += f"Prediction: {exp.prediction_value:.4f}\n"
-            report += f"Confidence: [{exp.confidence_lower:.4f}, {exp.confidence_upper:.4f}]\n\n"
+        if predictions_df.empty:
+            return report + "No predictions were produced.\n"
 
-            report += "Top Contributing Factors:\n"
-            for i, (feature, contrib, direction) in enumerate(exp.top_drivers, 1):
-                report += f"  {i}. {feature}: {contrib:.4f} ({direction} risk)\n"
+        for _, row in predictions_df.iterrows():
+            report += f"Source: {row['source']}\n"
+            report += f"  Risk score: {row['risk_score']:.4f}\n"
+            report += f"  Denormalised prediction: {row['prediction']:.4f}\n\n"
 
-            report += f"\n{exp.explanation_text}\n"
-            report += "\n" + "-"*50 + "\n\n"
-
+        report += "-" * 50 + "\n"
         return report
 
     def _generate_multi_bank_explanation_report(self, analysis: MultiBankAnalysis) -> str:
-        """Generate multi-bank explanation report."""
-        report = "MULTI-BANK ANALYSIS REPORT\n" + "="*70 + "\n\n"
-
+        """Render the network analysis, including what could not be computed."""
+        report = "MULTI-INSTITUTION NETWORK REPORT\n" + "=" * 70 + "\n\n"
         report += f"Date: {analysis.analysis_date}\n"
-        report += f"Banks Analyzed: {analysis.num_banks}\n"
-        report += f"Systemic Risk Score: {analysis.systemic_risk_score * 100:.1f}%\n\n"
+        report += f"Institutions analysed: {analysis.num_banks}\n"
 
-        report += "INDIVIDUAL BANK ASSESSMENTS:\n" + "-"*70 + "\n"
+        if analysis.systemic_risk_score is None:
+            report += (
+                "Systemic clearing: UNAVAILABLE - interbank liabilities and/or\n"
+                "endowments were not supplied. No clearing equilibrium exists to\n"
+                "report, and a model risk score is not a substitute for capital.\n"
+            )
+        else:
+            report += (
+                "Unpaid fraction of system liabilities at the clearing "
+                f"equilibrium: {analysis.systemic_risk_score * 100:.2f}%\n"
+            )
+            if analysis.clearing is not None:
+                report += (
+                    f"Clearing converged in {analysis.clearing.iterations} iteration(s); "
+                    f"{analysis.clearing.n_defaults} institution(s) defaulted\n"
+                )
+        report += "\n"
+
+        report += "INSTITUTION ASSESSMENTS:\n" + "-" * 70 + "\n"
         for bank_id, profile in analysis.bank_profiles.items():
             report += f"\n{profile.bank_name} ({bank_id}):\n"
-            report += f"  Overall Risk: {profile.overall_liquidity_risk * 100:.1f}% ({profile.risk_level})\n"
-            report += f"  Confidence: [{profile.confidence_lower * 100:.1f}%, {profile.confidence_upper * 100:.1f}%]\n"
-            report += f"  Systemic Importance: {profile.systemic_importance * 100:.1f}%\n"
+            report += f"  Model risk score: {profile.risk_score * 100:.1f}% ({profile.risk_level})\n"
+            report += (
+                f"  Systemic importance: {profile.systemic_importance * 100:.1f}% "
+                f"({profile.systemic_importance_method})\n"
+            )
+            report += f"  Network position: {profile.network_position}\n"
+            report += f"  Gross liabilities: {profile.gross_liabilities:,.2f}\n"
+            report += f"  Gross claims: {profile.gross_claims:,.2f}\n"
+            report += f"  Prediction interval: {profile.confidence_method}\n"
 
             if profile.top_vulnerabilities:
-                report += f"  Key Vulnerabilities:\n"
-                for vuln in profile.top_vulnerabilities[:2]:
-                    report += f"    - {vuln}\n"
+                report += "  Observed conditions:\n"
+                for finding in profile.top_vulnerabilities[:2]:
+                    report += f"    - {finding}\n"
 
             if profile.recommendations:
-                report += f"  Recommendations:\n"
-                for rec in profile.recommendations[:2]:
-                    report += f"    - {rec}\n"
+                report += "  Recommendations:\n"
+                for recommendation in profile.recommendations[:2]:
+                    report += f"    - {recommendation}\n"
 
-        if analysis.systemic_banks:
-            report += "\n\nSYSTEMICALLY IMPORTANT BANKS:\n" + "-"*70 + "\n"
-            for bank_id, importance, reason in analysis.systemic_banks:
-                report += f"  {bank_id}: {importance * 100:.1f}% importance ({reason})\n"
+        if analysis.shock_scenarios:
+            report += (
+                "\n\nCONTAGION SCENARIOS (total loss of external assets):\n"
+                + "-" * 70 + "\n"
+            )
+            for bank_id, result in analysis.shock_scenarios.items():
+                sequence = result.default_sequence()
+                report += f"  If {bank_id} loses all external assets:\n"
+                report += f"    - Institutions failing: {result.n_defaults}\n"
+                report += f"    - Propagation rounds: {len(result.default_rounds)}\n"
+                report += (
+                    "    - Order of failure: "
+                    f"{' -> '.join(sequence) if sequence else 'none'}\n"
+                )
 
-        if analysis.cascade_scenarios:
-            report += "\n\nCONTAGION SCENARIOS:\n" + "-"*70 + "\n"
-            for bank_id, cascade in analysis.cascade_scenarios.items():
-                report += f"  If {bank_id} fails:\n"
-                report += f"    - Total failures: {cascade['total_failures']}\n"
-                report += f"    - Cascade depth: {cascade['cascade_depth']} rounds\n"
-                report += f"    - Affected banks: {', '.join(cascade['affected_banks'])}\n"
-
-        report += "\n" + "="*70 + "\n"
-        report += "This report is EU AI Act compliant with full model explainability.\n"
-
+        report += "\n" + "=" * 70 + "\n"
+        report += (
+            "Attribution: none reported. SubgraphX attribution over the temporal\n"
+            "multiplex is pending; no approximate attribution is substituted.\n"
+        )
         return report

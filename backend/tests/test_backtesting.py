@@ -15,15 +15,13 @@ import pytest
 from backend.modules.engine import backtesting as bt
 
 
-QUANT_METRIC_KEYS = (
-    "sharpe_ratio",
-    "sortino_ratio",
-    "max_drawdown",
-    "calmar_ratio",
-    "annualized_volatility",
+METRIC_KEYS = (
+    "mse",
+    "mae",
+    "rmse",
+    "r2",
+    "directional_accuracy",
     "hit_rate",
-    "var_95",
-    "cvar_95",
 )
 
 
@@ -122,26 +120,9 @@ class TestWalkForwardFolds:
 
 
 # ---------------------------------------------------------------------------
-# Hand-computed quantitative metrics
+# Hand-computed metrics
 # ---------------------------------------------------------------------------
 class TestMetricsHandComputed:
-    def test_sharpe_ratio(self):
-        returns = np.array([0.02, 0.01, -0.01, 0.03, 0.0])
-        # mean = 0.01, sample sd = sqrt(2.5e-4), * sqrt(252) -> 10.0399
-        assert bt.sharpe_ratio(returns) == pytest.approx(10.0399, rel=1e-4)
-        assert bt.sharpe_ratio(returns, risk_free=0.05) < bt.sharpe_ratio(returns, risk_free=0.0)
-
-    def test_sortino_ratio(self):
-        returns = np.array([0.02, 0.01, -0.01, 0.03, 0.0])
-        # mean excess = 0.01; downside deviation = sqrt(1e-4 / 5) = sqrt(2e-5)
-        # -> 0.01 / sqrt(2e-5) * sqrt(252) = sqrt(1260)
-        assert bt.sortino_ratio(returns) == pytest.approx(math.sqrt(1260), rel=1e-9)
-        assert bt.sortino_ratio(returns) > bt.sharpe_ratio(returns)
-
-    def test_max_drawdown(self):
-        equity = np.array([100.0, 120.0, 90.0, 110.0, 80.0, 130.0])
-        assert bt.max_drawdown(equity) == pytest.approx(1.0 / 3.0, rel=1e-12)
-
     def test_rmse_and_r2(self):
         actual = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         predicted = np.array([1.1, 1.9, 3.2, 3.8, 5.1])
@@ -151,31 +132,6 @@ class TestMetricsHandComputed:
         assert bt.mae(actual, predicted) == pytest.approx(0.14, rel=1e-12)
         assert bt.r2_score_(actual, predicted) == pytest.approx(0.989, rel=1e-12)
 
-    def test_var_and_cvar(self):
-        returns = np.array([-0.05, -0.03, -0.01, 0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06])
-        var_95 = bt.value_at_risk(returns, level=0.95)
-        cvar_95 = bt.conditional_value_at_risk(returns, level=0.95)
-
-        assert var_95 == pytest.approx(0.041, rel=1e-12)
-        assert cvar_95 == pytest.approx(0.05, rel=1e-12)
-        assert cvar_95 >= var_95
-
-    def test_invalid_var_level_raises(self):
-        with pytest.raises(ValueError):
-            bt.value_at_risk(np.array([0.1, -0.1]), level=1.0)
-        with pytest.raises(ValueError):
-            bt.conditional_value_at_risk(np.array([0.1, -0.1]), level=0.0)
-
-    def test_risk_signal_convention(self):
-        risk = np.array([0.1, 0.15, 0.12, 0.2])
-        np.testing.assert_allclose(bt.risk_signal_to_returns(risk), [-0.05, 0.03, -0.08])
-
-    def test_equity_curve_shape(self):
-        returns = np.array([0.0, 0.0, 0.0])
-        equity = bt.equity_curve_from_returns(returns)
-        assert equity.shape == (4,)
-        np.testing.assert_allclose(equity, [1.0, 1.0, 1.0, 1.0])
-
 
 # ---------------------------------------------------------------------------
 # Degenerate input
@@ -183,27 +139,14 @@ class TestMetricsHandComputed:
 class TestDegenerateInputs:
     def test_empty_series(self):
         empty = np.array([])
-        assert math.isnan(bt.sharpe_ratio(empty))
-        assert math.isnan(bt.sortino_ratio(empty))
-        assert bt.max_drawdown(empty) == 0.0
-        assert math.isnan(bt.annualized_volatility(empty))
-        assert math.isnan(bt.calmar_ratio(empty))
         assert math.isnan(bt.hit_rate(empty, empty))
         assert math.isnan(bt.mean_squared_error(empty, empty))
         assert math.isnan(bt.mae(empty, empty))
         assert math.isnan(bt.rmse(empty, empty))
         assert math.isnan(bt.r2_score_(empty, empty))
-        assert math.isnan(bt.value_at_risk(empty))
-        assert math.isnan(bt.conditional_value_at_risk(empty))
-        assert bt.risk_signal_to_returns(empty).size == 0
 
     def test_constant_series(self):
         zeros = np.zeros(5)
-        assert bt.sharpe_ratio(zeros) == 0.0
-        assert bt.sortino_ratio(zeros) == 0.0
-        assert bt.annualized_volatility(zeros) == 0.0
-        assert bt.max_drawdown(zeros) == 0.0
-        assert bt.max_drawdown(bt.equity_curve_from_returns(zeros)) == 0.0
         assert bt.r2_score_(zeros, zeros) == 0.0
         assert bt.mean_squared_error(zeros, zeros) == 0.0
         assert bt.rmse(zeros, zeros) == 0.0
@@ -211,17 +154,11 @@ class TestDegenerateInputs:
 
     def test_single_element(self):
         one = np.array([0.5])
-        assert math.isnan(bt.sharpe_ratio(one))
-        assert math.isnan(bt.sortino_ratio(one))
-        assert math.isnan(bt.annualized_volatility(one))
-        assert bt.max_drawdown(one) == 0.0
-        assert bt.max_drawdown(bt.equity_curve_from_returns(one)) == 0.0
         assert math.isnan(bt.hit_rate(one, one))
         assert bt.mean_squared_error(one, one) == 0.0
         assert bt.rmse(one, one) == 0.0
         # A single point is a zero-variance target, so R^2 reports 0.0.
         assert bt.r2_score_(one, one) == 0.0
-        assert bt.risk_signal_to_returns(one).size == 0
 
 
 # ---------------------------------------------------------------------------
@@ -233,23 +170,34 @@ class TestComputeMetrics:
         predicted = actual + 0.01 * np.sin(np.arange(40))
         metrics = bt.compute_metrics(actual=actual, predicted=predicted)
 
-        for key in ("mse", "mae", "rmse", "r2", "directional_accuracy", *QUANT_METRIC_KEYS):
-            assert key in metrics
+        assert set(metrics) == set(METRIC_KEYS)
         assert metrics["rmse"] < 0.02
 
-    def test_quant_metrics_without_ground_truth(self):
+    def test_metrics_without_ground_truth(self):
         predicted = np.linspace(0.0, 1.0, 30)
         metrics = bt.compute_metrics(predicted=predicted)
 
+        assert set(metrics) == set(METRIC_KEYS)
         assert math.isnan(metrics["mse"])
-        for key in QUANT_METRIC_KEYS:
-            assert key in metrics
 
     def test_requires_some_signal(self):
         with pytest.raises(ValueError):
             bt.compute_metrics()
         with pytest.raises(ValueError):
             bt.compute_metrics(actual=np.array([1.0, 2.0]))
+
+    def test_boundaries_pool_the_directional_score(self):
+        actual = np.array([1.0, 2.0, 3.0, 3.0, 2.0, 1.0])
+        predicted = np.array([1.0, 2.0, 3.0, 4.0, 3.0, 2.0])
+
+        naive = bt.compute_metrics(actual=actual, predicted=predicted)
+        seam_free = bt.compute_metrics(actual=actual, predicted=predicted, boundaries=[3])
+
+        assert naive["hit_rate"] == pytest.approx(0.8)
+        assert seam_free["hit_rate"] == pytest.approx(1.0)
+        assert seam_free["directional_accuracy"] == pytest.approx(1.0)
+        # The error metrics are unaffected by how the directional score is pooled.
+        assert seam_free["mae"] == pytest.approx(naive["mae"])
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +230,7 @@ class TestWalkForwardBacktester:
 
         assert result.metrics.r2 > 0.99
         assert math.isfinite(result.metrics.rmse)
-        for key in QUANT_METRIC_KEYS:
+        for key in METRIC_KEYS:
             assert hasattr(result.metrics, key)
         assert len(result.folds) == config.n_splits
 
@@ -301,7 +249,7 @@ class TestWalkForwardBacktester:
         assert decoded["n_oos"] == 40
         assert decoded["walk_forward"]["config"]["n_splits"] == 2
         assert len(decoded["walk_forward"]["folds"]) == 2
-        for key in QUANT_METRIC_KEYS:
+        for key in METRIC_KEYS:
             assert key in decoded["metrics"]
 
     def test_pandas_inputs_supported(self):
@@ -342,28 +290,12 @@ class TestWalkForwardBacktester:
             assert fold.to_dict()["n_test"] == 15
 
 
-class FoldConstantModel:
-    """Predicts the training mean: constant within a fold, different across folds."""
-
-    def __init__(self) -> None:
-        self.value = 0.0
-
-    def fit(self, X, y):
-        self.value = float(np.mean(np.asarray(y, dtype=float)))
-        return self
-
-    def predict(self, X):
-        rows = np.asarray(X).shape[0]
-        return np.full(rows, self.value, dtype=float)
-
-
 # ---------------------------------------------------------------------------
 # Fold-boundary invariants
 #
-# Concatenating out-of-sample folds and differencing the result invents one
-# transition per seam. These tests pin the correction down: per-fold returns are
-# concatenated, directional agreement is pooled within segments, and the result
-# records what was suppressed.
+# Concatenating out-of-sample folds invents one transition per seam. These tests
+# pin the correction down: directional agreement is pooled within segments and
+# the result records the seams that were suppressed.
 # ---------------------------------------------------------------------------
 class TestFoldBoundaryInvariants:
     def test_segment_slices_split_on_the_named_offsets(self):
@@ -397,62 +329,6 @@ class TestFoldBoundaryInvariants:
             bt.boundaries_from_group_sizes([5, -1])
         with pytest.raises(ValueError):
             bt.boundaries_from_group_sizes([5.5])
-
-    def test_returns_never_span_a_boundary(self):
-        signal = np.array([0.0, 1.0, 2.0, 5.0, 6.0, 7.0])
-
-        naive = bt.risk_signal_to_returns(signal)
-        segmented = bt.risk_signal_to_returns(signal, boundaries=[3])
-
-        np.testing.assert_allclose(segmented, [-1.0, -1.0, -1.0, -1.0])
-        assert naive.size == segmented.size + 1
-        assert naive[2] == pytest.approx(-3.0), "the artefactual seam transition"
-        assert -3.0 not in segmented
-
-    def test_piecewise_constant_predictions_produce_a_flat_return_series(self):
-        """The crisp invariant: no seam may contribute a non-zero return."""
-        n_samples = 120
-        X = np.arange(n_samples, dtype=float).reshape(-1, 1)
-        y = np.sin(np.arange(n_samples) / 5.0)
-        config = bt.WalkForwardConfig(n_splits=4, test_size=20, gap=0)
-
-        result = bt.WalkForwardBacktester(lambda: FoldConstantModel(), config).run(X, y)
-
-        assert result.boundaries.tolist() == [20, 40, 60]
-        assert result.n_boundary_transitions_removed == 3
-        assert result.returns.size == result.n_oos - config.n_splits
-        np.testing.assert_allclose(result.returns, 0.0, atol=1e-12)
-        assert result.metrics.max_drawdown == 0.0
-        assert result.metrics.sharpe_ratio == 0.0
-        assert result.metrics.sortino_ratio == 0.0
-
-    def test_aggregate_returns_equal_concatenated_per_fold_returns(self):
-        n_samples = 100
-        X = np.linspace(0.0, 1.0, n_samples).reshape(-1, 1)
-        y = np.cos(X.ravel())
-        config = bt.WalkForwardConfig(n_splits=3, test_size=20, gap=0)
-        result = bt.WalkForwardBacktester(lambda: LinearStubModel(), config).run(X, y)
-
-        seam = np.concatenate(([0], result.boundaries, [result.n_oos]))
-        per_fold = [
-            bt.risk_signal_to_returns(result.predictions[start:stop])
-            for start, stop in zip(seam[:-1], seam[1:])
-        ]
-        np.testing.assert_allclose(result.returns, np.concatenate(per_fold))
-        np.testing.assert_allclose(
-            result.equity_curve, bt.equity_curve_from_returns(result.returns)
-        )
-
-    def test_naive_aggregation_would_have_been_biased(self):
-        n_samples = 100
-        X = np.linspace(0.0, 1.0, n_samples).reshape(-1, 1)
-        y = np.cos(X.ravel())
-        config = bt.WalkForwardConfig(n_splits=3, test_size=20, gap=0)
-        result = bt.WalkForwardBacktester(lambda: LinearStubModel(), config).run(X, y)
-
-        naive = bt.risk_signal_to_returns(result.predictions)
-        assert naive.size == result.returns.size + config.n_splits - 1
-        assert result.boundaries.size == config.n_splits - 1
 
     def test_hit_rate_pools_within_segments(self):
         # The only disagreement in the naive series is the zero change at the
@@ -525,12 +401,6 @@ class TestFoldBoundaryInvariants:
             np.testing.assert_array_equal(train_actual, train_expected)
             np.testing.assert_array_equal(test_actual, test_expected)
 
-    def test_compute_metrics_rejects_returns_and_boundaries_together(self):
-        with pytest.raises(ValueError):
-            bt.compute_metrics(
-                returns=np.array([0.1, 0.2]), boundaries=[1], predicted=np.array([1.0, 2.0, 3.0])
-            )
-
     def test_to_dict_reports_seam_free_aggregation(self):
         X = np.linspace(0.0, 1.0, 80).reshape(-1, 1)
         y = np.sin(X.ravel())
@@ -538,7 +408,7 @@ class TestFoldBoundaryInvariants:
         payload = bt.WalkForwardBacktester(lambda: LinearStubModel(), config).run(X, y).to_dict()
 
         aggregation = payload["aggregation"]
-        assert aggregation["returns"] == "per_fold"
+        assert aggregation["strategy"] == "directional_score_pooled_within_segment"
         assert aggregation["boundaries"] == [20]
         assert aggregation["n_boundary_transitions_removed"] == 1
         assert json.dumps(payload, allow_nan=False)
@@ -615,7 +485,7 @@ class TestBaselines:
         )
         # Every series ran under the same seam-free aggregation.
         for name in ("persistence", "ar1"):
-            assert payload["baselines"][name]["aggregation"]["returns"] == "per_fold"
+            assert payload["baselines"][name]["aggregation"]["strategy"] == "directional_score_pooled_within_segment"
         assert payload["primary"]["aggregation"]["n_boundary_transitions_removed"] == 2
         assert json.dumps(payload, allow_nan=False)
 

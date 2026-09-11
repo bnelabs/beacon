@@ -72,7 +72,6 @@ class DataPackage:
     job_id: str
     timeseries_path: str
     features_path: str
-    graph_path: Optional[str]
 
     metadata: Dict[str, Any]
     quality_report: DataQualityReport
@@ -197,16 +196,22 @@ class DataOrchestrator:
 
             self._update_progress(40.0, f"Validation complete: {len(validation_report.warnings)} warnings detected")
 
-            # Step 3: Cleaning
+            # Step 3: Cleaning. Gaps are detected and reported, never filled:
+            # forward-filling would inject values that had not been published at
+            # those timestamps, and back-filling would read from the future.
             self.status = DataStatus.CLEANING
-            self._update_progress(45.0, "Cleaning data and imputing missing values...")
+            self._update_progress(45.0, "Inspecting data for gaps...")
 
             clean_data, cleaning_report = self.cleaner.clean(
                 raw_data,
                 validation_report
             )
 
-            self._update_progress(60.0, f"Data cleaning complete: Fixed {cleaning_report.fixed_issues} issues")
+            self._update_progress(
+                60.0,
+                f"Gap inspection complete: {cleaning_report.gaps_detected} missing "
+                f"cell(s) preserved for explicit handling",
+            )
 
             # Step 4: Formatting
             self.status = DataStatus.FORMATTING
@@ -316,8 +321,12 @@ class DataOrchestrator:
             consistency=float(components.consistency if components.consistency is not None else 0.0),
             timeliness=float(components.timeliness if components.timeliness is not None else 0.0),
             accuracy=float(components.accuracy if components.accuracy is not None else 0.0),
-            anomalies_detected=validation_report.anomalies_count + cleaning_report.anomalies_detected,
-            anomalies_fixed=cleaning_report.fixed_issues,
+            # Anomalies come from validation. Cleaning no longer contributes a
+            # count of "fixed" cells, because it no longer fixes anything: gaps
+            # are preserved, and filling them would inject values that were not
+            # published at those timestamps.
+            anomalies_detected=validation_report.anomalies_count,
+            anomalies_fixed=0,
             warnings=validation_report.warnings + cleaning_report.warnings,
             errors=validation_report.errors,
             fit_for_engine=False,  # only the gate may certify a payload
@@ -359,20 +368,10 @@ class DataOrchestrator:
         features = self.formatter.extract_features(data)
         features.to_parquet(features_path, compression='snappy')
 
-        # Optional: Build graph structure
-        graph_path = None
-        if len(data) > 100:  # Only for sufficient data
-            graph = self.formatter.build_graph(data)
-            graph_path = f"{job_dir}/graph.pkl"
-            import pickle
-            with open(graph_path, 'wb') as f:
-                pickle.dump(graph, f)
-
         return DataPackage(
             job_id=self.job_id,
             timeseries_path=timeseries_path,
             features_path=features_path,
-            graph_path=graph_path,
             metadata={
                 "start_date": start_date,
                 "end_date": end_date,

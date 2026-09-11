@@ -115,7 +115,7 @@ class TestTrainerHook:
 
         assert payload is not None
         assert set(payload["baseline_metrics"]) == {"persistence", "ar1"}
-        assert payload["aggregation"]["returns"] == "per_fold"
+        assert payload["aggregation"]["strategy"] == "directional_score_pooled_within_segment"
         assert payload["lift_convention"].startswith("positive")
         assert "rmse" in payload["lower_is_better"]
         assert set(payload["lift"]) == {"persistence", "ar1"}
