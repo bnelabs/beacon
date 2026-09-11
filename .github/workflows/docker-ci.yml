@@ -1,0 +1,109 @@
+name: Docker build
+
+# why: the Backend CI and Frontend CI workflows test the code on the runner's own
+# interpreter/Node install - they never build the container images. That gap is
+# real, not theoretical: a Dependabot PR once proposed `python:3.14-slim` for
+# backend/Dockerfile.cpu, which passes every Python test (CI uses setup-python)
+# but cannot build, because torch/numpy publish no cp314 wheels. This workflow
+# builds the actual images so base-image, Dockerfile and requirements changes are
+# validated before they can merge.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/Dockerfile*"
+      - "backend/requirements*.txt"
+      - "frontend/Dockerfile"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "docker-compose*.yml"
+      - ".github/workflows/docker-ci.yml"
+  pull_request:
+    paths:
+      - "backend/Dockerfile*"
+      - "backend/requirements*.txt"
+      - "frontend/Dockerfile"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "docker-compose*.yml"
+      - ".github/workflows/docker-ci.yml"
+  workflow_dispatch:
+
+# why: never cancel on main - a cancelled run leaves the commit unverified.
+concurrency:
+  group: docker-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  compose-config:
+    name: Validate compose files
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Validate the base and both overlays
+        # why: `docker compose config` resolves the YAML, interpolates every
+        # ${VAR:-default}, and validates the merged service graph - the cheapest
+        # check that catches a broken compose edit. The overlays are only
+        # meaningful combined with the base file, which is how they are used.
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.cpu.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.gpu.yml config --quiet
+          echo "All compose files are valid."
+
+  build-backend:
+    name: Build backend image (CPU)
+    runs-on: ubuntu-latest
+    # why: installing the pinned ML stack (torch, torch-geometric, scipy) inside
+    # the image is the slow leg; 45 minutes bounds a hung build while leaving
+    # headroom on a cold cache.
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build backend CPU image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.cpu
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-frontend:
+    name: Build frontend image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: false
+          load: false
+          build-args: |
+            VITE_API_BASE_URL=http://localhost:3456
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

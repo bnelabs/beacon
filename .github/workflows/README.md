@@ -1,17 +1,27 @@
 # CI/CD workflows
 
-This directory contains the GitHub Actions automation for BEACON. There are three
-workflows plus Dependabot configuration, and a pull-request template.
+This directory contains the GitHub Actions automation for BEACON: four
+workflows, Dependabot configuration, and a pull-request template.
 
 | File | Purpose | Triggers |
 | --- | --- | --- |
 | `backend-ci.yml` | Compile and test the FastAPI/Celery/PyTorch backend on Python 3.12 and upload a coverage report. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
 | `frontend-ci.yml` | Build the React/Vite app on Node 24 and run the Playwright end-to-end suite. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
+| `docker-ci.yml` | Build the real backend and frontend container images and validate every compose file. | `push`/`pull_request` **restricted to Docker, requirements, package and compose paths**, plus `workflow_dispatch`. |
 | `security.yml` | Advisory dependency audits: `pip-audit` for `backend/requirements.txt` and `npm audit` for `frontend/`. Never blocks a merge. | `push` to `main`, every `pull_request`, weekly `schedule` (Mondays 06:17 UTC), manual `workflow_dispatch`. |
-| `../dependabot.yml` | Weekly version-update PRs for the `pip`, `npm`, `github-actions`, and `docker` ecosystems. | GitHub's scheduler (weekly). |
+| `../dependabot.yml` | Version-update PRs for `github-actions`, `pip`, `npm`, and `docker`. | GitHub's scheduler (see the policy below). |
 
-All workflows use a per-ref `concurrency` group with `cancel-in-progress: true`, so
-pushing again to the same branch cancels the older run instead of queueing two.
+## Concurrency
+
+Every workflow uses a per-ref `concurrency` group, but cancellation is
+**conditional**: `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}`.
+
+- On a pull request or feature branch, a superseded run is cancelled — it
+  produces no useful signal and wastes runner minutes.
+- **On `main` a run is never cancelled.** A cancelled run leaves the commit
+  permanently unverified, and a manual `workflow_dispatch` shares the same
+  concurrency group as a `push`, so unconditional cancellation could discard the
+  only real run for a commit.
 
 ## Backend CI (`backend-ci.yml`)
 
@@ -20,9 +30,9 @@ pushing again to the same branch cancels the older run instead of queueing two.
   The pinned scientific stack (scipy 1.18, scikit-learn 1.9, matplotlib 3.11)
   requires Python >= 3.12.
 - **CPU-only PyTorch.** The torch version is read from `backend/requirements.txt`
-  and installed from `https://download.pytorch.org/whl/cpu` *before* the
-  requirements files, so the runner does not download the multi-GB CUDA bundles
-  and can never drift from the pinned version.
+  at run time and installed from `https://download.pytorch.org/whl/cpu` *before*
+  the requirements files, so the runner does not download the multi-GB CUDA
+  bundles and the two can never drift apart.
 - **No database service.** The suite does not need a live PostgreSQL. The tests force
   SQLite through `USE_SQLITE=true` (`test_api_smoke.py`, `test_pipeline_integration.py`)
   and drive the app with FastAPI's in-process `TestClient`. The only Docker/Postgres test,
@@ -31,18 +41,19 @@ pushing again to the same branch cancels the older run instead of queueing two.
 - **Steps:** `python -m compileall -q backend` (fast syntax gate) → `python -m pytest`
   with coverage → upload the `backend-coverage` artifact (`coverage.xml`, `htmlcov/`) →
   an advisory `ruff` check that reports real defects without blocking.
-- **pytest configuration caveat.** The root `pytest.ini` uses the `[tool:pytest]` header,
-  which is only valid in `setup.cfg`; modern pytest ignores its options (including the
-  `--cov` flags). The workflow therefore passes `backend/tests` and the coverage flags
-  explicitly.
+- The target and coverage flags are passed explicitly as well as living in
+  `pytest.ini` (which uses the correct `[pytest]` header and sets
+  `testpaths = backend/tests`). Keeping them in the workflow makes the invocation
+  self-describing and immune to config drift.
 
 ## Frontend CI (`frontend-ci.yml`)
 
 - **Node 24** (Active LTS until 2028-04), matching the `node:24-alpine` base in
   `frontend/Dockerfile`.
 - **All JavaScript actions run on Node 24.** `actions/checkout@v7`,
-  `actions/setup-node@v7`, `actions/setup-python@v7` and
-  `actions/upload-artifact@v7` all declare `runs.using: node24`, so no action is
+  `actions/setup-node@v7`, `actions/setup-python@v7`,
+  `actions/upload-artifact@v7`, `docker/setup-buildx-action@v4` and
+  `docker/build-push-action@v7` all declare `runs.using: node24`, so no action is
   forced onto a newer runtime and the Node 20 deprecation warning does not appear.
   When bumping an action, check its `action.yml` for `using: node24` rather than
   assuming the highest tag is current.
@@ -51,32 +62,72 @@ pushing again to the same branch cancels the older run instead of queueing two.
 - **No live backend is started.** The Playwright suite is fully mocked:
   `frontend/tests/full-frontend.spec.js` installs `frontend/tests/apiMocks.js`, which
   intercepts every `**/api/**` request via `page.route(...)`. Playwright's `webServer`
-  block only starts the Vite dev server on `127.0.0.1:8173`. Starting Postgres, Redis, a
-  worker, or `uvicorn` would add minutes of startup and still exercise nothing extra.
+  block only starts the Vite dev server on `127.0.0.1:8173`.
+
+## Docker build (`docker-ci.yml`)
+
+This workflow exists because `backend-ci.yml` and `frontend-ci.yml` test the code
+on the *runner's* interpreter and never build the images. That gap is not
+theoretical: a Dependabot PR proposed `python:3.14-slim` for
+`backend/Dockerfile.cpu`, which passes every Python test — CI uses
+`setup-python`, not the image — but cannot build, because `torch` and `numpy`
+publish no cp314 wheels. Without this workflow such a change fails only at
+`docker compose build` time, on the operator's machine.
+
+- `compose-config` runs `docker compose config` over the base file and both
+  overlays (`.cpu`, `.gpu`), resolving variables and validating the merged service
+  graph.
+- `build-backend` builds `backend/Dockerfile.cpu`; `build-frontend` builds
+  `frontend/Dockerfile`. Both use the GitHub Actions build cache.
+- Path-filtered on purpose: it runs only when a Dockerfile, requirements file,
+  `package.json`/lockfile, or compose file changes, so ordinary code PRs do not
+  pay for a container build.
 
 ## Security audit (`security.yml`)
 
 - `pip-audit -r backend/requirements.txt` and `npm audit --audit-level=high` in
   `frontend/`.
+- The `pip-audit` version is read from `backend/requirements-dev.txt` rather than
+  hard-coded, so the audit tool cannot drift from the pinned dev dependency set.
 - Every audit step is `continue-on-error: true`: findings show up in the checks UI but do
   not block merges. Fix findings as a dedicated, reviewable dependency bump.
 
 ## Dependabot (`../dependabot.yml`)
 
-Weekly PRs for `pip` (`/backend`), `npm` (`/frontend`), `github-actions` (`/`), and
-`docker` (`/backend` for the Dockerfiles, `/` for the compose files). Minor and patch
-updates are grouped per ecosystem; major updates arrive individually.
+The policy is deliberately conservative about the stack where a "minor" version
+bump is breaking in practice.
+
+| Ecosystem | Cadence | Automatic? |
+| --- | --- | --- |
+| `github-actions` (`/`) | weekly | Yes — all updates, grouped. |
+| `pip` (`/backend`) | monthly | Minor/patch grouped. The ML/scientific stack (`torch`, `torch-geometric`, `numpy`, `scipy`, `scikit-learn`, `matplotlib`, `pandas`) is exempt from major **and** minor bumps. Framework majors (`fastapi`, `pydantic`, `sqlalchemy`, `celery`) are exempt. |
+| `npm` (`/frontend`) | monthly | Minor/patch grouped; majors ignored. |
+| `docker` (`/backend`) | monthly | The `python` base image is exempt from major **and** minor bumps; `nvidia/cuda` likewise. |
+| `docker` (`/`) | monthly | Compose image majors (`postgres`, `timescale/timescaledb`, `redis`, `nginx`) ignored. |
+
+Why the ML stack is exempt: Dependabot classified `torch` 2.5.1 → 2.14.0,
+`scipy` 1.13 → 1.18, `scikit-learn` 1.5 → 1.9 and `matplotlib` 3.9 → 3.11 as
+*minor* updates and grouped them into one PR. That PR was not installable —
+`scipy` 1.18 requires `numpy>=2.0` while `numpy` was pinned to 1.26, and those
+packages require Python >= 3.12 while the image shipped 3.10 — so resolving it
+meant moving the Python version and the numpy major together. That is a
+migration, not a chore.
+
+`ignore` rules and `open-pull-requests-limit` do **not** affect **security**
+updates, which have their own internal limit. Vulnerability alerts therefore keep
+working even with this policy.
 
 ## Run this locally before opening a PR
 
 **Backend** (from the repository root):
 
 ```bash
-python -m pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+# Match the pinned torch without pulling CUDA bundles.
+TORCH_VERSION="$(grep -E '^torch==' backend/requirements.txt | head -1 | cut -d= -f3)"
+python -m pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
 python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 python -m compileall -q backend
-python -m pytest backend/tests \
-  --cov=backend --cov-report=term-missing
+python -m pytest backend/tests --cov=backend --cov-report=term-missing
 ```
 
 **Frontend** (from `frontend/`):
@@ -86,6 +137,14 @@ npm ci
 npm run build
 npx playwright install --with-deps chromium   # first time only on a fresh machine
 npm test
+```
+
+**Docker and compose** (from the repository root):
+
+```bash
+docker compose -f docker-compose.yml config --quiet
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml config --quiet
+docker compose build
 ```
 
 **Security audits** (optional but recommended):

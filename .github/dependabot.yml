@@ -1,57 +1,32 @@
 # Dependabot configuration for BEACON.
 # Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 #
-# Strategy: small, reviewable PRs once a week. Minor and patch updates are grouped per
-# ecosystem so they arrive as a single PR; major updates stay separate because they may
-# contain breaking changes that need individual attention.
+# STRATEGY (revised after Dependabot opened 9 PRs in four minutes and the
+# grouped one could not build):
+#
+#   * github-actions  -> keep automatic. Low risk, high value, no application code.
+#   * npm             -> grouped minor/patch only; majors are migrations.
+#   * pip             -> grouped minor/patch, but the scientific/ML stack is exempt:
+#                        its "minor" bumps are breaking in practice.
+#   * docker          -> the Python base image only moves when a human decides.
+#
+# Why the ML stack is exempt from automatic bumps:
+#   Dependabot classified torch 2.5.1->2.14.0, scipy 1.13->1.18, scikit-learn
+#   1.5->1.9 and matplotlib 3.9->3.11 as *minor* updates and grouped them into a
+#   single PR. That PR was not installable: scipy 1.18 requires numpy>=2.0 while
+#   numpy was pinned to 1.26, and scikit-learn/matplotlib/scipy all require Python
+#   >=3.12 while the image shipped 3.10. Resolving it required moving the Python
+#   version and the numpy major together. Those are deliberal migrations, not
+#   chores, so they are done by hand.
+#
+# Security updates are NOT affected by any `ignore` rule or by
+# `open-pull-requests-limit`. They continue to open PRs under their own limit, so
+# suppressing routine version noise does not cost us vulnerability alerts.
+
 version: 2
 
 updates:
-  # --- Python dependencies (backend/requirements.txt and requirements-dev.txt) ---
-  - package-ecosystem: pip
-    directory: /backend
-    schedule:
-      interval: weekly
-      day: monday
-      time: "06:00"
-      timezone: Etc/UTC
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - backend
-    commit-message:
-      prefix: "chore(deps)"
-    groups:
-      backend-python-minor-patch:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-
-  # --- JavaScript dependencies (frontend/package.json + package-lock.json) ---
-  - package-ecosystem: npm
-    directory: /frontend
-    schedule:
-      interval: weekly
-      day: monday
-      time: "06:00"
-      timezone: Etc/UTC
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - frontend
-    commit-message:
-      prefix: "chore(deps)"
-    groups:
-      frontend-npm-minor-patch:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-
-  # --- GitHub Actions used by .github/workflows/** ---
+  # --- GitHub Actions -------------------------------------------------------
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -66,47 +41,121 @@ updates:
     commit-message:
       prefix: "chore(ci)"
     groups:
-      github-actions-minor-patch:
+      github-actions:
+        patterns:
+          - "*"
+
+  # --- Python (backend) — routine updates, ML stack exempt -------------------
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - backend
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      backend-python-minor-patch:
         patterns:
           - "*"
         update-types:
           - minor
           - patch
+    ignore:
+      # Compiled against a specific Python ABI and CUDA major; move with the
+      # interpreter, not on a bot's schedule.
+      - dependency-name: "torch"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "torch-geometric"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # The scientific stack must move as a single coordinated unit: their
+      # numpy/Python floors are coupled and cannot be satisfied one bump at a time.
+      - dependency-name: "numpy"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "scipy"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "scikit-learn"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "matplotlib"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # pandas/numpy ABI pairs up with the above; majors only, minors are safe.
+      - dependency-name: "pandas"
+        update-types: ["version-update:semver-major"]
+      # Framework majors are migrations (pydantic v2, sqlalchemy 2.0), not chores.
+      - dependency-name: "fastapi"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pydantic"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sqlalchemy"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "celery"
+        update-types: ["version-update:semver-major"]
 
-  # --- Container base images in backend/Dockerfile and backend/Dockerfile.cpu ---
+  # --- JavaScript (frontend) -------------------------------------------------
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - frontend
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      frontend-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # React and Vite majors are framework migrations; deck.gl majors can break
+      # the layer APIs. Take them deliberately.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # --- Backend base images ---------------------------------------------------
   - package-ecosystem: docker
     directory: /backend
     schedule:
-      interval: weekly
-      day: monday
-      time: "06:00"
-      timezone: Etc/UTC
-    open-pull-requests-limit: 3
+      interval: monthly
+    open-pull-requests-limit: 2
     labels:
       - dependencies
       - docker
     commit-message:
       prefix: "chore(deps)"
-    groups:
-      backend-docker-images:
-        patterns:
-          - "*"
+    ignore:
+      # The interpreter and CUDA version define the whole dependency contract.
+      # Dependabot flagged python:3.10 -> 3.14 as a *minor* bump; it cannot build
+      # because torch/numpy publish no cp314 wheels. Always a human decision.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "nvidia/cuda"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
-  # --- Container images referenced by docker-compose*.yml (postgres, redis) ---
+  # --- Compose images (postgres/timescaledb, redis, nginx) --------------------
   - package-ecosystem: docker
     directory: /
     schedule:
-      interval: weekly
-      day: monday
-      time: "06:00"
-      timezone: Etc/UTC
-    open-pull-requests-limit: 3
+      interval: monthly
+    open-pull-requests-limit: 2
     labels:
       - dependencies
       - docker
     commit-message:
       prefix: "chore(deps)"
-    groups:
-      compose-docker-images:
-        patterns:
-          - "*"
+    ignore:
+      # A datastore major upgrade (PostgreSQL/TimescaleDB, Redis) needs a
+      # migration and a restore plan, not an automatic PR.
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "timescale/timescaledb"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "redis"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "nginx"
+        update-types: ["version-update:semver-major"]

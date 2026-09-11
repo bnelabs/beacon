@@ -13,7 +13,7 @@ on:
 
 concurrency:
   group: security-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -36,7 +36,16 @@ jobs:
           cache-dependency-path: backend/requirements.txt
 
       - name: Install pip-audit
-        run: python -m pip install pip-audit==2.7.3
+        # why: the version is read from backend/requirements-dev.txt so the audit
+        # tool cannot drift from the pinned dev dependency set (it previously
+        # hard-coded 2.7.3 while requirements-dev.txt pinned 2.10.1).
+        run: |
+          PIP_AUDIT_VERSION="$(grep -E '^pip-audit==' backend/requirements-dev.txt | head -1 | cut -d= -f3)"
+          if [ -z "$PIP_AUDIT_VERSION" ]; then
+            echo "pip-audit is not pinned in backend/requirements-dev.txt" >&2
+            exit 1
+          fi
+          python -m pip install "pip-audit==${PIP_AUDIT_VERSION}"
 
       - name: Audit backend dependencies
         # why: advisory only. A new CVE must surface as a visible check but must not

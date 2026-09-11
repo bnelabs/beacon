@@ -8,11 +8,13 @@ on:
   pull_request:
   workflow_dispatch:
 
-# why: a superseded run on the same ref produces no useful signal, so cancel it and
-# reclaim runner minutes (especially valuable for the slow torch install).
+# why: cancel superseded runs on a branch or PR, but NEVER on main. A cancelled
+# main run leaves the commit unverified, and `workflow_dispatch` shares this
+# concurrency group, so a manual dispatch could otherwise discard the only real
+# run for that commit.
 concurrency:
   group: backend-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read

@@ -7,11 +7,11 @@ on:
   pull_request:
   workflow_dispatch:
 
-# why: cancel superseded runs on the same ref to avoid wasting runner minutes on the
-# browser download + build.
+# why: cancel superseded runs on a branch or PR, but never on main - see the note
+# in backend-ci.yml. Cancelling on main can leave a commit permanently unverified.
 concurrency:
   group: frontend-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
