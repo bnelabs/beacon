@@ -4,7 +4,7 @@
 # codebase uses no legacy numpy aliases removed in 2.0.
 torch==2.14.0
 torch-geometric==2.8.0.post1
-pandas==2.2.3
+pandas==2.3.3
 numpy==2.5.3
 scikit-learn==1.9.0
 matplotlib==3.11.1
@@ -52,7 +52,7 @@ alembic==1.19.2
 
 # Task Queue
 celery==5.6.3
-redis==5.0.1
+redis==5.3.1
 
 # System Monitoring
 psutil==7.2.2
