@@ -37,7 +37,7 @@ tenacity==9.1.4
 pyyaml==6.0.3
 python-dotenv==1.2.3
 pyarrow==18.1.0
-pycountry==24.6.1
+pycountry==26.2.16
 
 # Backend API
 fastapi==0.141.1
