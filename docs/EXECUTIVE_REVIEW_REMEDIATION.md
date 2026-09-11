@@ -146,45 +146,6 @@ is only valid inside `setup.cfg` — pytest ignored the file entirely, so
 `testpaths` and the `--cov` addopts were dead. It is now `[pytest]` with
 `testpaths = backend/tests`.
 
-### Observability: Prometheus + Grafana — *Removed*
-
-> **Superseded, not current.** This workstream was built and then **removed from
-> the project on operator instruction**. `backend/monitoring/`,
-> `configs/observability/`, the `prometheus` / `grafana` / `celery-exporter`
-> compose services, the `GET /metrics` route, the `prometheus-client`
-> dependency and `backend/tests/test_observability.py` no longer exist. What
-> follows is a record of what was built and why, not a description of the tree.
->
-> Worth knowing before restoring any of it: `drift.py` and `celery_health.py`
-> hard-imported the metrics module, so removing the Prometheus instrumentation
-> also removed the pure-numpy drift detection (PSI, Kolmogorov–Smirnov,
-> Jensen–Shannon, `FeatureDriftMonitor`) and the Celery queue-depth and
-> worker-liveness helpers. Those had no Prometheus dependency in substance and
-> could be brought back decoupled from it.
-
-`backend/monitoring/` provides:
-
-- **`metrics.py`** — HTTP latency/errors, pipeline job counters, ingestion
-  failures by plugin and error code, Celery task counters and duration, queue
-  depth, inference latency, predictions by region/risk level. Safe no-op shims
-  when `prometheus_client` is absent; multiprocess mode via
-  `PROMETHEUS_MULTIPROC_DIR`.
-- **`drift.py`** — data drift detection: `population_stability_index`,
-  `kolmogorov_smirnov_statistic` (with an asymptotic p-value implemented without
-  SciPy), Jensen–Shannon divergence, a `FeatureDriftMonitor` that stores the
-  training-time reference distribution as JSON, and the
-  `beacon_feature_drift_psi{feature}` gauge.
-- **`celery_health.py`** — Redis queue depth, worker liveness via
-  `celery.control.inspect()` (a crashed PyTorch worker pool is visible;
-  degrades gracefully when no worker responds), and Celery signal hookup.
-
-Dashboards and alerts live in `configs/observability/` (Prometheus scrape config,
-alert rules for ingestion failure rate, PSI > 0.25, queue depth, zero workers,
-5xx rate, inference p95, and pipeline failure rate; Grafana datasource
-provisioning and the `beacon-overview` dashboard).
-
-`GET /metrics` is wired into the FastAPI app.
-
 ### Mapbox / Deck.gl — *Done*
 
 See section 4.
@@ -311,7 +272,7 @@ from the full pinned environment (`backend/requirements.txt` +
 
 # Core Review Remediation (Second Round)
 
-Scope: BEACON core only. API authentication and the Grafana/Prometheus stack are
+Scope: BEACON core only. API authentication and operational monitoring are
 explicitly out of scope for this round and no change was made to them.
 
 Verdict accepted from the review: the data-governance model, `safe_torch_load`
@@ -625,5 +586,5 @@ embargo/gap logic is untouched and still tested).
 
 With the two blockers fixed, a baseline reported as lift, and every artefact
 carrying a verifiable provenance manifest and a content-addressed data snapshot,
-the core is defensible for regulated use. API auth and the Grafana/Prometheus
-stack were out of scope and are unchanged.
+the core is defensible for regulated use. API auth and operational monitoring
+were out of scope and are unchanged.

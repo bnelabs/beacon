@@ -39,9 +39,11 @@ Every workflow uses a per-ref `concurrency` group, but cancellation is
   and drive the app with FastAPI's in-process `TestClient`. The only Docker/Postgres test,
   `test_country_scope.py`, is skipped unless `RUN_DOCKER_SCOPE_TESTS=1`, which CI never
   sets. See the `# why:` comment at the top of the job for details.
-- **Steps:** `python -m compileall -q backend` (fast syntax gate) → `python -m pytest`
-  with coverage → upload the `backend-coverage` artifact (`coverage.xml`, `htmlcov/`) →
-  an advisory `ruff` check that reports real defects without blocking.
+- **Steps:** `python -m compileall -q backend` (fast syntax gate) →
+  `python scripts/generate_api_docs.py --check` (the generated endpoint inventory
+  matches the app) → `python -m pytest` with coverage → upload the
+  `backend-coverage` artifact (`coverage.xml`, `htmlcov/`) → an advisory `ruff`
+  check that reports real defects without blocking.
 - The target and coverage flags are passed explicitly as well as living in
   `pytest.ini` (which uses the correct `[pytest]` header and sets
   `testpaths = backend/tests`). Keeping them in the workflow makes the invocation
@@ -247,6 +249,7 @@ TORCH_VERSION="$(grep -E '^torch==' backend/requirements.txt | head -1 | cut -d=
 uv pip install --system "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
 uv pip install --system -r backend/requirements.txt -r backend/requirements-dev.txt
 python -m compileall -q backend
+PYTHONPATH=. python scripts/generate_api_docs.py --check   # generated docs in sync
 python -m pytest backend/tests                       # fast, no coverage
 python -m pytest backend/tests --cov=backend --cov-report=term-missing   # optional
 ```
