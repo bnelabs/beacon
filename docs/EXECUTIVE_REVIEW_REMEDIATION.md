@@ -1204,7 +1204,8 @@ without asserting a benchmark number a shared CI runner would make flaky.
 
 | Check | Result |
 |---|---|
-| Full backend suite | **1960 passed, 7 skipped** (was 1880 at the first sitting, 1676 before the round) |
+| Full backend suite | **1961 passed, 7 skipped** (was 1880 at the first sitting, 1676 before the round) |
 | Non-linear recovery distinguished from linear | asserted as the test's premise |
 | Reachability guard | caught the `causal_discovery`/`tncm_vae` promotion and required the census update |
+| Generated API inventory | guarded by `test_api_docs_current.py` after a stale file turned `main` red |
 

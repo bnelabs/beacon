@@ -12,7 +12,7 @@ schema at `/openapi.json` or the Swagger UI at `/docs`.
 
 Application: **BEACON API - Banking Network Engine** v2.0.0
 
-**120 operations across 21 tags.**
+**122 operations across 22 tags.**
 
 
 ## Pipeline (DATA-ENGINE-RESULTS)
@@ -243,6 +243,14 @@ Application: **BEACON API - Banking Network Engine** v2.0.0
 | `GET` | `/api/v1/alert-rules/{rule_id}` | `AlertRuleResponse` | Get specific alert rule. |
 | `PUT` | `/api/v1/alert-rules/{rule_id}` | `AlertRuleResponse` | Update alert rule. |
 | `DELETE` | `/api/v1/alert-rules/{rule_id}` | — | Delete alert rule. |
+
+
+## Network Graph & Bilateral Exposures
+
+| Method | Path | Success model | Purpose |
+|---|---|---|---|
+| `POST` | `/api/v1/network/exposures` | untyped | Accept and persist a bilateral exposure matrix. |
+| `GET` | `/api/v1/network/graph` | untyped | Return the current multiplex network graph, or an explicit unavailable state. |
 
 
 ## Reports
