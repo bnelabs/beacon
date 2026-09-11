@@ -1,6 +1,6 @@
 # GPU-enabled Dockerfile for Linux with NVIDIA GPU
 # For CPU-only systems, use Dockerfile.cpu instead
-FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:13.3.1-cudnn-runtime-ubuntu22.04
 
 # Set working directory
 WORKDIR /app
