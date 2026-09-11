@@ -1,6 +1,6 @@
 """Pydantic schemas for country profiles."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from decimal import Decimal
@@ -47,8 +47,7 @@ class CountryProfileResponse(CountryProfileCreate):
     last_updated: datetime
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CountryIndicatorBase(BaseModel):
@@ -75,8 +74,7 @@ class CountryIndicatorResponse(CountryIndicatorBase):
     id: int
     last_updated: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CountryComparisonRequest(BaseModel):
