@@ -113,38 +113,69 @@ proportional to the change.
 
 ## Dependabot (`../dependabot.yml`)
 
-The policy is deliberately conservative about the stack where a "minor" version
-bump is breaking in practice.
+Short answer to "do we actually need this?": **yes, but only for the parts that
+work.** Routine version updates are disabled for the two ecosystems that
+repeatedly caused damage or failed outright; security updates remain enabled
+everywhere.
 
-| Ecosystem | Cadence | Automatic? |
+| Ecosystem | Routine version updates | Policy |
 | --- | --- | --- |
-| `github-actions` (`/`) | weekly | Yes — all updates, grouped. |
-| `pip` (`/backend`) | monthly | Minor/patch grouped. The ML/scientific stack (`torch`, `torch-geometric`, `numpy`, `scipy`, `scikit-learn`, `matplotlib`, `pandas`) is exempt from major **and** minor bumps. Framework majors (`fastapi`, `pydantic`, `sqlalchemy`, `celery`) are exempt. |
-| `npm` (`/frontend`) | monthly | Minor/patch grouped; majors ignored. |
-| `docker` (`/backend`) | monthly | The `python` base image is exempt from major **and** minor bumps; `nvidia/cuda` likewise. |
-| `docker` (`/`) | monthly | Compose image majors (`postgres`, `timescale/timescaledb`, `redis`, `nginx`) ignored. |
+| `github-actions` (`/`) | **Yes** — weekly, grouped, limit 3 | Low risk, high value, no application code. |
+| `docker` (`/backend`) | **Yes** — monthly, limit 2 | `python` and `nvidia/cuda` exempt from minor **and** major bumps. |
+| `docker` (`/frontend`) | **Yes** — monthly, limit 2 | `node` and `nginx` exempt from minor **and** major bumps. |
+| `pip` (`/backend`) | **No** — `open-pull-requests-limit: 0` | Security updates only. |
+| `npm` (`/frontend`) | **No** — `open-pull-requests-limit: 0` | Security updates only. |
 
-Why the ML stack is exempt: Dependabot classified `torch` 2.5.1 → 2.14.0,
-`scipy` 1.13 → 1.18, `scikit-learn` 1.5 → 1.9 and `matplotlib` 3.9 → 3.11 as
-*minor* updates and grouped them into one PR. That PR was not installable —
-`scipy` 1.18 requires `numpy>=2.0` while `numpy` was pinned to 1.26, and those
-packages require Python >= 3.12 while the image shipped 3.10 — so resolving it
-meant moving the Python version and the numpy major together. That is a
-migration, not a chore.
+**Why `pip` routine updates are off.** Dependabot classified `torch` 2.5.1 →
+2.14.0, `scipy` 1.13 → 1.18, `scikit-learn` 1.5 → 1.9 and `matplotlib` 3.9 →
+3.11 as *minor* updates and grouped them into a single PR. That PR was not
+installable: `scipy` 1.18 requires `numpy>=2.0` while `numpy` was pinned to
+1.26, and those packages require Python >= 3.12 while the image shipped 3.10.
+Resolving it meant moving the Python version and the numpy major together. That
+is a migration, not a chore, and it needs a human who can change the
+interpreter, the numpy major and the image in one commit.
+
+**Why `npm` routine updates are off.** Dependabot's npm updater cannot resolve
+this dependency graph. Every scheduled run failed with:
+
+```
+npm error notarget No matching version found for @loaders.gl/worker-utils@4.5.1
+dependency_file_not_resolvable {message: "Error while updating peer dependency."}
+```
+
+while walking `@tanstack/react-query`'s peers through deck.gl's large peer set.
+A job that fails on every run and produces nothing is worse than no job, and
+Frontend CI plus the Docker frontend image build already catch real breakage.
+
+**Base images are exempt where the version is contractual.** `python` defines
+the interpreter the whole stack is compiled against (Dependabot called
+`3.10 → 3.14` a *minor* bump; it cannot build — no cp314 wheels for
+torch/numpy). `node` must track an Active LTS line, not the newest release
+(26 is not LTS until 2026-10-28). `nginx` publishes stable (even minor) and
+mainline (odd minor) lines, so a minor bump silently switches release lines.
+
+**What is left alone deliberately.** There is no `docker` entry for the
+repository root: Dependabot's docker ecosystem scans Dockerfiles, not compose
+files, and no root Dockerfile exists. The previous entry failed on every run
+with *"No Dockerfiles nor Kubernetes YAML found in /"*. Compose images
+(`postgres`/`timescaledb`, `redis`) are therefore bumped by hand.
 
 `ignore` rules and `open-pull-requests-limit` do **not** affect **security**
-updates, which have their own internal limit. Vulnerability alerts therefore keep
-working even with this policy.
+updates, which have their own internal limit — so this policy costs no
+vulnerability coverage. To re-enable routine bumps for an ecosystem, set its
+`open-pull-requests-limit` back to 3 and (for the base images) narrow the
+`ignore` list.
 
 ## Run this locally before opening a PR
 
 **Backend** (from the repository root):
 
 ```bash
-# Match the pinned torch without pulling CUDA bundles.
+# Match CI: uv installs the pinned stack far faster than pip.
+#   curl -LsSf https://astral.sh/uv/install.sh | sh
 TORCH_VERSION="$(grep -E '^torch==' backend/requirements.txt | head -1 | cut -d= -f3)"
-python -m pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
-python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+uv pip install --system "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
+uv pip install --system -r backend/requirements.txt -r backend/requirements-dev.txt
 python -m compileall -q backend
 python -m pytest backend/tests --cov=backend --cov-report=term-missing
 ```

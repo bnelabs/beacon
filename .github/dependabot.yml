@@ -45,12 +45,26 @@ updates:
         patterns:
           - "*"
 
-  # --- Python (backend) — routine updates, ML stack exempt -------------------
+  # --- Python (backend) — SECURITY UPDATES ONLY ------------------------------
+  #
+  # `open-pull-requests-limit: 0` disables routine *version* updates for this
+  # ecosystem while leaving *security* updates fully working (they have their
+  # own internal limit and are not affected by this setting or by `ignore`).
+  #
+  # Evidence for the decision: the grouped minor/patch PR bumped torch
+  # 2.5.1->2.14.0, scipy 1.13->1.18, scikit-learn 1.5->1.9 and matplotlib
+  # 3.9->3.11 in one shot. That PR was unbuildable - scipy 1.18 needs numpy>=2.0
+  # while numpy was pinned 1.26, and those three need Python>=3.12 while the
+  # image shipped 3.10 - so it forced a coordinated Python and numpy migration.
+  # The `ignore` list below narrows that risk, but the stack still needs a human
+  # who can change the interpreter, the numpy major and the image together.
+  #
+  # To re-enable routine bumps: set this back to 3.
   - package-ecosystem: pip
     directory: /backend
     schedule:
       interval: monthly
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     labels:
       - dependencies
       - backend
@@ -97,12 +111,25 @@ updates:
       - dependency-name: "redis"
         update-types: ["version-update:semver-major"]
 
-  # --- JavaScript (frontend) -------------------------------------------------
+  # --- JavaScript (frontend) — SECURITY UPDATES ONLY -------------------------
+  #
+  # 0 disables routine version updates here too; security updates still open PRs.
+  #
+  # Reason: Dependabot's npm updater cannot resolve this dependency graph. Every
+  # scheduled run fails with
+  #   npm error notarget No matching version found for
+  #   @loaders.gl/worker-utils@4.5.1
+  #   dependency_file_not_resolvable {message: "Error while updating peer dependency."}
+  # while walking @tanstack/react-query's peers through deck.gl's large peer set.
+  # A job that fails on every run and produces nothing is worse than no job, and
+  # Frontend CI plus the Docker frontend image build already catch real breakage.
+  #
+  # To re-enable routine bumps: set this back to 3.
   - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: monthly
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     labels:
       - dependencies
       - frontend
