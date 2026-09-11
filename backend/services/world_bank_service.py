@@ -3,7 +3,7 @@
 import requests
 import logging
 from typing import List, Dict, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from backend.models.country import CountryProfile, CountryIndicator
@@ -136,7 +136,7 @@ class WorldBankService:
                 for key, value in profile_data.items():
                     if value is not None:
                         setattr(existing, key, value)
-                existing.last_updated = datetime.utcnow()
+                existing.last_updated = datetime.now(timezone.utc)
                 return existing
             else:
                 new_profile = CountryProfile(**profile_data)
@@ -183,13 +183,13 @@ class WorldBankService:
                         year=year,
                         value=Decimal(str(point['value'])),
                         source='World Bank',
-                        last_updated=datetime.utcnow()
+                        last_updated=datetime.now(timezone.utc)
                     )
                     self.db.add(indicator)
                     records_created += 1
                 else:
                     existing.value = Decimal(str(point['value']))
-                    existing.last_updated = datetime.utcnow()
+                    existing.last_updated = datetime.now(timezone.utc)
 
         except Exception as e:
             logger.error(f"Failed to sync indicator {indicator_code} for {country_code}: {e}")

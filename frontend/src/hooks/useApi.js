@@ -35,7 +35,15 @@ async function fetchApi(endpoint, options = {}) {
     throw new Error(message)
   }
 
-  return response.json()
+  // A 204 (or any empty body) must not be parsed as JSON: response.json()
+  // throws on an empty body, which surfaced as a spurious "Request failed"
+  // error on DELETE endpoints that correctly return no content.
+  if (response.status === 204) {
+    return null
+  }
+
+  const body = await response.text()
+  return body ? JSON.parse(body) : null
 }
 
 function buildQueryString(params = {}) {
@@ -113,8 +121,11 @@ export function useCancelJob() {
 
   return useMutation({
     mutationFn: (jobId) =>
-      fetchApi(`/v1/jobs/${jobId}/cancel`, {
-        method: 'POST'
+      // The backend exposes single-job cancellation as DELETE /jobs/{id}
+      // (the batch endpoint below is POST /jobs/batch/cancel). Calling
+      // POST /jobs/{id}/cancel returned 405.
+      fetchApi(`/v1/jobs/${jobId}`, {
+        method: 'DELETE'
       }),
     onSuccess: (_, jobId) => {
       queryClient.invalidateQueries({ queryKey: ['jobs', jobId] })

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, and_
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from backend.database import get_db
 from backend.models.data_source import DataSource
@@ -28,7 +28,7 @@ async def get_data_quality_stats(
         data_sources = db.query(DataSource).all()
 
         # Calculate freshness metrics
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         stale_threshold = now - timedelta(days=7)  # 7 days
         outdated_threshold = now - timedelta(days=30)  # 30 days
 
@@ -149,7 +149,7 @@ async def get_source_quality_details(
     """
     try:
         data_sources = db.query(DataSource).all()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         source_details = []
 
@@ -215,7 +215,7 @@ async def get_quality_trends(
     Get quality score trends over time.
     """
     try:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         start_date = now - timedelta(days=days)
 
         # Get all completed data jobs in timeframe

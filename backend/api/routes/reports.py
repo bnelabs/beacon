@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import io
 import json
 
@@ -30,7 +30,7 @@ async def get_report_summary(
 
             return {
                 "report_type": report_type,
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
                 "period_days": days,
                 "summary": {
                     "total_jobs": total_jobs,
@@ -39,7 +39,7 @@ async def get_report_summary(
                 }
             }
 
-        return {"report_type": report_type, "generated_at": datetime.utcnow().isoformat(), "message": "Report type not yet implemented"}
+        return {"report_type": report_type, "generated_at": datetime.now(timezone.utc).isoformat(), "message": "Report type not yet implemented"}
 
     except Exception as e:
         error_logger = ErrorLogger(db)
@@ -57,7 +57,7 @@ async def export_report_json(
     try:
         report_data = {
             "report_type": report_type,
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "period_days": days,
             "data": {
                 "total_jobs": db.query(Job).count(),
@@ -69,7 +69,7 @@ async def export_report_json(
         return StreamingResponse(
             io.BytesIO(json_str.encode()),
             media_type="application/json",
-            headers={"Content-Disposition": f"attachment; filename=beacon_report_{datetime.utcnow().strftime('%Y%m%d')}.json"}
+            headers={"Content-Disposition": f"attachment; filename=beacon_report_{datetime.now(timezone.utc).strftime('%Y%m%d')}.json"}
         )
 
     except Exception as e:

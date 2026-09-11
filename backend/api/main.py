@@ -90,6 +90,10 @@ default_allowed_origins = [
     "http://127.0.0.1:5173",
     "http://localhost:6789",
     "http://127.0.0.1:6789",
+    # The production frontend container serves on 9876 (see docker-compose.yml).
+    # Without these the browser blocks every API call from the Dockerised UI.
+    "http://localhost:9876",
+    "http://127.0.0.1:9876",
 ]
 
 if os.getenv("ALLOWED_ORIGINS"):

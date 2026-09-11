@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.database import get_db
 from backend.models.country import CountryProfile, CountryIndicator
@@ -205,7 +205,7 @@ def compare_countries(
         countries=countries,
         comparison_matrix=comparison_matrix,
         insights=insights,
-        created_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc)
     )
 
 
@@ -224,7 +224,7 @@ def sync_world_bank_data(
 
     **Warning:** This is a resource-intensive operation. Use sparingly.
     """
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
 
     service = WorldBankService(db)
     stats = service.sync_all_countries(
@@ -232,7 +232,7 @@ def sync_world_bank_data(
         start_year=request.start_year
     )
 
-    end_time = datetime.utcnow()
+    end_time = datetime.now(timezone.utc)
     duration = (end_time - start_time).total_seconds()
 
     return WorldBankSyncResponse(

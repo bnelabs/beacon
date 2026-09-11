@@ -3,7 +3,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 from typing import List, Optional, Dict
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.models.notification import Notification
 from backend.schemas.notification import NotificationCreate, NotificationUpdate
@@ -57,7 +57,7 @@ class NotificationService:
 
         # Filter out expired notifications
         query = query.filter(
-            (Notification.expires_at == None) | (Notification.expires_at > datetime.utcnow())
+            (Notification.expires_at == None) | (Notification.expires_at > datetime.now(timezone.utc))
         )
 
         query = query.order_by(desc(Notification.created_at))
@@ -79,10 +79,10 @@ class NotificationService:
 
         # Update timestamps based on status changes
         if 'is_read' in update_data and update_data['is_read']:
-            update_data['read_at'] = datetime.utcnow()
+            update_data['read_at'] = datetime.now(timezone.utc)
 
         if 'is_dismissed' in update_data and update_data['is_dismissed']:
-            update_data['dismissed_at'] = datetime.utcnow()
+            update_data['dismissed_at'] = datetime.now(timezone.utc)
 
         for key, value in update_data.items():
             setattr(notification, key, value)
@@ -107,7 +107,7 @@ class NotificationService:
 
         count = query.update({
             'is_read': True,
-            'read_at': datetime.utcnow()
+            'read_at': datetime.now(timezone.utc)
         })
         self.db.commit()
         return count

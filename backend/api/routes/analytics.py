@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, desc, case
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 from backend.database import get_db
@@ -26,7 +26,7 @@ async def get_analytics_overview(
     Returns key metrics, trends, and insights across the platform.
     """
     try:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         start_date = now - timedelta(days=days)
 
         # Job statistics
@@ -125,7 +125,7 @@ async def get_time_series_trends(
     Get time-series trends for various metrics.
     """
     try:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         start_date = now - timedelta(days=days)
 
         if metric == "quality":
@@ -367,7 +367,7 @@ async def get_anomaly_insights(
     Detect and report anomalies in system behavior.
     """
     try:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         start_date = now - timedelta(days=days)
 
         anomalies = []
