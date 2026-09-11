@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -69,6 +69,20 @@ from .constants import (
     RISK_THRESHOLD_LOW,
     RISK_THRESHOLD_MODERATE,
 )
+from ..engine.persistence_vectors import (
+    SUMMARY_FEATURES,
+    PersistenceVectorParameters,
+    persistence_vector,
+)
+from ..engine.portfolio_overlap import (
+    PortfolioOverlapResult,
+    analyse_portfolio_overlap,
+)
+from .regulatory import (
+    InstitutionState,
+    StressTranslationResult,
+    translate_systemic_stress,
+)
 from .fire_sale import FireSaleResult, FireSaleScenario, solve_fire_sale
 
 logger = logging.getLogger(__name__)
@@ -76,6 +90,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "BankRiskProfile",
     "MultiBankAnalysis",
+    "TopologicalFeatures",
     "BankRiskAnalyzer",
     "generate_executive_summary",
     "eigenvector_centrality",
@@ -83,6 +98,34 @@ __all__ = [
 
 # Milestone at which calibrated intervals replace the current placeholder.
 CONFIDENCE_METHOD_PENDING = "unavailable:pending-conformal-calibration"
+
+
+@dataclass(frozen=True)
+class TopologicalFeatures:
+    """The topological signature of the exposure network, as a fixed-width vector.
+
+    `summary` names the interpretable half -- Betti numbers, fragmentation and
+    redundancy, the same statistics `persistent_homology.TopologicalSignature`
+    reports. `vector` is the full signature a model consumes, whose layout is
+    documented by
+    :class:`~backend.modules.engine.persistence_vectors.PersistenceVectorParameters`.
+
+    It is computed only when the caller supplies `topology_parameters` *and* the
+    exposure network exists. A topological signature of a network that was never
+    built would be a number without a subject, so that combination raises.
+    """
+
+    summary: Mapping[str, float]
+    vector: Tuple[float, ...]
+    reference: str
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "summary": {name: float(value) for name, value in self.summary.items()},
+            "vector": [float(value) for value in self.vector],
+            "reference": self.reference,
+            "width": len(self.vector),
+        }
 
 
 def eigenvector_centrality(
@@ -243,6 +286,30 @@ class MultiBankAnalysis:
     coupled solver needs were not supplied -- that is missing information, not
     evidence that the feedback is absent, and the two must not be confused.
     """
+    regulatory_stress: Optional[StressTranslationResult] = None
+    """Per-institution Basel III ratios before and after the systemic stress.
+
+    `None` when the caller supplied no `regulatory_states`. The stress table is a
+    different question from `clearing`: clearing says who fails to pay, this says
+    what that does to the liquidity and leverage ratios a supervisor measures.
+    """
+
+    crowding: Optional[PortfolioOverlapResult] = None
+    """Crowded-trade overlap across the supplied holdings.
+
+    `None` when no holdings matrix was supplied. A distinct volatility channel:
+    two institutions can hold identical positions and owe each other nothing, so
+    this is invisible in any exposure layer.
+    """
+
+    topology: Optional[TopologicalFeatures] = None
+    """Structural fragility of the exposure network, when it was requested.
+
+    `None` when no `topology_parameters` were supplied. Summary statistics such
+    as average degree can be unchanged while the routes between members quietly
+    collapse; this measures whether they did.
+    """
+
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -257,6 +324,11 @@ class MultiBankAnalysis:
             "systemic_risk_score": self.systemic_risk_score,
             "clearing": self.clearing.to_dict() if self.clearing else None,
             "fire_sale": self.fire_sale.to_dict() if self.fire_sale else None,
+            "regulatory_stress": (
+                self.regulatory_stress.to_dict() if self.regulatory_stress else None
+            ),
+            "crowding": self.crowding.to_dict() if self.crowding else None,
+            "topology": self.topology.to_dict() if self.topology else None,
             "shock_scenarios": {
                 bank_id: result.to_dict()
                 for bank_id, result in self.shock_scenarios.items()
@@ -296,6 +368,11 @@ class BankRiskAnalyzer:
         feature_names: Optional[List[str]] = None,
         bank_endowments: Optional[Dict[str, float]] = None,
         fire_sale_scenario: Optional[FireSaleScenario] = None,
+        regulatory_states: Optional[Sequence[InstitutionState]] = None,
+        price_decline: Optional[float] = None,
+        holdings: Optional[pd.DataFrame] = None,
+        concentration_threshold: Optional[float] = None,
+        topology_parameters: Optional[PersistenceVectorParameters] = None,
     ) -> MultiBankAnalysis:
         """Score every institution, then analyse the network if possible.
 
@@ -310,6 +387,19 @@ class BankRiskAnalyzer:
                 feedback until a fixed point or divergence. Every quantity comes
                 from the caller; nothing is defaulted, and the scenario must cover
                 exactly the institutions being analysed.
+            regulatory_states: Optional per-institution Basel III positions. Must
+                cover *every* analysed institution, because a partial stress table
+                silently omits the others and reads as though they were unaffected.
+            price_decline: Optional fractional price fall applied to each
+                institution's declared price-sensitive assets.
+            holdings: Optional institutions x instruments positions frame for
+                crowded-trade analysis. A subset of the analysed institutions is
+                allowed; an institution outside the analysis is not.
+            concentration_threshold: Optional per-institution concentration above
+                which a holding counts toward the correlated-unwind measure.
+            topology_parameters: Optional persistence-vector parameters. When
+                supplied, the exposure network's topological signature is computed;
+                this requires the network to exist.
 
         Returns:
             A :class:`MultiBankAnalysis`. ``systemic_risk_score`` is ``None``
@@ -432,6 +522,70 @@ class BankRiskAnalyzer:
                 )
             fire_sale_result = solve_fire_sale(fire_sale_scenario)
 
+        regulatory_stress_result: Optional[StressTranslationResult] = None
+        if regulatory_states is not None:
+            states = list(regulatory_states)
+            given = [state.institution_id for state in states]
+            repeated = sorted({name for name in given if given.count(name) > 1})
+            if repeated:
+                raise ValueError(f"regulatory_states repeats institution(s): {repeated}")
+            unknown = sorted(set(given) - set(bank_ids))
+            if unknown:
+                raise KeyError(
+                    "regulatory_states names institutions outside the analysis: "
+                    f"{unknown}"
+                )
+            absent = sorted(set(bank_ids) - set(given))
+            if absent:
+                raise ValueError(
+                    "regulatory_states must cover every analysed institution; missing "
+                    f"{absent}. A partial stress table would omit institutions "
+                    "silently, which reads as though they were unaffected."
+                )
+            regulatory_stress_result = translate_systemic_stress(
+                states, clearing=clearing, price_decline=price_decline
+            )
+
+        crowding_result: Optional[PortfolioOverlapResult] = None
+        if holdings is not None:
+            if not isinstance(holdings, pd.DataFrame):
+                raise TypeError(
+                    "holdings must be a DataFrame of institutions x instruments, got "
+                    f"{type(holdings).__name__}"
+                )
+            institution_ids = [str(name) for name in holdings.index]
+            instrument_ids = [str(name) for name in holdings.columns]
+            unknown = sorted(set(institution_ids) - set(bank_ids))
+            if unknown:
+                raise KeyError(
+                    f"holdings names institutions outside the analysis: {unknown}"
+                )
+            crowding_result = analyse_portfolio_overlap(
+                holdings.to_numpy(dtype=float),
+                institution_ids,
+                instrument_ids,
+                concentration_threshold=concentration_threshold,
+            )
+
+        topology_result: Optional[TopologicalFeatures] = None
+        if topology_parameters is not None:
+            if liabilities is None:
+                raise ValueError(
+                    "topology_parameters were supplied but the exposure network is "
+                    "unavailable; supply interbank exposures and endowments. A "
+                    "topological signature of a network that was never built would be "
+                    "a number without a subject."
+                )
+            vector = persistence_vector(liabilities, topology_parameters)
+            block = topology_parameters.layout()["summary"]
+            topology_result = TopologicalFeatures(
+                summary=dict(
+                    zip(SUMMARY_FEATURES, (float(value) for value in vector[block]))
+                ),
+                vector=tuple(float(value) for value in vector),
+                reference=str(topology_parameters.reference),
+            )
+
         return MultiBankAnalysis(
             analysis_date=pd.Timestamp.now().isoformat(),
             num_banks=len(bank_ids),
@@ -447,6 +601,9 @@ class BankRiskAnalyzer:
             shock_scenarios=shock_scenarios,
             systemic_risk_score=systemic_risk_score,
             fire_sale=fire_sale_result,
+            regulatory_stress=regulatory_stress_result,
+            crowding=crowding_result,
+            topology=topology_result,
         )
 
     def _score_bank(self, bank_id: str, df: pd.DataFrame) -> float:
