@@ -1,4 +1,4 @@
-"""REAL Prediction Engine - NO PLACEHOLDERS - EU AI Act Compliant."""
+"""Prediction engine with EU AI Act compliant explainability."""
 
 import torch
 import pandas as pd
@@ -9,6 +9,8 @@ import logging
 from pathlib import Path
 import json
 
+from backend.modules.data.quality_gate import DataQualityGate, QualityAttestation
+from backend.modules.engine.model_io import safe_torch_load
 from backend.modules.explainability.shap_explainer import ModelExplainer
 from backend.modules.risk.bank_analyzer import BankRiskAnalyzer, MultiBankAnalysis, generate_executive_summary
 
@@ -17,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PredictionResult:
-    """REAL prediction result with explainability."""
+    """Prediction result with explainability."""
     job_id: str
     model_path: str
 
@@ -42,21 +44,34 @@ class PredictionResult:
 
 class RealPredictionEngine:
     """
-    REAL Prediction Engine - NO MOCK DATA.
+    Prediction engine backed by a trained model.
 
-    Features:
-    1. Uses trained models (not random predictions)
+    Responsibilities:
+    1. Load a trained model and refuse to run without a data-quality attestation
     2. EU AI Act compliant explainability
     3. Per-bank risk analysis
     4. Contagion/cascade simulation
     5. Human-readable reports
     """
 
-    def __init__(self, model_path: str, device: torch.device, config: Dict):
+    def __init__(
+        self,
+        model_path: str,
+        device: torch.device,
+        config: Dict,
+        quality_attestation: Optional[QualityAttestation] = None,
+    ):
         self.model_path = model_path
         self.device = device
         self.config = config
         self.sequence_length = self.config.get('sequence_length', 30)
+
+        # Predictions are refused unless the payload was quality-attested by the
+        # DATA stage. `allow_unverified_data` is an explicit, logged override for
+        # exploratory runs; it is never a silent default.
+        self.quality_attestation = quality_attestation
+        self.require_quality_attestation = bool(self.config.get('require_quality_attestation', True))
+        self.allow_unverified_data = bool(self.config.get('allow_unverified_data', False))
 
         self.model_config = {}
         self.source_stats: Dict[str, Dict[str, float]] = {}
@@ -255,7 +270,7 @@ class RealPredictionEngine:
 
     def _load_model(self, model_path: str) -> torch.nn.Module:
         """Load trained PyTorch model."""
-        checkpoint = torch.load(model_path, map_location=self.device)
+        checkpoint = safe_torch_load(model_path, map_location=self.device)
 
         # Recreate model architecture
         from backend.modules.engine.multi_scale_trainer import MultiScaleTemporalAttentionModel
@@ -285,6 +300,29 @@ class RealPredictionEngine:
 
         return model
 
+    def set_quality_attestation(self, attestation: Optional[QualityAttestation]) -> None:
+        """Attach the DATA-stage quality verdict to this engine instance."""
+        self.quality_attestation = attestation
+
+    def _enforce_data_quality(self, input_data: pd.DataFrame) -> None:
+        """Refuse to predict on data that was not attested by the DATA stage.
+
+        Raises:
+            PredictionBlockedError: No verified attestation is available.
+        """
+        if not self.require_quality_attestation:
+            return
+
+        attestation = self.quality_attestation or input_data.attrs.get("quality_attestation")
+        if attestation is None and self.allow_unverified_data:
+            logger.warning(
+                "Predicting without a data-quality attestation because "
+                "allow_unverified_data is enabled for this engine"
+            )
+            return
+
+        DataQualityGate.require(attestation)
+
     def predict(
         self,
         input_data: pd.DataFrame,
@@ -300,7 +338,9 @@ class RealPredictionEngine:
         Returns:
             PredictionResult with predictions and explanations
         """
-        logger.info("Starting REAL prediction with explainability")
+        logger.info("Starting prediction with explainability")
+
+        self._enforce_data_quality(input_data)
 
         # Check if multi-bank scenario
         has_bank_id = 'bank_id' in input_data.columns

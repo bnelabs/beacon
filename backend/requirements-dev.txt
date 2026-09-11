@@ -1,0 +1,28 @@
+# Development / CI dependencies for the BEACON backend.
+#
+# Installed on top of backend/requirements.txt:
+#     pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+#
+# NOTE: the versions of pytest, pytest-cov and httpx below are intentionally
+# identical to the pins already present in backend/requirements.txt so that
+# installing both files together cannot produce a resolver conflict. Keep the
+# two files in lockstep when bumping them.
+#
+# NOTE: pytest-asyncio is deliberately NOT included. The backend suite is fully
+# synchronous: backend/tests/*.py contains no `async def test_*`, no
+# `@pytest.mark.asyncio` and no `pytest_asyncio` usage (FastAPI is exercised via
+# the synchronous starlette `TestClient` in test_api_smoke.py). Adding the
+# plugin would only add an unused dependency.
+
+# Test runner + coverage (mirrors backend/requirements.txt)
+pytest==8.3.4
+pytest-cov==6.0.0
+
+# HTTP client used by starlette's TestClient (mirrors backend/requirements.txt)
+httpx==0.26.0
+
+# Lint / static analysis
+ruff==0.8.6
+
+# Dependency vulnerability scanner used by .github/workflows/security.yml
+pip-audit==2.7.3

@@ -263,7 +263,7 @@ export function useBanksByRegion(filters) {
         region: item.region,
         description: item.description,
         metadata: item.parameters || {},
-        risk_score: item.metadata?.risk_score,
+        risk_score: (item.parameters ?? item.metadata)?.risk_score ?? null,
         source: item.data_source?.name || ''
       }))
     }

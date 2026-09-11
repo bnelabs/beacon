@@ -1,4 +1,4 @@
-"""REAL Model Explainability - EU AI Act Compliant (No Black Boxes)."""
+"""Model explainability - EU AI Act compliant (no black boxes)."""
 
 import torch
 import numpy as np
@@ -40,7 +40,7 @@ class ExplanationResult:
 
 class ModelExplainer:
     """
-    REAL Model Explainer - EU AI Act Compliant.
+    Model explainer - EU AI Act compliant.
 
     Provides:
     - Feature importance using gradient-based attribution

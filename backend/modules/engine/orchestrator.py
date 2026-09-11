@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 
 from backend.modules.data.orchestrator import DataPackage
+from backend.modules.engine.model_io import safe_torch_load
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +218,7 @@ class EngineOrchestrator:
         # Check if trained model exists
         if model_path:
             logger.info(f"[{self.job_id}] Loading trained model from {model_path}")
-            checkpoint = torch.load(model_path, map_location=self.device)
+            checkpoint = safe_torch_load(model_path, map_location=self.device)
 
             # Extract model configuration
             config = checkpoint.get('config', self.config)

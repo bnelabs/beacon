@@ -532,7 +532,26 @@ function jsonResponse(route, payload, status = 200) {
   })
 }
 
+// 1x1 transparent PNG used to stub the CARTO/OSM raster basemap so the risk
+// map renders deterministically without reaching the public tile CDN.
+const TRANSPARENT_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+  'base64'
+)
+
+async function registerBasemapTileMocks(page) {
+  await page.route(/basemaps\.cartocdn\.com/, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'image/png',
+      body: TRANSPARENT_PNG
+    })
+  )
+}
+
 export async function registerApiMocks(page) {
+  await registerBasemapTileMocks(page)
+
   await page.addInitScript(() => {
     class MockWebSocket {
       constructor() {

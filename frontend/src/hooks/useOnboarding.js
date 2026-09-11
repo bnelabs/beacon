@@ -40,14 +40,14 @@ export function useOnboarding() {
         {
           element: '[data-tour="globe-nav"]',
           popover: {
-            title: '🌍 Globe View',
+            title: '📍 Risk Map',
             description: `
               <div class="space-y-2">
-                <p>Visualize banking regions and data sources on an interactive 3D globe.</p>
+                <p>Explore banking regions, liquidity-risk heat and interbank exposures on an interactive 2D risk map.</p>
                 <p><strong>Features:</strong></p>
                 <ul class="list-disc pl-5 space-y-1">
-                  <li>Click regions to view banking data</li>
-                  <li>Toggle network visualization to see interbank connections</li>
+                  <li>Click regions or institutions to view banking data</li>
+                  <li>Toggle the heatmap and interbank exposure arcs</li>
                   <li>Color-coded risk levels (green → red)</li>
                 </ul>
               </div>

@@ -10,19 +10,39 @@ Documentation: https://github.com/AI4Risk/interbank
 
 This plugin provides access to real interbank network topology and bank features
 for training temporal GNN models on financial contagion and systemic risk.
+
+The dataset is file-backed and must be downloaded by the operator. When it is
+absent this plugin fails with :class:`DatasetMissingError` rather than
+synthesising replacement data, because downstream risk scores cannot be
+distinguished from plausible-looking fiction once fake exposure edges enter the
+graph.
 """
 
-import pandas as pd
-import numpy as np
-from datetime import datetime
-from typing import Dict, Any, Optional, List
 import logging
 import os
-from pathlib import Path
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
+
+from backend.exceptions import (
+    DatasetMissingError,
+    EmptyDatasetError,
+    SchemaValidationError,
+)
 
 from .base import DataSourcePlugin, register_plugin
 
 logger = logging.getLogger(__name__)
+
+DOWNLOAD_URL = "https://github.com/AI4Risk/interbank"
+
+SUPPORTED_ITEMS = (
+    "network_topology",
+    "bank_features:<BANK_ID>",
+    "credit_ratings",
+    "systemic_risk",
+)
 
 
 class AI4RiskInterbankPlugin(DataSourcePlugin):
@@ -34,40 +54,63 @@ class AI4RiskInterbankPlugin(DataSourcePlugin):
         self.plugin_type = "ai4risk_interbank"
 
     def validate_config(self) -> None:
-        """Validate that dataset directory exists."""
-        if not os.path.exists(self.data_dir):
-            logger.warning(
-                f"AI4Risk data directory not found at {self.data_dir}. "
-                "Download from https://github.com/AI4Risk/interbank and extract to this directory. "
-                "Plugin will create sample data for demonstration purposes."
+        """Require that the downloaded dataset directory exists.
+
+        Raises:
+            DatasetMissingError: When the dataset has not been downloaded.
+        """
+        data_dir = self.config.get('data_dir', './data/ai4risk/')
+        if not os.path.isdir(data_dir):
+            raise DatasetMissingError(
+                f"AI4Risk dataset directory not found: {data_dir}",
+                context={
+                    "data_dir": data_dir,
+                    "download_url": DOWNLOAD_URL,
+                    "remediation": (
+                        "Download the dataset from "
+                        f"{DOWNLOAD_URL} and extract it into {data_dir}"
+                    ),
+                },
             )
-            # Don't raise error - allow plugin to work with sample data
 
     def test_connection(self) -> Dict[str, Any]:
-        """Test AI4Risk dataset availability."""
+        """Report whether the local AI4Risk dataset is present and usable."""
         try:
-            if os.path.exists(self.data_dir):
-                files = os.listdir(self.data_dir)
-                return {
-                    "success": True,
-                    "message": f"AI4Risk data directory found with {len(files)} files",
-                    "details": {"data_dir": self.data_dir, "files": files[:5]}
-                }
-            else:
-                return {
-                    "success": True,
-                    "message": "AI4Risk plugin ready (using sample data mode). Download full dataset from GitHub.",
-                    "details": {
-                        "data_dir": self.data_dir,
-                        "download_url": "https://github.com/AI4Risk/interbank",
-                        "mode": "sample"
-                    }
-                }
-        except Exception as e:
+            files = os.listdir(self.data_dir)
+        except OSError as exc:
             return {
                 "success": False,
-                "message": f"Error accessing AI4Risk data: {str(e)}"
+                "message": f"AI4Risk dataset directory is not readable: {self.data_dir}",
+                "details": {
+                    "error_code": "DATASET_MISSING",
+                    "data_dir": self.data_dir,
+                    "download_url": DOWNLOAD_URL,
+                    "error": str(exc),
+                },
             }
+
+        expected = ("interbank_network.csv", "bank_features.csv", "credit_ratings.csv")
+        present = [name for name in expected if name in files]
+        if not present:
+            return {
+                "success": False,
+                "message": (
+                    f"AI4Risk data directory '{self.data_dir}' contains no recognised "
+                    f"dataset files (expected one of: {', '.join(expected)})"
+                ),
+                "details": {
+                    "error_code": "DATASET_MISSING",
+                    "data_dir": self.data_dir,
+                    "download_url": DOWNLOAD_URL,
+                    "files": files[:5],
+                },
+            }
+
+        return {
+            "success": True,
+            "message": f"AI4Risk dataset found ({len(present)}/{len(expected)} files present)",
+            "details": {"data_dir": self.data_dir, "files": present},
+        }
 
     def fetch_indicator_data(
         self,
@@ -77,6 +120,22 @@ class AI4RiskInterbankPlugin(DataSourcePlugin):
     ) -> Optional[pd.DataFrame]:
         """Alias for fetch_data to match base class interface."""
         return self.fetch_data(indicator_id, start_date, end_date)
+
+    def fetch_asset_data(
+        self,
+        symbols: List[str],
+        start_date: datetime,
+        end_date: datetime
+    ) -> pd.DataFrame:
+        """AI4Risk publishes interbank network topology, not tradable prices.
+
+        Raises:
+            SchemaValidationError: Always; this plugin has no asset series.
+        """
+        raise SchemaValidationError(
+            "AI4Risk plugin does not provide asset price data",
+            context={"symbols": list(symbols), "supported": list(SUPPORTED_ITEMS)},
+        )
 
     def fetch_data(
         self,
@@ -93,50 +152,77 @@ class AI4RiskInterbankPlugin(DataSourcePlugin):
         - "credit_ratings" - All bank credit ratings and SRISK indicators
         - "systemic_risk" - Systemic risk measures across all banks
 
-        Returns:
-            DataFrame with Date, Value, and additional columns depending on item type
+        Raises:
+            DatasetMissingError: The requested dataset file is absent.
+            SchemaValidationError: The dataset does not match the expected schema.
+            EmptyDatasetError: The dataset has no rows for the requested period.
+            DataSourceUnavailableError: The dataset could not be read.
         """
+        if item_identifier == "network_topology":
+            return self._fetch_network_topology(start_date, end_date)
+        if item_identifier.startswith("bank_features:"):
+            bank_id = item_identifier.split(":", 1)[1]
+            return self._fetch_bank_features(bank_id, start_date, end_date)
+        if item_identifier == "credit_ratings":
+            return self._fetch_credit_ratings(start_date, end_date)
+        if item_identifier == "systemic_risk":
+            return self._fetch_systemic_risk(start_date, end_date)
+
+        raise SchemaValidationError(
+            f"Unknown AI4Risk item identifier: {item_identifier}",
+            context={"supported": list(SUPPORTED_ITEMS)},
+        )
+
+    def _read_dataset(self, filename: str) -> pd.DataFrame:
+        """Read a dataset file, failing loudly when it is absent or unreadable."""
+        path = os.path.join(self.data_dir, filename)
+        if not os.path.isfile(path):
+            raise DatasetMissingError(
+                f"AI4Risk dataset file not found: {path}",
+                context={
+                    "file": path,
+                    "download_url": DOWNLOAD_URL,
+                    "remediation": f"Download the dataset from {DOWNLOAD_URL} into {self.data_dir}",
+                },
+            )
         try:
-            if item_identifier == "network_topology":
-                return self._fetch_network_topology(start_date, end_date)
-            elif item_identifier.startswith("bank_features:"):
-                bank_id = item_identifier.split(":", 1)[1]
-                return self._fetch_bank_features(bank_id, start_date, end_date)
-            elif item_identifier == "credit_ratings":
-                return self._fetch_credit_ratings(start_date, end_date)
-            elif item_identifier == "systemic_risk":
-                return self._fetch_systemic_risk(start_date, end_date)
-            else:
-                logger.error(f"Unknown item identifier: {item_identifier}")
-                return None
-        except Exception as e:
-            logger.error(f"Error fetching AI4Risk data for {item_identifier}: {e}")
-            return None
+            return pd.read_csv(path)
+        except (OSError, pd.errors.ParserError, pd.errors.EmptyDataError) as exc:
+            raise SchemaValidationError(
+                f"AI4Risk dataset file could not be parsed: {path}",
+                context={"file": path, "error": str(exc)},
+                cause=exc,
+            ) from exc
+
+    def _resolve_date_column(self, df: pd.DataFrame, filename: str) -> pd.DataFrame:
+        """Normalise the quarter/date column onto a 'Date' column."""
+        source = next((col for col in ("quarter", "date", "Date") if col in df.columns), None)
+        if source is None:
+            raise SchemaValidationError(
+                f"AI4Risk dataset '{filename}' has no date column",
+                context={"columns": list(df.columns), "expected_any_of": ["quarter", "date", "Date"]},
+            )
+        df = df.copy()
+        df["Date"] = pd.to_datetime(df[source], errors="coerce")
+        if df["Date"].isna().all():
+            raise SchemaValidationError(
+                f"AI4Risk dataset '{filename}' has no parseable dates",
+                context={"column": source},
+            )
+        return df
 
     def _fetch_network_topology(
         self,
         start_date: datetime,
         end_date: datetime
-    ) -> Optional[pd.DataFrame]:
+    ) -> pd.DataFrame:
         """
         Fetch interbank network edges (bank-to-bank exposures).
 
         This provides the critical network topology for GNN training.
         """
-        network_file = os.path.join(self.data_dir, 'interbank_network.csv')
+        df = self._resolve_date_column(self._read_dataset('interbank_network.csv'), 'interbank_network.csv')
 
-        if os.path.exists(network_file):
-            df = pd.read_csv(network_file)
-            df['Date'] = pd.to_datetime(df.get('quarter', df.get('date', df.get('Date'))))
-        else:
-            # Generate sample network data for demonstration
-            logger.info("Generating sample interbank network data")
-            df = self._generate_sample_network(start_date, end_date)
-
-        # Filter by date range
-        df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
-
-        # Standardize columns: Date, source_bank, target_bank, Value (exposure)
         column_mapping = {
             'bank_i': 'source_bank',
             'bank_j': 'target_bank',
@@ -144,17 +230,24 @@ class AI4RiskInterbankPlugin(DataSourcePlugin):
             'target': 'target_bank',
             'exposure': 'Value',
             'weight': 'Value',
-            'amount': 'Value'
+            'amount': 'Value',
         }
-
         df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
 
-        # Ensure required columns exist
         required_cols = ['Date', 'source_bank', 'target_bank', 'Value']
-        if not all(col in df.columns for col in required_cols):
-            logger.error(f"Missing required columns. Have: {df.columns.tolist()}")
-            return None
+        missing = [col for col in required_cols if col not in df.columns]
+        if missing:
+            raise SchemaValidationError(
+                "AI4Risk network dataset is missing required columns",
+                context={"missing": missing, "present": list(df.columns)},
+            )
 
+        df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
+        if df.empty:
+            raise EmptyDatasetError(
+                "No AI4Risk network edges in the requested period",
+                context={"start_date": str(start_date), "end_date": str(end_date)},
+            )
         return df[required_cols].sort_values('Date')
 
     def _fetch_bank_features(
@@ -162,41 +255,46 @@ class AI4RiskInterbankPlugin(DataSourcePlugin):
         bank_id: str,
         start_date: datetime,
         end_date: datetime
-    ) -> Optional[pd.DataFrame]:
+    ) -> pd.DataFrame:
         """
         Fetch 300+ features for a specific bank.
 
         Features include: assets, equity, debt, liquidity ratios, performance metrics, etc.
         """
-        features_file = os.path.join(self.data_dir, 'bank_features.csv')
+        df = self._resolve_date_column(self._read_dataset('bank_features.csv'), 'bank_features.csv')
 
-        if os.path.exists(features_file):
-            df = pd.read_csv(features_file)
-            df['Date'] = pd.to_datetime(df.get('quarter', df.get('date', df.get('Date'))))
-            df = df[df.get('bank_id', df.get('BANK_ID', df.get('id'))) == bank_id]
-        else:
-            # Generate sample features
-            logger.info(f"Generating sample bank features for {bank_id}")
-            df = self._generate_sample_features(bank_id, start_date, end_date)
+        id_column = next((col for col in ('bank_id', 'BANK_ID', 'id') if col in df.columns), None)
+        if id_column is None:
+            raise SchemaValidationError(
+                "AI4Risk bank features dataset has no bank identifier column",
+                context={"columns": list(df.columns)},
+            )
+        df = df[df[id_column] == bank_id]
 
-        # Filter by date range
         df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
-
         if df.empty:
-            logger.warning(f"No data found for bank {bank_id}")
-            return None
+            raise EmptyDatasetError(
+                f"No AI4Risk features found for bank '{bank_id}' in the requested period",
+                context={
+                    "bank_id": bank_id,
+                    "start_date": str(start_date),
+                    "end_date": str(end_date),
+                },
+            )
 
-        # Melt to long format: Date, feature, Value, bank_id
         id_cols = ['Date']
         if 'bank_id' in df.columns:
             id_cols.append('bank_id')
 
-        feature_cols = [col for col in df.columns
-                       if col not in id_cols + ['quarter', 'date', 'id', 'BANK_ID']]
-
+        feature_cols = [
+            col for col in df.columns
+            if col not in id_cols + ['quarter', 'date', 'id', 'BANK_ID']
+        ]
         if not feature_cols:
-            logger.error(f"No feature columns found for bank {bank_id}")
-            return None
+            raise SchemaValidationError(
+                f"AI4Risk bank features dataset has no feature columns for bank '{bank_id}'",
+                context={"columns": list(df.columns)},
+            )
 
         df_long = df.melt(
             id_vars=id_cols,
@@ -211,27 +309,14 @@ class AI4RiskInterbankPlugin(DataSourcePlugin):
         self,
         start_date: datetime,
         end_date: datetime
-    ) -> Optional[pd.DataFrame]:
+    ) -> pd.DataFrame:
         """
         Fetch credit ratings and SRISK (systemic risk) indicators.
 
         SRISK measures how much capital a bank would need in a systemic crisis.
         """
-        ratings_file = os.path.join(self.data_dir, 'credit_ratings.csv')
+        df = self._resolve_date_column(self._read_dataset('credit_ratings.csv'), 'credit_ratings.csv')
 
-        if os.path.exists(ratings_file):
-            df = pd.read_csv(ratings_file)
-            df['Date'] = pd.to_datetime(df.get('quarter', df.get('date', df.get('Date'))))
-        else:
-            # Generate sample ratings
-            logger.info("Generating sample credit ratings")
-            df = self._generate_sample_ratings(start_date, end_date)
-
-        # Filter by date range
-        df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
-
-        # Standardize: Date, bank_id, rating (numeric), srisk
-        # Convert letter ratings to numeric if needed
         if 'rating' in df.columns and df['rating'].dtype == 'object':
             rating_map = {
                 'AAA': 1, 'AA+': 2, 'AA': 3, 'AA-': 4,
@@ -243,27 +328,38 @@ class AI4RiskInterbankPlugin(DataSourcePlugin):
             }
             df['rating_numeric'] = df['rating'].map(rating_map)
 
-        # Create Value column from rating for consistency
         if 'rating_numeric' in df.columns:
             df['Value'] = df['rating_numeric']
         elif 'srisk' in df.columns:
             df['Value'] = df['srisk']
+        else:
+            raise SchemaValidationError(
+                "AI4Risk credit ratings dataset has neither a recognisable rating nor an srisk column",
+                context={"columns": list(df.columns)},
+            )
 
+        if 'bank_id' not in df.columns:
+            raise SchemaValidationError(
+                "AI4Risk credit ratings dataset has no bank identifier column",
+                context={"columns": list(df.columns)},
+            )
+
+        df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
+        if df.empty:
+            raise EmptyDatasetError(
+                "No AI4Risk credit ratings in the requested period",
+                context={"start_date": str(start_date), "end_date": str(end_date)},
+            )
         return df[['Date', 'bank_id', 'Value']].sort_values('Date')
 
     def _fetch_systemic_risk(
         self,
         start_date: datetime,
         end_date: datetime
-    ) -> Optional[pd.DataFrame]:
+    ) -> pd.DataFrame:
         """Fetch system-wide systemic risk measures."""
-        # This could aggregate SRISK across all banks or provide network-level metrics
         ratings_df = self._fetch_credit_ratings(start_date, end_date)
 
-        if ratings_df is None or ratings_df.empty:
-            return None
-
-        # Aggregate to system level
         system_risk = ratings_df.groupby('Date').agg({
             'Value': ['mean', 'max', 'std']
         }).reset_index()
@@ -273,125 +369,37 @@ class AI4RiskInterbankPlugin(DataSourcePlugin):
 
         return system_risk[['Date', 'Value']].sort_values('Date')
 
-    def _generate_sample_network(
-        self,
-        start_date: datetime,
-        end_date: datetime
-    ) -> pd.DataFrame:
-        """Generate sample interbank network for demonstration."""
-        quarters = pd.date_range(start=start_date, end=end_date, freq='Q')
-
-        # Sample banks
-        banks = [f'BANK_{i:03d}' for i in range(1, 51)]  # 50 banks
-
-        records = []
-        for quarter in quarters:
-            # Generate scale-free network (realistic bank network structure)
-            n_edges = len(banks) * 3  # Average degree ~3
-
-            for _ in range(n_edges):
-                # Preferential attachment: large banks more connected
-                source = np.random.choice(banks[:20], p=[1/(i+1) for i in range(20)])
-                target = np.random.choice(banks)
-
-                if source != target:
-                    exposure = np.random.lognormal(15, 2)  # Log-normal exposure distribution
-                    records.append({
-                        'Date': quarter,
-                        'source_bank': source,
-                        'target_bank': target,
-                        'Value': exposure
-                    })
-
-        return pd.DataFrame(records)
-
-    def _generate_sample_features(
-        self,
-        bank_id: str,
-        start_date: datetime,
-        end_date: datetime
-    ) -> pd.DataFrame:
-        """Generate sample bank features for demonstration."""
-        quarters = pd.date_range(start=start_date, end=end_date, freq='Q')
-
-        records = []
-        for quarter in quarters:
-            # Generate correlated time series for bank features
-            base_value = 1000000 + np.random.randn() * 100000
-
-            record = {
-                'Date': quarter,
-                'bank_id': bank_id,
-                'total_assets': base_value * np.random.uniform(0.9, 1.1),
-                'total_equity': base_value * 0.1 * np.random.uniform(0.8, 1.2),
-                'total_debt': base_value * 0.6 * np.random.uniform(0.9, 1.1),
-                'cash': base_value * 0.15 * np.random.uniform(0.7, 1.3),
-                'liquidity_ratio': np.random.uniform(0.1, 0.3),
-                'capital_ratio': np.random.uniform(0.08, 0.15),
-                'roa': np.random.uniform(0.005, 0.02),
-                'roe': np.random.uniform(0.05, 0.15),
-                'npl_ratio': np.random.uniform(0.01, 0.05)
-            }
-            records.append(record)
-
-        return pd.DataFrame(records)
-
-    def _generate_sample_ratings(
-        self,
-        start_date: datetime,
-        end_date: datetime
-    ) -> pd.DataFrame:
-        """Generate sample credit ratings for demonstration."""
-        quarters = pd.date_range(start=start_date, end=end_date, freq='Q')
-        banks = [f'BANK_{i:03d}' for i in range(1, 51)]
-
-        records = []
-        for quarter in quarters:
-            for bank in banks:
-                # Random walk for ratings
-                rating_numeric = np.random.randint(1, 20)
-                srisk = np.random.lognormal(10, 3) if rating_numeric > 10 else 0
-
-                records.append({
-                    'Date': quarter,
-                    'bank_id': bank,
-                    'rating_numeric': rating_numeric,
-                    'srisk': srisk,
-                    'Value': rating_numeric
-                })
-
-        return pd.DataFrame(records)
-
     def test_item(self, item_identifier: str) -> Dict[str, Any]:
-        """Test AI4Risk data access."""
+        """Test AI4Risk data access for a single item."""
         try:
             end_date = datetime.now()
             start_date = datetime(end_date.year - 1, 1, 1)
 
             df = self.fetch_data(item_identifier, start_date, end_date)
 
-            if df is not None and not df.empty:
-                return {
-                    "success": True,
-                    "message": f"Successfully accessed AI4Risk data for {item_identifier}. Found {len(df)} records.",
-                    "details": {
-                        "records": len(df),
-                        "date_range": f"{df['Date'].min().date()} to {df['Date'].max().date()}",
-                        "columns": df.columns.tolist()[:10]
-                    }
-                }
-            else:
+            if df is None or df.empty:
                 return {
                     "success": False,
                     "message": f"No data found for {item_identifier}",
-                    "details": {"error": "Empty dataset"}
+                    "details": {"error_code": "EMPTY_DATASET"},
                 }
+
+            return {
+                "success": True,
+                "message": f"Successfully accessed AI4Risk data for {item_identifier}. Found {len(df)} records.",
+                "details": {
+                    "records": len(df),
+                    "date_range": f"{df['Date'].min().date()} to {df['Date'].max().date()}",
+                    "columns": df.columns.tolist()[:10],
+                },
+            }
         except Exception as e:
-            logger.error(f"Error testing AI4Risk item {item_identifier}: {e}")
+            error_code = getattr(e, "code", "DATA_INGESTION_FAILED")
+            logger.error("Error testing AI4Risk item %s: %s", item_identifier, e)
             return {
                 "success": False,
-                "message": f"Failed to access {item_identifier}: {str(e)}",
-                "details": {"error": str(e)}
+                "message": f"Failed to access {item_identifier}: {e}",
+                "details": {"error_code": error_code, "error": str(e)},
             }
 
     @classmethod
@@ -403,7 +411,7 @@ class AI4RiskInterbankPlugin(DataSourcePlugin):
                 "required": False,
                 "default": "./data/ai4risk/",
                 "label": "Data Directory",
-                "help": "Path to downloaded AI4Risk dataset (download from https://github.com/AI4Risk/interbank)"
+                "help": f"Path to downloaded AI4Risk dataset (download from {DOWNLOAD_URL})"
             }
         }
 
@@ -413,12 +421,12 @@ class AI4RiskInterbankPlugin(DataSourcePlugin):
         return {
             "name": "AI4Risk Interbank Network",
             "description": "Real interbank network topology and bank features for 4,548 banks (2016Q1-2023Q1)",
-            "version": "1.0.0",
+            "version": "1.1.0",
             "author": "BEACON",
             "free": True,
             "registration_required": False,
             "registration_url": None,
-            "download_url": "https://github.com/AI4Risk/interbank",
+            "download_url": DOWNLOAD_URL,
             "data_types": ["interbank_networks", "credit_risk", "systemic_risk", "bank_features"],
             "coverage": "4,548 banks globally, quarterly snapshots",
             "frequency": "quarterly",

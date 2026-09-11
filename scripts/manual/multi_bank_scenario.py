@@ -1,11 +1,19 @@
 """
-Multi-Bank Scenario Test: HSBC, Citibank, Bank of America, JPMorgan Chase, Wells Fargo
+Multi-Bank Scenario script: HSBC, Citibank, Bank of America, JPMorgan Chase, Wells Fargo
 
-This script creates a comprehensive test scenario for liquidity risk analysis
-across multiple major banks using real financial data.
+Creates a comprehensive liquidity-risk scenario across multiple major banks.
+
+This is a manual smoke script, not an automated test - it drives a running
+BEACON instance. Start the stack first:
+
+    docker compose up -d
+    python scripts/manual/multi_bank_scenario.py
+
+Automated coverage lives in backend/tests/ (pytest) and frontend/tests/
+(Playwright).
 """
 
-import requests
+import httpx as requests  # httpx is a declared dependency; the API is compatible here
 import json
 import time
 from datetime import datetime

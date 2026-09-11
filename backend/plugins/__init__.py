@@ -47,6 +47,7 @@ def _load_plugins() -> Dict[str, str]:
         (".ecb_banking_plugin", "ECBBankingPlugin"),
         (".fmp_plugin", "FMPPlugin"),
         (".kaggle_plugin", "KagglePlugin"),
+        (".ai4risk_plugin", "AI4RiskInterbankPlugin"),
     )
 
     loaded: Dict[str, str] = {}

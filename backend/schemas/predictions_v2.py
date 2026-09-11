@@ -35,3 +35,5 @@ class BacktestReport(BaseModel):
     status: str
     metrics: Dict[str, Any]
     metadata: Dict[str, Any]
+    quant_metrics: Optional[Dict[str, Any]] = None
+    walk_forward: Optional[Dict[str, Any]] = None

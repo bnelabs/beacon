@@ -1,8 +1,20 @@
 services:
-  # PostgreSQL Database
+  # PostgreSQL + TimescaleDB.
+  # TimescaleDB is a drop-in PostgreSQL extension, so the SQLAlchemy models,
+  # Alembic migrations, and connection string are unchanged; the time-series
+  # tables (indicator_observations, risk_scores, model_metrics) additionally
+  # become compressed, time-partitioned hypertables with continuous aggregates.
   postgres:
-    image: postgres:15-alpine
+    image: timescale/timescaledb:2.15.2-pg15
     container_name: beacon-postgres
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=timescaledb
+      - -c
+      - timescaledb.telemetry_level=off
+      - -c
+      - max_worker_processes=16
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-beacon_db}
       POSTGRES_USER: ${POSTGRES_USER:-beacon_user}
@@ -118,7 +130,7 @@ services:
     restart: unless-stopped
     command: celery -A backend.tasks.celery_app worker --loglevel=info --concurrency=2
 
-  # Frontend (Production-Ready - React 19 + Vite + Three.js)
+  # Frontend (React 18 + Vite + Deck.gl 2D risk map)
   frontend:
     build:
       context: ./frontend
@@ -134,9 +146,81 @@ services:
       - beacon-network
     restart: unless-stopped
 
+  # Celery worker/task/queue metrics.
+  # A dedicated exporter reads the broker event stream, so worker metrics are
+  # available without changing the worker command line. This is the single
+  # supported path for Celery metrics (see configs/observability/prometheus).
+  celery-exporter:
+    image: danihodovic/celery-exporter:0.10.6
+    container_name: beacon-celery-exporter
+    environment:
+      CE_BROKER_URL: redis://redis:6379/0
+    ports:
+      - "9808:9808"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - beacon-network
+    restart: unless-stopped
+
+  # Prometheus scrapes the backend /metrics endpoint and the Celery exporter.
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: beacon-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    volumes:
+      - ./configs/observability/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+      - celery-exporter
+    networks:
+      - beacon-network
+    restart: unless-stopped
+
+  # Grafana with the Prometheus datasource and BEACON dashboard provisioned.
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: beacon-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-beacon}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/beacon-overview.json
+    volumes:
+      # Dashboards are mounted outside /var/lib/grafana on purpose: the state
+      # volume lives there, and nesting a bind mount inside a named volume is
+      # fragile. provisioning/dashboards.yml points at /etc/grafana/dashboards.
+      - ./configs/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./configs/observability/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - beacon-network
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   beacon-network:

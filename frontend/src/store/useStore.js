@@ -7,9 +7,6 @@ export const useStore = create((set) => ({
   selectedDataSource: 'fdic',
   setSelectedDataSource: (source) => set({ selectedDataSource: source }),
 
-  globeRotation: true,
-  setGlobeRotation: (enabled) => set({ globeRotation: enabled }),
-
   sidebarOpen: true,
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen }))

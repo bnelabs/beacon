@@ -1,4 +1,4 @@
-"""Multi-scale trainer for heterogeneous data sources - THE RIGHT APPROACH."""
+"""Multi-scale trainer for heterogeneous data sources."""
 
 import torch
 import torch.nn as nn
@@ -13,6 +13,7 @@ from pathlib import Path
 import json
 
 from .models import create_model
+from .model_io import safe_torch_load, safe_torch_save
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +250,7 @@ class MultiScaleTemporalAttentionModel(nn.Module):
 
 
 class MultiScaleTrainer:
-    """Trainer for multi-scale, multi-source data - THE RIGHT APPROACH."""
+    """Trainer for multi-scale, multi-source data."""
 
     def __init__(self, model_type: str, device: torch.device, config: Dict):
         self.model_type = model_type
@@ -372,7 +373,7 @@ class MultiScaleTrainer:
                 self.best_val_loss = val_loss
                 best_epoch = epoch
                 model_path = Path(output_dir) / 'best_model.pt'
-                torch.save({
+                safe_torch_save({
                     'epoch': epoch,
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
@@ -391,7 +392,7 @@ class MultiScaleTrainer:
                            f"Best Val: {self.best_val_loss:.6f} (epoch {best_epoch + 1})")
 
         # Load best model
-        checkpoint = torch.load(model_path)
+        checkpoint = safe_torch_load(model_path)
         self.model.load_state_dict(checkpoint['model_state_dict'])
 
         # Test evaluation

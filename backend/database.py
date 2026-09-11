@@ -41,7 +41,19 @@ Base = declarative_base()
 
 def init_db():
     """Initialize database tables."""
-    from backend.models import data_source, asset, job, error_log, data_catalogue, pipeline_job, country  # Import all models
+    # Import every model module so its table is registered on Base.metadata.
+    from backend.models import (  # noqa: F401
+        alert_rule,
+        asset,
+        country,
+        data_catalogue,
+        data_source,
+        error_log,
+        job,
+        notification,
+        pipeline_job,
+        timeseries,
+    )
     Base.metadata.create_all(bind=engine)
 
 

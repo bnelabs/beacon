@@ -6,8 +6,9 @@ FastAPI application entry point for BEACON system.
 Copyright © 2025 BNE (Banking Network Engine). All rights reserved.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
 import os
@@ -36,8 +37,10 @@ from .routes import (
     reports,
 )
 from backend.database import init_db, close_db
+from backend.exceptions import BeaconError
 
 logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -131,6 +134,28 @@ app.include_router(data_quality.router, prefix="/api/v1/data-quality", tags=["Da
 app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["Advanced Analytics"])
 app.include_router(alert_rules.router, prefix="/api/v1/alert-rules", tags=["Alert Rules"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
+
+# Observability (workstream F): expose Prometheus metrics on GET /metrics and
+# instrument HTTP request count/latency.  This is intentionally best-effort so
+# that a missing/optional `prometheus_client` never prevents the API from
+# booting; `setup_metrics` degrades to a no-op in that case.
+try:
+    from backend.monitoring.metrics import setup_metrics as _setup_metrics
+
+    _setup_metrics(app)
+except Exception as _metrics_exc:  # pragma: no cover - observability must not break boot
+    logger.warning("Observability metrics could not be enabled: %s", _metrics_exc)
+
+
+@app.exception_handler(BeaconError)
+async def beacon_error_handler(request: Request, exc: BeaconError) -> JSONResponse:
+    """Return domain errors as a stable, machine-readable payload.
+
+    Clients branch on ``code`` rather than parsing message text, so a
+    data-quality rejection is distinguishable from an upstream outage.
+    """
+    logger.warning("%s %s -> %s: %s", request.method, request.url.path, exc.code, exc)
+    return JSONResponse(status_code=exc.http_status, content=exc.to_dict())
 
 
 @app.get("/")

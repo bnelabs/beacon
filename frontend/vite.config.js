@@ -14,7 +14,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           'react-vendor': ['react', 'react-dom'],
-          'three-vendor': ['three', '@react-three/fiber', '@react-three/drei'],
           'query-vendor': ['@tanstack/react-query', 'zustand'],
           'onboarding': ['driver.js']
         }

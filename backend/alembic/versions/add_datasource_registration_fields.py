@@ -1,7 +1,7 @@
 """add datasource registration fields
 
 Revision ID: 003
-Revises: 002
+Revises: (root - no prior revision exists in this repository)
 Create Date: 2025-10-30
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers
 revision = '003'
-down_revision = '002'
+down_revision = None
 branch_labels = None
 depends_on = None
 

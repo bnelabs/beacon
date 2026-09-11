@@ -6,11 +6,11 @@ import logging
 from datetime import datetime, timedelta, timezone
 import psutil
 import os
-import torch
 from pathlib import Path
 
 from .celery_app import celery_app
 from backend.database import SessionLocal
+from backend.modules.data.quality_gate import DataQualityGate
 from backend.services.job_service import JobService
 from backend.services.enhanced_error_translator import translate_error_enhanced as translate_error
 import json
@@ -179,6 +179,7 @@ def run_data_collection(self, job_id: int, parameters: dict):
             "completeness": data_package.quality_report.completeness,
             "fit_for_engine": data_package.quality_report.fit_for_engine,
             "anomalies_detected": data_package.quality_report.anomalies_detected,
+            "quality_attestation": (data_package.metadata or {}).get("quality_attestation"),
             "output_path": data_package.timeseries_path,
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "regions": selected_regions,
@@ -331,8 +332,8 @@ def run_training(self, job_id: int, parameters: dict):
 
         self.update_progress(job_id, 60.0)
 
-        # REAL MODEL TRAINING WITH MULTI-SCALE SUPPORT
-        logger.info("Starting REAL multi-scale model training...")
+        # Multi-scale training
+        logger.info("Starting multi-scale model training...")
 
         # Check if we have source_code column (multi-source data)
         has_multi_source = 'source_code' in train_df.columns
@@ -349,6 +350,8 @@ def run_training(self, job_id: int, parameters: dict):
         logger.info(f"Training {model_type.upper()} model")
 
         # Create trainer
+        import torch
+
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         logger.info(f"Using device: {device}")
 
@@ -392,7 +395,7 @@ def run_training(self, job_id: int, parameters: dict):
 
         history_path = Path(output_dir) / "training_history.json"
 
-        # Prepare results with REAL training metrics
+        # Prepare results with training metrics
         data_job = service.get_job(data_job_id)
 
         result = {
@@ -409,7 +412,7 @@ def run_training(self, job_id: int, parameters: dict):
             "total_records": len(timeseries_df),
             "features": list(timeseries_df.columns),
             "device": str(device),
-            # REAL METRICS
+            # Training metrics
             "epochs_trained": training_metrics.total_epochs,
             "best_epoch": training_metrics.best_epoch + 1,
             "final_train_loss": float(training_metrics.train_loss[-1]),
@@ -540,7 +543,11 @@ def run_prediction(self, job_id: int, parameters: dict):
         engine = RealPredictionEngine(
             model_path=model_path,
             device=device,
-            config=parameters.get('config', {})
+            config=parameters.get('config', {}),
+            quality_attestation=DataQualityGate.attestation_from_job_result(
+                data_scope if isinstance(data_scope, dict) else {},
+                job_id=str(data_source_job),
+            ),
         )
 
         self.update_progress(job_id, 40.0)
@@ -662,10 +669,12 @@ def run_backtest(self, job_id: int, parameters: dict):
 
         # Get data from data collection job
         data_path = None
+        data_scope = {}
         if data_source_job:
             data_job = service.get_job(data_source_job)
             if data_job and isinstance(data_job.result, dict):
                 data_path = data_job.result.get("output_path")
+                data_scope = data_job.result
 
         if not model_path or not data_path:
             raise ValueError("Could not retrieve model_path or data_path from trained job")
@@ -695,13 +704,19 @@ def run_backtest(self, job_id: int, parameters: dict):
         engine = RealPredictionEngine(
             model_path=model_path,
             device=device,
-            config=parameters.get('config', {})
+            config=parameters.get('config', {}),
+            quality_attestation=DataQualityGate.attestation_from_job_result(
+                data_scope if isinstance(data_scope, dict) else {},
+                job_id=str(data_source_job),
+            ),
         )
 
         self.update_progress(job_id, 60.0)
 
         # Generate predictions on test set
         prediction_result = engine.predict(test_data)
+
+        actuals = None
 
         # Calculate backtest metrics
         if 'actual_risk' in test_data.columns or 'target' in test_data.columns:
@@ -762,6 +777,65 @@ def run_backtest(self, job_id: int, parameters: dict):
                 "note": "No ground truth available"
             }
 
+        # Quantitative extension: risk-signal returns, tail-risk statistics, and
+        # walk-forward fold diagnostics. Purely additive to backtest_metrics; the
+        # pre-trained engine is evaluated on each fold's out-of-sample segment
+        # (per-fold retraining is owned by the training job).
+        from backend.modules.engine.backtesting import (
+            WalkForwardConfig,
+            compute_metrics,
+            generate_walk_forward_folds,
+        )
+
+        wf_raw = parameters.get("walk_forward")
+        if not isinstance(wf_raw, dict):
+            wf_raw = {}
+        try:
+            wf_config = WalkForwardConfig(
+                n_splits=int(wf_raw.get("n_splits", 5)),
+                test_size=wf_raw.get("test_size", 0.2),
+                expanding=bool(wf_raw.get("expanding", True)),
+                gap=int(wf_raw.get("gap", 0)),
+                min_train_size=int(wf_raw.get("min_train_size", 1)),
+            )
+        except (TypeError, ValueError) as config_exc:
+            logger.warning(f"Invalid walk_forward parameters for job {job_id}, using defaults: {config_exc}")
+            wf_config = WalkForwardConfig()
+
+        quant_metrics = compute_metrics(actual=actuals, predicted=pred_values)
+        for quant_key in (
+            "sharpe_ratio",
+            "sortino_ratio",
+            "max_drawdown",
+            "calmar_ratio",
+            "annualized_volatility",
+            "hit_rate",
+            "var_95",
+            "cvar_95",
+        ):
+            backtest_metrics[quant_key] = quant_metrics[quant_key]
+
+        walk_forward = {"config": {}, "folds": []}
+        try:
+            walk_forward["config"] = wf_config.to_dict()
+            folds = generate_walk_forward_folds(len(pred_values), wf_config)
+            for fold_index, (train_idx, test_idx) in enumerate(folds):
+                fold_actuals = actuals[test_idx] if actuals is not None else None
+                walk_forward["folds"].append({
+                    "fold": fold_index,
+                    "train_start": int(train_idx[0]),
+                    "train_end": int(train_idx[-1]) + 1,
+                    "test_start": int(test_idx[0]),
+                    "test_end": int(test_idx[-1]) + 1,
+                    "n_train": int(len(train_idx)),
+                    "n_test": int(len(test_idx)),
+                    "metrics": compute_metrics(actual=fold_actuals, predicted=pred_values[test_idx]),
+                })
+        except (TypeError, ValueError) as wf_exc:
+            walk_forward["error"] = str(wf_exc)
+            logger.warning(f"Walk-forward folds skipped for job {job_id}: {wf_exc}")
+        backtest_metrics["walk_forward"] = walk_forward
+
         self.update_progress(job_id, 95.0)
 
         # Calculate memory usage
@@ -785,6 +859,8 @@ def run_backtest(self, job_id: int, parameters: dict):
             "train_samples": len(train_data),
             "test_samples": len(test_data),
             "backtest_metrics": clean_nan(backtest_metrics),
+            "quant_metrics": clean_nan(quant_metrics),
+            "walk_forward": clean_nan(walk_forward),
             "completed_at": datetime.now(timezone.utc).isoformat()
         }
 

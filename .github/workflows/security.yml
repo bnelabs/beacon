@@ -1,0 +1,73 @@
+name: Security audit
+
+# why: advisory dependency and supply-chain signal. Runs on the same events as CI so a
+# newly published CVE shows up in the PR/checks UI, plus a weekly schedule so it still
+# fires when the repository is quiet, plus manual dispatch.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    name: pip-audit (backend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install pip-audit
+        run: python -m pip install pip-audit==2.7.3
+
+      - name: Audit backend dependencies
+        # why: advisory only. A new CVE must surface as a visible check but must not
+        # block merges; remediation should land as a separate, reviewable dependency
+        # bump.
+        continue-on-error: true
+        run: pip-audit -r backend/requirements.txt
+
+  npm-audit:
+    name: npm audit (frontend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Audit frontend dependencies
+        # why: advisory only (see pip-audit note above). --audit-level=high keeps the
+        # report focused on vulnerabilities that actually matter for merge decisions;
+        # npm reads frontend/package-lock.json, so no install is required.
+        continue-on-error: true
+        run: npm audit --audit-level=high

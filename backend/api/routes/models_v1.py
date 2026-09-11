@@ -28,6 +28,7 @@ from backend.schemas.models_v1 import (
     ScenarioResponse,
 )
 from backend.services.error_logger import ErrorLogger
+from backend.modules.data.quality_gate import DataQualityGate
 from backend.modules.engine.prediction_engine import RealPredictionEngine
 
 router = APIRouter()
@@ -273,10 +274,17 @@ async def simulate_model(
         adjusted_df = _apply_adjustments(base_df, scenario.adjustments, scenario.horizon_days)
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        source_data_job = db.query(Job).filter(Job.id == data_job_id).first()
         engine = RealPredictionEngine(
             model_path=model_path,
             device=device,
             config=result.get("config", {}),
+            quality_attestation=DataQualityGate.attestation_from_job_result(
+                source_data_job.result
+                if source_data_job and isinstance(source_data_job.result, dict)
+                else {},
+                job_id=str(data_job_id),
+            ),
         )
 
         prediction_result = engine.predict(adjusted_df)

@@ -1,0 +1,504 @@
+# =============================================================================
+# BEACON — Prometheus alerting rules (observability workstream F)
+# =============================================================================
+# Mounted as /etc/prometheus/alert_rules.yml and referenced from prometheus.yml
+# `rule_files`.
+#
+# Metric sources
+#   beacon_*              -> backend API process (/metrics on backend:3456)
+#   celery_*              -> dedicated celery-exporter service (chosen approach)
+#
+# Celery rules reference the exporter series and fall back to the BEACON-native
+# gauges with `or`.  `A or B` yields A when A has series, otherwise B, so the rule
+# works both with and without the exporter and never double-fires for the same
+# label set.
+# =============================================================================
+
+groups:
+  # ---------------------------------------------------------------------------
+  # Data ingestion
+  # ---------------------------------------------------------------------------
+  - name: beacon-data-ingestion
+    rules:
+      - alert: BeaconDataIngestionFailureRateSpike
+        expr: |
+          (
+            sum by (plugin) (rate(beacon_data_ingestion_failures_total[5m]))
+            /
+            clamp_min(
+              sum by (plugin) (rate(beacon_data_ingestion_attempts_total[5m])),
+              0.001
+            )
+          ) > 0.20
+        for: 10m
+        labels:
+          severity: warning
+          component: data-ingestion
+          team: beacon
+        annotations:
+          summary: "Data ingestion failure ratio above 20% for plugin {{ $labels.plugin }}"
+          description: >-
+            More than one in five ingestion attempts failed for plugin
+            "{{ $labels.plugin }}" over the last 5 minutes. Check the plugin's
+            upstream API status, credentials/rate limits and the per-error-code
+            breakdown in the BEACON overview dashboard.
+          runbook_url: "https://github.com/bnelabs/beacon/blob/main/configs/observability/README.md#data-ingestion-failures"
+
+      - alert: BeaconDataIngestionFailuresSurging
+        expr: |
+          (
+            sum by (plugin, error_code) (rate(beacon_data_ingestion_failures_total[5m]))
+            >
+            3 * clamp_min(
+              sum by (plugin, error_code) (
+                avg_over_time(rate(beacon_data_ingestion_failures_total[5m])[1h:1m])
+              ),
+              0.001
+            )
+          )
+          and
+          (
+            sum by (plugin, error_code) (rate(beacon_data_ingestion_failures_total[5m])) > 0.05
+          )
+        for: 10m
+        labels:
+          severity: warning
+          component: data-ingestion
+          team: beacon
+        annotations:
+          summary: "Ingestion failures surging for {{ $labels.plugin }} ({{ $labels.error_code }})"
+          description: >-
+            The failure rate for plugin "{{ $labels.plugin }}" with error code
+            "{{ $labels.error_code }}" is more than 3x its own 1-hour baseline and
+            above 0.05 failures/s.
+
+      - alert: BeaconDataIngestionCompletelyStalled
+        expr: |
+          sum by (plugin) (rate(beacon_data_ingestion_attempts_total{status="success"}[15m])) == 0
+          and
+          sum by (plugin) (increase(beacon_data_ingestion_attempts_total[15m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+          component: data-ingestion
+          team: beacon
+        annotations:
+          summary: "No successful ingestion for plugin {{ $labels.plugin }} in 15m"
+          description: >-
+            Ingestion attempts are being made for "{{ $labels.plugin }}" but none
+            succeeded during the last 15 minutes.
+
+  # ---------------------------------------------------------------------------
+  # Feature drift (PSI bands: none < 0.1, moderate 0.1-0.25, major > 0.25)
+  # ---------------------------------------------------------------------------
+  - name: beacon-feature-drift
+    rules:
+      - alert: BeaconFeatureDriftMajor
+        expr: |
+          max by (feature) (beacon_feature_drift_psi) > 0.25
+        for: 5m
+        labels:
+          severity: critical
+          component: ml-drift
+          team: beacon
+        annotations:
+          summary: "Major feature drift (PSI > 0.25) on feature {{ $labels.feature }}"
+          description: >-
+            PSI for feature "{{ $labels.feature }}" is
+            {{ printf "%.3f" $value }} (major band, > 0.25). The live distribution
+            no longer matches the training reference: retrain or roll back the
+            feature pipeline.
+          runbook_url: "https://github.com/bnelabs/beacon/blob/main/configs/observability/README.md#feature-drift"
+
+      - alert: BeaconFeatureDriftModerate
+        expr: |
+          (max by (feature) (beacon_feature_drift_psi) > 0.10)
+          and
+          (max by (feature) (beacon_feature_drift_psi) <= 0.25)
+        for: 30m
+        labels:
+          severity: warning
+          component: ml-drift
+          team: beacon
+        annotations:
+          summary: "Moderate feature drift (PSI 0.10-0.25) on feature {{ $labels.feature }}"
+          description: >-
+            PSI for feature "{{ $labels.feature }}" is
+            {{ printf "%.3f" $value }} (moderate band). Monitor the trend and
+            schedule retraining if it keeps rising.
+
+      - alert: BeaconFeatureDriftMetricMissing
+        expr: |
+          absent(beacon_feature_drift_psi)
+        for: 30m
+        labels:
+          severity: warning
+          component: ml-drift
+          team: beacon
+        annotations:
+          summary: "No feature-drift PSI samples are being published"
+          description: >-
+            `beacon_feature_drift_psi` has been absent for 30 minutes. Drift
+            scoring either stopped running or the reference monitor failed to
+            load; drift is currently unobserved.
+
+  # ---------------------------------------------------------------------------
+  # Celery queue depth
+  # ---------------------------------------------------------------------------
+  - name: beacon-celery-queues
+    rules:
+      - alert: BeaconCeleryQueueDepthHigh
+        expr: |
+          max by (queue) (
+            celery_queue_length or beacon_celery_queue_depth
+          ) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          component: celery
+          team: beacon
+        annotations:
+          summary: "Celery queue {{ $labels.queue }} depth above 1000"
+          description: >-
+            Queue "{{ $labels.queue }}" has had more than 1000 pending messages
+            for 10 minutes (current: {{ printf "%.0f" $value }}). Scale workers or
+            investigate a slow/blocked task.
+          runbook_url: "https://github.com/bnelabs/beacon/blob/main/configs/observability/README.md#celery-queues"
+
+      - alert: BeaconCeleryQueueDepthGrowing
+        expr: |
+          (
+            max by (queue) (celery_queue_length or beacon_celery_queue_depth)
+            -
+            max by (queue) (
+              celery_queue_length offset 15m
+              or
+              beacon_celery_queue_depth offset 15m
+            )
+          ) > 200
+        for: 15m
+        labels:
+          severity: warning
+          component: celery
+          team: beacon
+        annotations:
+          summary: "Celery queue {{ $labels.queue }} is growing"
+          description: >-
+            Queue "{{ $labels.queue }}" grew by more than 200 messages in the last
+            15 minutes and is still growing: arrival rate exceeds processing rate.
+
+      - alert: BeaconCeleryQueueBacklogCritical
+        expr: |
+          max by (queue) (
+            celery_queue_length or beacon_celery_queue_depth
+          ) > 10000
+        for: 5m
+        labels:
+          severity: critical
+          component: celery
+          team: beacon
+        annotations:
+          summary: "Celery queue {{ $labels.queue }} backlog critical (> 10000)"
+          description: >-
+            Queue "{{ $labels.queue }}" holds more than 10000 pending messages
+            (current: {{ printf "%.0f" $value }}). The platform is effectively
+            stalled for this queue.
+
+  # ---------------------------------------------------------------------------
+  # Celery workers / pools
+  # ---------------------------------------------------------------------------
+  - name: beacon-celery-workers
+    rules:
+      - alert: BeaconCeleryNoLiveWorkers
+        expr: |
+          (sum(celery_worker_up) == 0)
+          or
+          (sum(beacon_celery_workers_online{pool="all"}) == 0)
+        for: 5m
+        labels:
+          severity: critical
+          component: celery
+          team: beacon
+        annotations:
+          summary: "Zero live Celery workers"
+          description: >-
+            No Celery worker is responding. All background work (data collection,
+            training, prediction, backtest) has stopped. Check the worker pools
+            for crashes/OOM and restart them.
+          runbook_url: "https://github.com/bnelabs/beacon/blob/main/configs/observability/README.md#celery-workers"
+
+      - alert: BeaconCeleryTrainingPoolDead
+        expr: |
+          (max(beacon_celery_workers_online{pool="training"}) == 0)
+          and on()
+          (max(beacon_celery_workers_online{pool="all"}) > 0)
+        for: 10m
+        labels:
+          severity: critical
+          component: celery
+          team: ml-platform
+        annotations:
+          summary: "PyTorch training worker pool is dead"
+          description: >-
+            Other Celery workers are alive but no training-capable worker has been
+            seen for 10 minutes: the PyTorch/GNN training pool has crashed or was
+            scaled to zero, while the queue keeps accepting training jobs.
+            `beacon_celery_workers_online{pool="training"}` is 0 with
+            `pool="all"` > 0.
+
+      - alert: BeaconCeleryWorkerCountBelowExpectation
+        expr: |
+          max(beacon_celery_workers_online{pool="training"}) <
+          max(beacon_celery_workers_online{pool="training_expected"})
+        for: 15m
+        labels:
+          severity: warning
+          component: celery
+          team: ml-platform
+        annotations:
+          summary: "Training worker count below expectation"
+          description: >-
+            The number of live training workers is below the declared expectation
+            (`beacon_celery_workers_online{pool="training_expected"}`).
+
+      - alert: BeaconCeleryWorkerTasksReservedHigh
+        expr: |
+          max(beacon_celery_worker_tasks{state="reserved"}) > 50
+        for: 15m
+        labels:
+          severity: warning
+          component: celery
+          team: beacon
+        annotations:
+          summary: "Celery reserved task backlog above 50"
+          description: >-
+            Workers hold more than 50 prefetched/reserved tasks for 15 minutes,
+            which usually indicates slow tasks or a stuck worker.
+
+      - alert: BeaconCeleryTaskFailureRateHigh
+        expr: |
+          (
+            sum(rate(beacon_celery_tasks_total{status="failed"}[15m]))
+            /
+            clamp_min(sum(rate(beacon_celery_tasks_total[15m])), 0.001)
+          ) > 0.10
+        for: 15m
+        labels:
+          severity: warning
+          component: celery
+          team: beacon
+        annotations:
+          summary: "Celery task failure ratio above 10%"
+          description: >-
+            More than 10% of Celery task terminal states are failures over the
+            last 15 minutes.
+
+  # ---------------------------------------------------------------------------
+  # API availability / errors / latency
+  # ---------------------------------------------------------------------------
+  - name: beacon-api
+    rules:
+      - alert: BeaconBackendDown
+        expr: |
+          up{job="beacon-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: api
+          team: beacon
+        annotations:
+          summary: "BEACON backend is not scrapeable"
+          description: >-
+            Prometheus has been unable to scrape `beacon-backend:3456/metrics` for
+            2 minutes: the API is down, hanging, or `/metrics` is broken.
+          runbook_url: "https://github.com/bnelabs/beacon/blob/main/configs/observability/README.md#api"
+
+      - alert: BeaconApiHigh5xxRate
+        expr: |
+          (
+            sum(rate(beacon_http_requests_total{status=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(beacon_http_requests_total[5m])), 0.001)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+          component: api
+          team: beacon
+        annotations:
+          summary: "API 5xx ratio above 5%"
+          description: >-
+            More than 5% of API requests returned a 5xx status over the last 5
+            minutes (current: {{ printf "%.2f" $value }}).
+          runbook_url: "https://github.com/bnelabs/beacon/blob/main/configs/observability/README.md#api"
+
+      - alert: BeaconApiHigh5xxRateWarning
+        expr: |
+          (
+            sum(rate(beacon_http_requests_total{status=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(beacon_http_requests_total[5m])), 0.001)
+          ) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+          component: api
+          team: beacon
+        annotations:
+          summary: "API 5xx ratio above 1%"
+          description: >-
+            More than 1% of API requests returned a 5xx status over the last 5
+            minutes.
+
+      - alert: BeaconApiLatencyP95High
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(beacon_http_request_duration_seconds_bucket[5m]))
+          ) > 2.0
+        for: 10m
+        labels:
+          severity: warning
+          component: api
+          team: beacon
+        annotations:
+          summary: "API p95 latency above 2s"
+          description: >-
+            The 95th percentile API latency has exceeded 2 seconds for 10 minutes.
+
+      - alert: BeaconApiLatencyP99Critical
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le) (rate(beacon_http_request_duration_seconds_bucket[5m]))
+          ) > 10.0
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+          team: beacon
+        annotations:
+          summary: "API p99 latency above 10s"
+          description: >-
+            The 99th percentile API latency has exceeded 10 seconds for 5 minutes.
+
+  # ---------------------------------------------------------------------------
+  # Pipeline jobs + model inference
+  # ---------------------------------------------------------------------------
+  - name: beacon-pipeline-inference
+    rules:
+      - alert: BeaconPipelineJobFailureRateHigh
+        expr: |
+          (
+            sum(rate(beacon_pipeline_jobs_failed_total[15m]))
+            /
+            clamp_min(
+              sum(rate(beacon_pipeline_jobs_completed_total[15m]))
+              +
+              sum(rate(beacon_pipeline_jobs_failed_total[15m])),
+              0.001
+            )
+          ) > 0.10
+        for: 15m
+        labels:
+          severity: critical
+          component: pipeline
+          team: beacon
+        annotations:
+          summary: "Pipeline job failure ratio above 10%"
+          description: >-
+            More than 10% of pipeline jobs failed in the last 15 minutes. Inspect
+            the per-stage/per-job-type breakdown in the BEACON overview dashboard.
+          runbook_url: "https://github.com/bnelabs/beacon/blob/main/configs/observability/README.md#pipeline-jobs"
+
+      - alert: BeaconPipelineStageFailureRateHigh
+        expr: |
+          (
+            sum by (stage, job_type) (rate(beacon_pipeline_jobs_failed_total[30m]))
+            /
+            clamp_min(
+              sum by (stage, job_type) (rate(beacon_pipeline_jobs_completed_total[30m]))
+              +
+              sum by (stage, job_type) (rate(beacon_pipeline_jobs_failed_total[30m])),
+              0.001
+            )
+          ) > 0.25
+        for: 15m
+        labels:
+          severity: warning
+          component: pipeline
+          team: beacon
+        annotations:
+          summary: "Stage {{ $labels.stage }} / {{ $labels.job_type }} failing >25%"
+          description: >-
+            The "{{ $labels.stage }}" stage of "{{ $labels.job_type }}" jobs is
+            failing more than 25% of the time over the last 30 minutes.
+
+      - alert: BeaconPipelineJobStalled
+        expr: |
+          sum(rate(beacon_pipeline_jobs_started_total[30m])) == 0
+          and
+          (max(beacon_celery_queue_depth) > 0)
+        for: 30m
+        labels:
+          severity: warning
+          component: pipeline
+          team: beacon
+        annotations:
+          summary: "No pipeline job has started in 30m while the queue is non-empty"
+          description: >-
+            Jobs are queued but nothing started for 30 minutes: the pipeline is
+            stalled (no worker consuming this queue, or dispatch is broken).
+
+      - alert: BeaconModelInferenceLatencyP95Breach
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(beacon_model_inference_latency_seconds_bucket[5m]))
+          ) > 2.5
+        for: 10m
+        labels:
+          severity: warning
+          component: inference
+          team: ml-platform
+        annotations:
+          summary: "Model inference p95 latency above 2.5s (SLO breach)"
+          description: >-
+            The 95th percentile model inference latency has exceeded 2.5 seconds
+            for 10 minutes: check GPU availability, batch sizes and input sizes.
+          runbook_url: "https://github.com/bnelabs/beacon/blob/main/configs/observability/README.md#inference-latency"
+
+      - alert: BeaconModelInferenceLatencyP99Critical
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le) (rate(beacon_model_inference_latency_seconds_bucket[5m]))
+          ) > 10.0
+        for: 5m
+        labels:
+          severity: critical
+          component: inference
+          team: ml-platform
+        annotations:
+          summary: "Model inference p99 latency above 10s"
+          description: >-
+            The 99th percentile model inference latency has exceeded 10 seconds
+            for 5 minutes.
+
+      - alert: BeaconModelInferenceErrorRateHigh
+        expr: |
+          (
+            sum(rate(beacon_model_inference_errors_total[15m]))
+            /
+            clamp_min(sum(rate(beacon_predictions_total[15m])), 0.001)
+          ) > 0.05
+        for: 15m
+        labels:
+          severity: warning
+          component: inference
+          team: ml-platform
+        annotations:
+          summary: "Model inference error ratio above 5%"
+          description: >-
+            More than 5% of inference calls are failing (errors vs. produced
+            predictions) over the last 15 minutes.

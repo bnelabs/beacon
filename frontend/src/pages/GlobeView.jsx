@@ -4,69 +4,55 @@ import PageContainer from '../components/ui/PageContainer'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
-import GlobeCanvas from '../components/globe/GlobeCanvas'
+import RiskMap from '../components/map/RiskMap'
 import { useBanksByRegion } from '../hooks/useApi'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
+import { cn } from '../utils/cn'
 import {
   formatExposure,
   getRiskLevel,
-  getRiskColor
+  getRiskColor,
+  networkConnections
 } from '../data/network-connections'
 import { regions } from '../data/regions'
 
-export default function GlobeView() {
-  const { selectedRegion, setSelectedRegion, globeRotation, setGlobeRotation } = useStore()
+const API_REGION_BY_ID = {
+  'us-northeast': 'north_america',
+  'us-southeast': 'north_america',
+  'us-midwest': 'north_america',
+  'us-southwest': 'north_america',
+  'us-west': 'north_america',
+  uk: 'europe',
+  germany: 'europe',
+  france: 'europe',
+  italy: 'europe',
+  spain: 'europe',
+  japan: 'asia',
+  china: 'asia',
+  singapore: 'asia',
+  australia: 'asia'
+}
+
+const DATA_SOURCES = ['fdic', 'ecb', 'fmp']
+
+export default function RiskMapPage() {
+  const { selectedRegion, setSelectedRegion } = useStore()
   const [selectedDataSource, setSelectedDataSource] = useState('fdic')
   const [showNetwork, setShowNetwork] = useState(false)
+  const [showHeatmap, setShowHeatmap] = useState(true)
+  const [resetToken, setResetToken] = useState(0)
   const [selectedConnection, setSelectedConnection] = useState(null)
+
   const regionFilters = useMemo(() => {
     if (!selectedRegion) return null
 
-    const { country, name, id } = selectedRegion
-
-    const countryIsoMap = {
-      USA: 'USA',
-      US: 'USA',
-      UK: 'GBR',
-      UnitedKingdom: 'GBR',
-      Germany: 'DEU',
-      France: 'FRA',
-      Italy: 'ITA',
-      Spain: 'ESP',
-      Japan: 'JPN',
-      China: 'CHN',
-      Singapore: 'SGP',
-      Australia: 'AUS'
-    }
-
     const filters = { enabled_only: true }
-
-    const normalizedCountry = country?.replace(/\s+/g, '')
-    const iso = countryIsoMap[country] || countryIsoMap[normalizedCountry]
-
-    if (iso) {
-      filters.countries = [iso]
+    if (selectedRegion.iso3) {
+      filters.countries = [selectedRegion.iso3]
     }
 
-    const regionMap = {
-      'us-northeast': 'north_america',
-      'us-southeast': 'north_america',
-      'us-midwest': 'north_america',
-      'us-southwest': 'north_america',
-      'us-west': 'north_america',
-      uk: 'europe',
-      germany: 'europe',
-      france: 'europe',
-      italy: 'europe',
-      spain: 'europe',
-      japan: 'asia',
-      china: 'asia',
-      singapore: 'asia',
-      australia: 'asia'
-    }
-
-    const regionKey = regionMap[id] || regionMap[name?.toLowerCase?.()] || null
+    const regionKey = API_REGION_BY_ID[selectedRegion.id]
     if (regionKey) {
       filters.region = regionKey
     }
@@ -84,20 +70,33 @@ export default function GlobeView() {
   const totalAssets = banks.length
   const criticalAssets = useMemo(() => banks.filter((bank) => bank.risk_score && bank.risk_score >= 0.7), [banks])
 
+  const networkSummary = useMemo(() => {
+    const totalExposure = networkConnections.reduce((sum, connection) => sum + connection.exposure, 0)
+    const averageRisk =
+      networkConnections.reduce((sum, connection) => sum + connection.riskScore, 0) / networkConnections.length
+    const riskiest = networkConnections.reduce(
+      (max, connection) => (connection.riskScore > max.riskScore ? connection : max),
+      networkConnections[0]
+    )
+    return { totalExposure, averageRisk, riskiest }
+  }, [])
+
+  const getRegionName = (regionId) => regions.find((region) => region.id === regionId)?.name || regionId
+
   const handleConnectionClick = (connection) => {
     setSelectedConnection(connection)
-    // Also deselect region when connection is selected
     setSelectedRegion(null)
   }
 
-  const getRegionName = (regionId) => {
-    const region = regions.find(r => r.id === regionId)
-    return region?.name || regionId
+  const handleRegionSelect = (region) => {
+    setSelectedRegion(region)
+    setSelectedConnection(null)
   }
 
   return (
     <PageContainer
-      title="Globe View"
+      title="Risk Map"
+      subtitle="Geographic view of systemic liquidity risk and interbank exposures"
       actions={
         <div className="flex items-center gap-2">
           <Button
@@ -122,13 +121,13 @@ export default function GlobeView() {
             )}
           </Button>
           <Button
-            variant={globeRotation ? 'primary' : 'ghost'}
+            variant={showHeatmap ? 'primary' : 'ghost'}
             size="sm"
-            onClick={() => setGlobeRotation(!globeRotation)}
+            onClick={() => setShowHeatmap(!showHeatmap)}
           >
-            {globeRotation ? 'Stop Rotation' : 'Auto Rotate'}
+            {showHeatmap ? 'Hide Heatmap' : 'Show Heatmap'}
           </Button>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" onClick={() => setResetToken((token) => token + 1)}>
             Reset View
           </Button>
         </div>
@@ -137,12 +136,14 @@ export default function GlobeView() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-12rem)]">
         <div className="lg:col-span-2">
           <Card className="h-full p-0 overflow-hidden">
-            <GlobeCanvas
-              onRegionClick={setSelectedRegion}
+            <RiskMap
               selectedRegion={selectedRegion}
-              autoRotate={globeRotation}
+              onRegionSelect={handleRegionSelect}
               showNetwork={showNetwork}
+              showHeatmap={showHeatmap}
+              banks={banks}
               onConnectionClick={handleConnectionClick}
+              resetToken={resetToken}
             />
           </Card>
         </div>
@@ -151,15 +152,16 @@ export default function GlobeView() {
           <Card>
             <h3 className="font-semibold text-bne-ink mb-4">Data Source</h3>
             <div className="space-y-2">
-              {['fdic', 'ecb', 'fmp'].map((source) => (
+              {DATA_SOURCES.map((source) => (
                 <button
                   key={source}
                   onClick={() => setSelectedDataSource(source)}
-                  className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-all ${
+                  className={cn(
+                    'w-full text-left px-4 py-3 rounded-lg border-2 transition-all',
                     selectedDataSource === source
                       ? 'border-bne-azure bg-bne-azure/5'
                       : 'border-bne-frost hover:border-bne-azure/50'
-                  }`}
+                  )}
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-bne-ink uppercase">{source}</span>
@@ -172,6 +174,26 @@ export default function GlobeView() {
             </div>
           </Card>
 
+          <Card>
+            <h3 className="font-semibold text-bne-ink mb-4">Regions</h3>
+            <div className="flex flex-wrap gap-2">
+              {regions.map((region) => (
+                <button
+                  key={region.id}
+                  onClick={() => handleRegionSelect(region)}
+                  className={cn(
+                    'px-3 py-1.5 rounded-full border text-xs font-medium transition-colors',
+                    selectedRegion?.id === region.id
+                      ? 'border-bne-azure bg-bne-azure text-white'
+                      : 'border-bne-frost text-bne-steel hover:border-bne-azure/50 hover:text-bne-ink'
+                  )}
+                >
+                  {region.name}
+                </button>
+              ))}
+            </div>
+          </Card>
+
           {selectedConnection && (
             <Card>
               <div className="flex items-start justify-between mb-4">
@@ -179,6 +201,7 @@ export default function GlobeView() {
                 <button
                   onClick={() => setSelectedConnection(null)}
                   className="text-bne-steel hover:text-bne-ink"
+                  aria-label="Close connection details"
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -294,7 +317,7 @@ export default function GlobeView() {
                           <tr>
                             <th className="px-3 py-2 text-left">Code</th>
                             <th className="px-3 py-2 text-left">Name</th>
-                            <th className="px-3 py-2 text-left">Category</th>
+                            <th className="px-3 py-2 text-left">Risk</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -302,7 +325,9 @@ export default function GlobeView() {
                             <tr key={bank.id} className="border-t border-bne-frost">
                               <td className="px-3 py-2 font-mono text-xs text-bne-ink">{bank.code}</td>
                               <td className="px-3 py-2 text-bne-ink">{bank.name}</td>
-                              <td className="px-3 py-2 text-xs uppercase text-bne-steel">{bank.category?.replace(/_/g, ' ') || '—'}</td>
+                              <td className="px-3 py-2 text-xs font-mono text-bne-steel">
+                                {typeof bank.risk_score === 'number' ? bank.risk_score.toFixed(2) : '—'}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -340,11 +365,11 @@ export default function GlobeView() {
                   />
                 </svg>
                 <p className="text-sm text-bne-steel mb-2">
-                  Click on a region marker to view details
+                  Select a region from the map or the region list to view details
                 </p>
                 {showNetwork && (
                   <p className="text-xs text-bne-steel">
-                    Or click on a network arc to see connection info
+                    Or click on an exposure arc to see connection info
                   </p>
                 )}
               </div>
@@ -352,19 +377,54 @@ export default function GlobeView() {
           )}
 
           <Card>
+            <h3 className="font-semibold text-bne-ink mb-4">Exposure Summary</h3>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-bne-steel">Total Network Exposure</span>
+                <span className="text-sm font-semibold text-bne-ink">
+                  {formatExposure(networkSummary.totalExposure)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-bne-steel">Average Corridor Risk</span>
+                <Badge
+                  variant={
+                    networkSummary.averageRisk < 0.3
+                      ? 'success'
+                      : networkSummary.averageRisk < 0.6
+                      ? 'default'
+                      : 'warning'
+                  }
+                  size="sm"
+                >
+                  {(networkSummary.averageRisk * 100).toFixed(1)}%
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-bne-steel">Highest Risk Corridor</span>
+                <span className="text-xs font-medium text-bne-ink">
+                  {getRegionName(networkSummary.riskiest.source)} → {getRegionName(networkSummary.riskiest.target)}
+                </span>
+              </div>
+            </div>
+          </Card>
+
+          <Card>
             <h3 className="font-semibold text-bne-ink mb-4">Quick Stats</h3>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-bne-steel">Total Regions</span>
-                <Badge variant="info" size="sm">14</Badge>
+                <Badge variant="info" size="sm">{regions.length}</Badge>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-bne-steel">Total Banks</span>
-                <Badge variant="primary" size="sm">7,012</Badge>
+                <Badge variant="primary" size="sm">
+                  {regions.reduce((sum, region) => sum + region.bankCount, 0).toLocaleString()}
+                </Badge>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-bne-steel">Active Models</span>
-                <Badge variant="success" size="sm">3</Badge>
+                <span className="text-sm text-bne-steel">Interbank Corridors</span>
+                <Badge variant="success" size="sm">{networkConnections.length}</Badge>
               </div>
             </div>
           </Card>

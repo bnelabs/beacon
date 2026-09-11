@@ -18,6 +18,17 @@ from backend.services.error_logger import ErrorLogger
 
 router = APIRouter()
 
+_QUANT_METRIC_KEYS = (
+    "sharpe_ratio",
+    "sortino_ratio",
+    "max_drawdown",
+    "calmar_ratio",
+    "annualized_volatility",
+    "hit_rate",
+    "var_95",
+    "cvar_95",
+)
+
 
 def _load_job(db: Session, job_id: int) -> Job:
     job = db.query(Job).filter(Job.id == job_id).first()
@@ -152,10 +163,22 @@ async def get_backtest_report(job_id: int, db: Session = Depends(get_db)):
             return _progress(job)
 
         result = job.result or {}
+        backtest_metrics = result.get("backtest_metrics", {}) or {}
+
+        quant_metrics = result.get("quant_metrics")
+        if not quant_metrics:
+            quant_metrics = {
+                key: backtest_metrics.get(key)
+                for key in _QUANT_METRIC_KEYS
+                if key in backtest_metrics
+            } or None
+
+        walk_forward = result.get("walk_forward") or backtest_metrics.get("walk_forward")
+
         report = BacktestReport(
             job_id=job.id,
             status=job.status,
-            metrics=result.get("backtest_metrics", {}),
+            metrics=backtest_metrics,
             metadata={
                 "train_samples": result.get("train_samples"),
                 "test_samples": result.get("test_samples"),
@@ -163,6 +186,8 @@ async def get_backtest_report(job_id: int, db: Session = Depends(get_db)):
                 "regions": result.get("regions") or [],
                 "countries": result.get("countries") or [],
             },
+            quant_metrics=quant_metrics,
+            walk_forward=walk_forward,
         )
         return report
 

@@ -1,0 +1,35 @@
+# =============================================================================
+# BEACON — Grafana Prometheus datasource provisioning (observability workstream F)
+# =============================================================================
+# Mounted at /etc/grafana/provisioning/datasources/prometheus.yml
+#
+# The `uid` below is STABLE and is the exact value referenced by every panel of
+# `configs/observability/grafana/dashboards/beacon-overview.json`
+# ({"type": "prometheus", "uid": "beacon-prometheus"}).  Do not change one
+# without changing the other.
+# =============================================================================
+
+apiVersion: 1
+
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+
+datasources:
+  - name: Prometheus
+    uid: beacon-prometheus
+    type: prometheus
+    access: proxy
+    orgId: 1
+    # `prometheus` is the docker-compose service name on the beacon-network.
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 15s
+      # Matches the Prometheus `external_labels.monitor` value.
+      prometheusType: Prometheus
+      prometheusVersion: "2.51.0"
+      # Keep exemplars off: none of our histogram-producing services emit them.
+      exemplarTraceIdDestinations: []

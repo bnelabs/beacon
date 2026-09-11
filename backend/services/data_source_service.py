@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 
+from backend.exceptions import BeaconError
 from backend.models.data_source import DataSource
 from backend.schemas.data_source import (
     DataSourceCreate,
@@ -44,7 +45,7 @@ class DataSourceService:
         valid_plugins = [
             "yfinance", "fred", "alpha_vantage", "csv", "custom_api",
             "ecb", "sec_edgar", "bis", "imf", "world_bank",
-            "ecb_banking", "fmp", "kaggle"
+            "ecb_banking", "fmp", "kaggle", "ai4risk_interbank"
         ]
         if data_source.plugin_type not in valid_plugins:
             raise ValueError(f"Invalid plugin type. Must be one of: {', '.join(valid_plugins)}")
@@ -163,6 +164,14 @@ class DataSourceService:
                     message=f"Connection failed: {result.get('message', 'Unknown error')}",
                     details=result.get("details")
                 )
+
+        except BeaconError as e:
+            logger.error("Data source test rejected for %s: %s", test_request.plugin_type, e)
+            return DataSourceTestResponse(
+                success=False,
+                message=str(e),
+                details={"error_code": e.code, **e.context}
+            )
 
         except Exception as e:
             logger.error(f"Error testing data source: {e}")

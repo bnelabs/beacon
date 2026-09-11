@@ -1,0 +1,87 @@
+name: Frontend CI
+
+# why: keep main green and validate every proposed frontend change before merge.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# why: cancel superseded runs on the same ref to avoid wasting runner minutes on the
+# browser download + build.
+concurrency:
+  group: frontend-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # why: NO live backend stack (no `docker compose up`, no uvicorn/Postgres/Redis) is
+  # started for this job. The Playwright suite is fully self-mocked:
+  #   * frontend/tests/full-frontend.spec.js calls registerApiMocks(page) in
+  #     beforeEach; frontend/tests/apiMocks.js registers `page.route('**/api/**', ...)`
+  #     and serves every catalogue/jobs/countries/analytics/data-quality response from
+  #     in-file fixtures.
+  #   * frontend/playwright.config.js uses a webServer block that only needs the Vite
+  #     dev server (`npm run dev` -> 127.0.0.1:8173); the component code's default
+  #     API_BASE (http://localhost:3456) is never actually reached because route
+  #     interception happens in the browser before the request leaves.
+  # The suite is therefore run standalone against the mocked API.
+  build-and-e2e:
+    name: Build and Playwright e2e (Node 20)
+    runs-on: ubuntu-latest
+    # why: browser download + vite build + the long mocked navigation spec; 30 minutes
+    # gives headroom on a cold cache while bounding a hung run.
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # why: matches the node:20-alpine base used by frontend/Dockerfile and keeps
+          # CI on the same major as the shipped runtime.
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Install Playwright browser and system dependencies
+        # why: --with-deps pulls the OS libraries chromium needs on the bare
+        # ubuntu-latest runner. The `pretest` hook (scripts/ensure-playwright.mjs) also
+        # runs `npx playwright install chromium`, which becomes a fast no-op because the
+        # browser is already present.
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright end-to-end suite
+        env:
+          # why: playwright.config.js sets reuseExistingServer = !process.env.CI, so CI
+          # must be truthy for Playwright to own the Vite webServer lifecycle.
+          CI: "true"
+        # why: `npm test` runs the documented entry point (pretest browser check +
+        # `playwright test`).
+        run: npm test
+
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          # note: paths are resolved from the repo root, not the job's working-directory.
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7

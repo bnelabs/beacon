@@ -1,4 +1,4 @@
-"""REAL Model Trainer - Actual training implementation."""
+"""Model trainer."""
 
 import torch
 import torch.nn as nn
@@ -13,6 +13,7 @@ from pathlib import Path
 import json
 
 from .models import create_model
+from .model_io import safe_torch_load, safe_torch_save
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ class TimeSeriesDataset(Dataset):
 
 
 class ModelTrainer:
-    """REAL model trainer with actual training loop."""
+    """Trainer with the training/validation loop."""
 
     def __init__(self, model_type: str, device: torch.device, config: Dict):
         self.model_type = model_type
@@ -125,7 +126,7 @@ class ModelTrainer:
         Returns:
             TrainingMetrics with results
         """
-        logger.info(f"Starting REAL training with {self.model_type} model")
+        logger.info(f"Starting training with {self.model_type} model")
         logger.info(f"Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)} records")
 
         # Create datasets
@@ -183,7 +184,7 @@ class ModelTrainer:
                 self.best_val_loss = val_loss
                 best_epoch = epoch
                 model_path = Path(output_dir) / 'best_model.pt'
-                torch.save({
+                safe_torch_save({
                     'epoch': epoch,
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
@@ -200,7 +201,7 @@ class ModelTrainer:
                            f"Best Val: {self.best_val_loss:.6f} (epoch {best_epoch + 1})")
 
         # Load best model for testing
-        checkpoint = torch.load(model_path)
+        checkpoint = safe_torch_load(model_path)
         self.model.load_state_dict(checkpoint['model_state_dict'])
 
         # Test evaluation

@@ -88,7 +88,7 @@ export default function GlobalSearch() {
     // Static pages
     items.push(
       { id: 'dashboard', title: 'Dashboard', category: 'Page', page: 'dashboard', icon: '🏠' },
-      { id: 'globe', title: 'Globe View', category: 'Page', page: 'globe', icon: '🌍' },
+      { id: 'globe', title: 'Risk Map', category: 'Page', page: 'globe', icon: '📍' },
       { id: 'models', title: 'Models', category: 'Page', page: 'models', icon: '📊' },
       { id: 'jobs', title: 'Jobs', category: 'Page', page: 'jobs', icon: '⏱️' },
       { id: 'datasources', title: 'Data Sources', category: 'Page', page: 'datasources', icon: '💾' },

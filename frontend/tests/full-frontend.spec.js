@@ -71,18 +71,31 @@ test('navigates the application and exercises primary interactions', async ({ pa
     await expect(searchInput).not.toBeVisible()
   }
 
-  // Globe View interactions
-  await page.getByRole('button', { name: 'Globe View' }).click()
-  await expect(page.getByRole('heading', { name: 'Globe View' })).toBeVisible()
+  // Risk Map interactions
+  await page.getByRole('button', { name: 'Risk Map', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Risk Map' })).toBeVisible()
+  await expect(page.getByTestId('risk-map')).toBeVisible()
+  await expect(page.getByTestId('risk-map').locator('canvas')).toBeVisible()
+  await expect(page.getByTestId('map-legend')).toBeVisible()
+  await expect(page.getByTestId('map-attribution')).toContainText('OpenStreetMap')
+
   const networkToggle = page.getByRole('button', { name: /Show Network|Hide Network/ })
   if (await networkToggle.isVisible()) {
     await networkToggle.click()
+    await expect(page.getByRole('button', { name: 'Hide Network' })).toBeVisible()
   }
-  const rotationToggle = page.getByRole('button', { name: /Auto Rotate|Stop Rotation/ })
-  if (await rotationToggle.isVisible()) {
-    await rotationToggle.click()
+  const heatmapToggle = page.getByRole('button', { name: /Show Heatmap|Hide Heatmap/ })
+  if (await heatmapToggle.isVisible()) {
+    await heatmapToggle.click()
+    await expect(page.getByRole('button', { name: 'Show Heatmap' })).toBeVisible()
+    await heatmapToggle.click()
   }
   await page.getByRole('button', { name: 'Reset View' }).click()
+
+  // Region selection updates the detail panel and the bank list
+  await page.getByRole('button', { name: 'United Kingdom', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Region Details' })).toBeVisible()
+  await expect(page.getByText('FDIC Liquidity Coverage')).toBeVisible()
   await page.getByRole('button', { name: /FDIC/i }).click()
 
   // Models interactions

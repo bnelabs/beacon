@@ -9,7 +9,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers
 revision = '20251107_161500'
-down_revision = None
+down_revision = '20251107_152125'
 branch_labels = None
 depends_on = None
 

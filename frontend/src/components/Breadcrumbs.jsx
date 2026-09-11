@@ -2,7 +2,7 @@ import { useRouter } from '../store/useRouter'
 
 const PAGE_METADATA = {
   dashboard: { title: 'Dashboard', parent: null },
-  globe: { title: 'Globe View', parent: null },
+  globe: { title: 'Risk Map', parent: null },
   models: { title: 'Models', parent: null },
   jobs: { title: 'Jobs', parent: null },
   datasources: { title: 'Data Sources', parent: null },

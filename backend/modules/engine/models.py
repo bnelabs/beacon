@@ -1,4 +1,4 @@
-"""REAL ML Models for liquidity risk prediction - NO PLACEHOLDERS."""
+"""Graph and temporal models for liquidity-risk prediction."""
 
 import torch
 import torch.nn as nn
@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 
 class HeterogeneousGraphTransformer(nn.Module):
     """
-    REAL Heterogeneous Graph Transformer (HGT) for multi-source financial data.
+    Heterogeneous Graph Transformer (HGT) for multi-source financial data.
 
-    This is THE RIGHT MODEL for liquidity risk because:
+    Suited to liquidity risk because:
     1. Handles multiple data source types (ECB, FRED, BIS, World Bank)
     2. Learns different transformations per source type
     3. Captures temporal dependencies AND cross-source relationships
@@ -59,7 +59,7 @@ class HeterogeneousGraphTransformer(nn.Module):
         # Node type embeddings
         self.node_type_embedding = nn.Embedding(num_node_types, hidden_channels)
 
-        # HGT layers - REAL heterogeneous graph convolutions
+        # Heterogeneous graph convolutions
         self.hgt_convs = nn.ModuleList([
             HGTConv(
                 in_channels=hidden_channels,

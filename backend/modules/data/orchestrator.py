@@ -10,6 +10,7 @@ from enum import Enum
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from backend.exceptions import DataQualityError
 from backend.models.data_catalogue import DataCatalogueItem
 from backend.models.data_source import DataSource
 from .collector import DataCollector
@@ -18,6 +19,7 @@ from .cleaner import DataCleaner
 from .formatter import DataFormatter
 from .analyzer import DataAnalyzer
 from .monitor import DataMonitor
+from .quality_gate import DataQualityGate, QualityAttestation, QualityPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -96,9 +98,21 @@ class DataOrchestrator:
         self.analyzer = DataAnalyzer(job_id)
         self.monitor = DataMonitor(db, job_id)
 
+        self.quality_gate = DataQualityGate(
+            QualityPolicy(),
+            alert_sink=self._emit_data_quality_alert,
+        )
+        self.attestation: Optional[QualityAttestation] = None
+
         self.status = DataStatus.PENDING
         self.current_step = None
         self.progress = 0.0
+
+    def _emit_data_quality_alert(self, source_name: str, issue: str, severity: str) -> None:
+        """Raise a data-quality notification so operators see ingestion problems."""
+        from backend.services.notification_service import NotificationService
+
+        NotificationService(self.db).create_data_quality_alert(source_name, issue, severity)
 
     def _update_progress(self, progress: float, message: str):
         """Update internal progress and call callback if provided."""
@@ -163,7 +177,10 @@ class DataOrchestrator:
                 if not raw_data:
                     self.status = DataStatus.FAILED
                     self.monitor.fail("All datasets failed validation")
-                    raise Exception("Validation failed: No valid datasets available")
+                    raise DataQualityError(
+                        "Validation failed: no valid datasets available",
+                        context={"job_id": self.job_id, "critical_errors": validation_report.critical_errors},
+                    )
 
             self._update_progress(40.0, f"Validation complete: {len(validation_report.warnings)} warnings detected")
 
@@ -207,6 +224,18 @@ class DataOrchestrator:
             )
 
             self._update_progress(90.0, f"Analysis complete: Quality score {quality_report.quality_score:.1f}/100")
+
+            # Nothing is certified — and therefore nothing reaches the model —
+            # until the payload independently passes the quality gate. The gate
+            # re-derives its verdict because the composite score alone accepts
+            # an entirely empty payload at exactly the 70/100 threshold.
+            self.attestation = self.quality_gate.enforce(
+                clean_data,
+                job_id=self.job_id,
+                quality_score=quality_report.quality_score,
+                completeness=quality_report.completeness,
+            )
+            quality_report.fit_for_engine = True
 
             # Step 6: Save and certify
             self.status = DataStatus.CERTIFIED
@@ -331,6 +360,10 @@ class DataOrchestrator:
                 "regions": regions or [],
                 "countries": countries or [],
                 "quality_score": quality_report.quality_score,
+                "quality_attestation": self.attestation.to_dict() if self.attestation else None,
+                "collection_report": (
+                    self.collector.last_report.to_dict() if self.collector.last_report else None
+                ),
             },
             quality_report=quality_report,
             date_range=(start_date, end_date),
