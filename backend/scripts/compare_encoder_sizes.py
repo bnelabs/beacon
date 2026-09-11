@@ -18,6 +18,34 @@ Answers three questions, in order of how much they actually matter:
 Nothing downloads. Each checkpoint is loaded with ``local_files_only`` and skipped
 if it is not already on disk, so this is safe to run repeatedly.
 
+Measured results (RTX 3090, torch 2.14.0+cu130, batch 8, context 256, 64 nodes)
+------------------------------------------------------------------------------
+
+    checkpoint  device   nodes/s   ms/node   peak VRAM   embed dim
+    313m        cuda       219.7       4.6     1.41 GB        2048
+    313m        cpu         26.8      37.3         n/a        2048
+    1B          cuda       149.4       6.7     4.43 GB        3072
+    1B          cpu          8.0     125.3         n/a        3072
+    2.5B        cuda        89.9      11.1    10.17 GB        4096
+    2.5B        cpu          3.1     325.4         n/a        4096
+
+All six configurations produced 64/64 distinct embeddings, so no checkpoint
+collapses the representation at any size.
+
+The reading that matters: **on GPU all three are usable**, and even the 2.5B encodes
+200 nodes in about two seconds. The choice is therefore not about speed on a
+dedicated card -- it is about memory on a shared one, and about whether a CPU
+fallback exists. The 313m is 2.4x faster than the 2.5B, needs a seventh of the
+memory, and is the only one whose CPU path (26.8 nodes/s) is comfortable; the GPU
+here was 22 GB occupied by another process when first inspected, which the 2.5B at
+10.17 GB would not have survived. Hence the 313m default.
+
+Caveat on the quality columns: the three probes below distinguish a *working* encoder
+from a degenerate one. They do NOT establish that a larger checkpoint produces
+better embeddings for this task, and none of the three separated on any probe. A
+larger checkpoint's case rests on forecasting benchmarks, and whether that transfers
+to representation quality for a downstream graph model is untested here.
+
 Usage::
 
     python -m backend.scripts.compare_encoder_sizes
