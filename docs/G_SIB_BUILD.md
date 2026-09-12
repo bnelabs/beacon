@@ -386,3 +386,12 @@ useful to a reviewer.
   because "the note said it was done" is how the gap survived two review rounds.
   Reachability is now asserted by `backend/tests/test_reachability.py`, which
   fails when the census and the code disagree in either direction.
+
+  **Update.** The connector package has since been deleted rather than wired: a
+  migration spike found that none of its five feeds has an engine consumer at the
+  granularity the engine needs, and that the plugin interface cannot carry the
+  two-clock guarantee the layer existed to provide. The reasoning and the
+  point-in-time exposure path that replaced it are in
+  [`data_connectors.md`](data_connectors.md); the removal is recorded in
+  `REMOVED` in the reachability guard. The other modules named above are still
+  unreachable and each now carries a disposition in that guard's census.

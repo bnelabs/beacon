@@ -257,5 +257,3 @@ listens on IPv4 only, while the image's `/etc/hosts` maps `localhost` to `::1`
 first, so a `localhost` probe is refused and the container reports unhealthy for
 its whole life while serving every real request correctly. If the frontend shows
 `(unhealthy)`, check that probe first.
-
-See `docs/data_connectors.md` for the NBFI/CCP ingestion feeds.

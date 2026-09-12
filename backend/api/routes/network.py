@@ -79,7 +79,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from backend.modules.engine.multiplex import build_interbank_exposure_layer
 from backend.services.bilateral_exposure_store import (
@@ -278,9 +278,47 @@ def _graph_from_frame(
     }
 
 
+def _unavailable(reason: str, *, as_of: Optional[str] = None) -> Dict[str, Any]:
+    """The explicit "no network" payload.
+
+    Every key the available response carries is present here too, so a client
+    cannot distinguish the two shapes by guessing. An unavailable network is a
+    fact to report, never an empty graph to draw.
+    """
+    return {
+        "status": "unavailable",
+        "as_of": as_of,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "source": "bilateral_exposure_store",
+        "unavailable_reason": reason,
+        "nodes": [],
+        "edges": [],
+        "layers": [],
+        "metadata": {
+            "n_nodes": 0,
+            "n_edges": 0,
+            "gross_notional": None,
+            "source_institution": None,
+            "content_hash": None,
+            "uploaded_at": None,
+            "duplicate_edges_aggregated": 0,
+            "geography_resolution": "client_reference_data",
+            "risk_score_available": False,
+        },
+    }
+
+
 @router.get("/graph", response_model=Dict[str, Any])
 async def get_network_graph(
     store: BilateralExposureStore = Depends(get_bilateral_exposure_store),
+    as_of: Optional[str] = Query(
+        default=None,
+        description=(
+            "Return the matrix as it was known at this instant (ISO 8601), "
+            "rather than the current one. A cut-off before the stored matrix "
+            "was uploaded returns unavailable, never the current matrix."
+        ),
+    ),
 ) -> Dict[str, Any]:
     """Return the current multiplex network graph, or an explicit unavailable state.
 
@@ -307,33 +345,37 @@ async def get_network_graph(
     When nothing has been uploaded the same keys are present with
     ``status: "unavailable"``, empty ``nodes``/``edges``/``layers`` and a
     populated ``unavailable_reason``.
+
+    With ``?as_of=<ISO 8601>`` the same payload describes the matrix **as it was
+    known at that instant**, resolved through the point-in-time store. A cut-off
+    before the stored matrix was uploaded is ``unavailable`` with a reason naming
+    the cut-off: the current matrix is never substituted for a vintage that did
+    not exist yet, because a network you could not have observed is exactly the
+    look-ahead this platform refuses elsewhere.
     """
+    if as_of is not None:
+        try:
+            historical = store.load_as_of(as_of)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"as_of {as_of!r} is not a valid ISO 8601 timestamp",
+            )
+        if historical is None:
+            return _unavailable(
+                f"no exposure matrix was known as of {as_of}; the stored vintage "
+                "had not been published yet, and the current matrix is not "
+                "substituted for it",
+                as_of=as_of,
+            )
+        return _graph_from_frame(historical, store.manifest() or {})
+
     frame = store.load()
     if frame is None:
-        return {
-            "status": "unavailable",
-            "as_of": None,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "source": "bilateral_exposure_store",
-            "unavailable_reason": (
-                "no bilateral exposure matrix has been uploaded; the interbank "
-                "network is unavailable rather than assumed"
-            ),
-            "nodes": [],
-            "edges": [],
-            "layers": [],
-            "metadata": {
-                "n_nodes": 0,
-                "n_edges": 0,
-                "gross_notional": None,
-                "source_institution": None,
-                "content_hash": None,
-                "uploaded_at": None,
-                "duplicate_edges_aggregated": 0,
-                "geography_resolution": "client_reference_data",
-                "risk_score_available": False,
-            },
-        }
+        return _unavailable(
+            "no bilateral exposure matrix has been uploaded; the interbank "
+            "network is unavailable rather than assumed"
+        )
 
     manifest = store.manifest() or {}
     return _graph_from_frame(frame, manifest)

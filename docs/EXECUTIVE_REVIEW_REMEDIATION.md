@@ -1095,6 +1095,12 @@ tell the difference between "verified" and "asserted".
   result, so it needs a product decision about where that comparison belongs, not
   a call site.
 
+**Superseded by the third sitting below.** This list was accurate when written but
+it was also incomplete, and its flat form hid that: two more orphans
+(`data/pit.py`, `engine/foundation_encoders.py`) were missing entirely, and every
+entry here now carries a blocker plan and a next step in the disposition census.
+Read the third sitting for the current state.
+
 ---
 
 # Second sitting: the remaining objective items
@@ -1208,4 +1214,203 @@ without asserting a benchmark number a shared CI runner would make flaky.
 | Non-linear recovery distinguished from linear | asserted as the test's premise |
 | Reachability guard | caught the `causal_discovery`/`tncm_vae` promotion and required the census update |
 | Generated API inventory | guarded by `test_api_docs_current.py` after a stale file turned `main` red |
+
+---
+
+# Third sitting: the disposition census
+
+The round above enumerated the orphans and left them undifferentiated, recording
+that wiring them was "the largest remaining item and is deliberately not rushed
+here". This sitting does not wire them either. It does the three things the
+enumeration could not: **makes the census complete**, **turns each orphan into a
+named decision rather than an anonymous entry**, and **deletes the one thing that
+was genuinely empty**.
+
+## The census was incomplete, which is worse than the orphans
+
+The guard asserted each list *independently* — "these are reachable", "these are
+not" — and never that the two covered the tree. So an orphan could appear between
+them and nothing failed. Two already had, and both were missing from the census
+that claimed to have scanned the whole backend:
+
+| Module | Lines | Why it was invisible |
+|---|---|---|
+| `data/pit.py` | 509 | Its only non-test importers are the unreachable connectors, so it died with them — dead collateral of a decision that had not been made |
+| `engine/foundation_encoders.py` | 697 | Commit `4f4e070` fixed it so it could *load* and verified 312,684,608 params in the container, but its only caller is `scripts/compare_encoder_sizes.py`. **Loading is not reachability** |
+| `modules/explainability/` | 0 | An empty package: `__init__.py` was zero bytes and nothing imported it. The explainability *routes* live in `backend/api/routes/` and are unaffected |
+
+`test_reachability.py` now computes the census universe — every non-package
+production module reachable from `backend.api.main` or `backend.tasks.celery_app`
+— and asserts the unreachable set equals the declared census **exactly**.
+Exclusions are declared with reasons (`backend/plugins` resolves by name through
+`get_plugin`; migrations and scripts are not production entry points) rather than
+being silent. The check was verified by simulation, not assumed: omitting
+`data/pit.py` from the census now fails the test, naming it.
+
+## The orphan list is now three registers
+
+Each of the 19 unreachable modules carries a blocker, a plan and a concrete next
+step, so the census reads as a queue instead of a list:
+
+| Register | Count | Meaning |
+|---|---|---|
+| `wire` | 6 | A production home exists or is cheap to add |
+| `decide` | 11 | Blocked on a product or design call, not on effort |
+| `park` | 2 | No input exists and none is planned |
+
+The `wire` register is the next work items, and two of them are worth naming
+because the blockers were already written down in code rather than invented here:
+`conformal.py` (the prediction engine reports `(None, None)` at
+`prediction_engine.py:731` with a comment saying no calibrated interval exists
+yet) and `timeseries_store.py` — which turns out to be the cheapest one in the
+pile, because **the infrastructure is already deployed**: `docker-compose.yml`
+runs TimescaleDB, the `timescale_timeseries` migration builds the hypertables, and
+`models/timeseries.py` is imported by nothing but the migration and this store.
+The risk-score and model-metric hypertables are migrated and empty. Wiring
+`record_risk_scores` at job completion turns sunk infrastructure into a
+capability; deleting the store would mean also deleting the migration and the
+Compose service.
+
+Two entries were grouped rather than listed separately: `hidden_markov.py`
+produces the regime label that `mixture_of_experts.py` needs as input, so they are
+one integration, not two. And `uncertainty.py` was re-described — the previous
+census called it "superseded-or-pending relative to conformal", which is wrong.
+Conformal answers *how wide* the interval is; `uncertainty.py` separates aleatoric
+from epistemic variance to answer *whether the width means the model is lost*, and
+its docstring says an epistemic spike should refuse the prediction outright. They
+are complementary, and it is conformal's downstream consumer.
+
+## What was deleted, and what was not
+
+**Deleted:** `modules/explainability/` — an empty package. That is the only
+unambiguous deletion the sweep found.
+
+**Not deleted, and this is the important part.** A duplication scan across the
+census (`roc_auc`, `average_precision`, `precision_recall_curve`,
+`wasserstein_1d`, Shapley values, HMM state labelling, uncertainty decomposition)
+found **no second implementation anywhere**. Nothing in the pile is superseded.
+Every module there is unique, implemented and tested; what it lacks is an input,
+not a reason to exist. Deleting them to make the count go down would throw away
+real options and repeat the original defect in the opposite direction — this time
+by destroying capability instead of advertising it. The honest finding is that
+**the pile is not dead code, it is decision debt.**
+
+`data/streaming.py` was considered for deletion and parked instead: no streaming
+source is configured and its only transport is an in-memory test double, but
+`temporal_graph.py` and two test files use it as a harness, so it has
+test-level integration. It is one line in the `park` register with the reason.
+
+## The Toto dependency is a live cost, not a dormant one
+
+`foundation_encoders.py` is not merely unreachable — the production image pays for
+it. `requirements.txt` declares `toto-2==2.0.0`, which drags `einops`,
+`gluonts[torch]`, `safetensors`, `jaxtyping`, `dd-unit-scaling` and
+`huggingface-hub` into the image, and `docs/deployment.md` records 1.2 GB / 3.9 GB
+/ 9.2 GB of local checkpoints. The only thing that constructs `TotoEncoder` is
+`backend/scripts/compare_encoder_sizes.py`, a developer benchmark. That is the
+decision the `decide` register carries: construct it in the engine, or drop the
+dependency and the encoder together.
+
+## Documentation corrected rather than left to mislead
+
+The README advertised, in its feature list, "SHAP values, attention weights,
+feature importance". **No SHAP implementation exists anywhere in the backend**,
+and `prediction_engine.py:974` removed exactly that routine, describing it as
+"gradient\*input scaled by uniform attention weights" presented as SHAP values —
+removed rather than re-tuned. The README was advertising the thing the engine had
+deleted for being fabricated. It now states that no attribution is reported, that
+the Toto encoder and HMM regime detection are implemented but not wired, and that
+the risk-score and model-metric hypertables have a schema but no writer. A
+**Reachability** section points at the guard as the source of truth.
+
+The `G_SIB_BUILD.md` sentence claiming the guard "fails when the census and the
+code disagree in either direction" was half true before this sitting — one
+direction was unasserted. It is true now.
+
+## Verification for the third sitting
+
+| Check | Result |
+|---|---|
+| Full backend suite | **1966 passed, 7 skipped** (was 1961 before this sitting; the guard grew 7 → 12 tests) |
+| Census completeness | `test_the_census_is_complete` — 92 production modules, 19 unreachable, all declared |
+| Guard power, verified by simulation | omitting `data/pit.py` fails the test and names it |
+| Duplication scan | no orphan re-implements a reachable module |
+| `data/streaming.py` deletion reconsidered | parked, not deleted: two test files depend on it |
+| Removed-package check | `test_removed_modules_do_not_reappear` fails if `explainability/` returns |
+
+---
+
+# Fourth sitting: the connector layer is deleted, and point-in-time has a home
+
+The third sitting left the connectors in the `decide` register with two options:
+migrate the ingestion path onto them, or bridge them into the plugin registry. A
+spike on `ecb_ccp` closed **both** with evidence, so the entry is resolved rather
+than deferred a fourth time. The full findings live in
+`docs/data_connectors.md`.
+
+## The spike's two negative results
+
+Both are worth recording because each one kills one of the options.
+
+**No consumer at the required granularity.** `ecb_ccp` looked like the producer
+for `build_ccp_exposure_layer`, which wants per-clearing-member obligations to the
+CCP. The ECB `CCP` dataflow has no clearing-member dimension at all: its
+`entity_id` is the CCP system and its values are annual aggregates — participant
+*counts* by type and securities transfer volumes. Participants are grouped, never
+identified, so the two are not the same object at different resolution. Wiring
+them would have produced exactly the defect the census exists to find: a green
+import with nothing flowing. The other four feeds are the same shape.
+
+**The plugin contract cannot carry the two clocks.** `fetch_indicator_data`
+returns `Date, Value` — one clock — and a grep for `observed_at` or `revision`
+across `backend/plugins/`, `collector.py` and `data_source_service.py` returns
+nothing. The connectors' defining guarantee, that collapsing `valid_time` and
+`observed_at` "is what makes a backtest silently clairvoyant", had no field to
+live in. Bridging was therefore refuted, not deferred, and migration meant
+changing the ingestion contract rather than adding a registry entry.
+
+So the question was never "which abstraction wins" but "does the platform need
+point-in-time data" — and with no consumer for any of the five feeds, the answer
+in practice was no.
+
+## Deleted, and kept
+
+**Deleted:** the seven connector modules (~4,558 lines) and their five test files
+(~3,100 lines). All seven are recorded in `REMOVED` in the reachability guard, so
+a reappearance is a test failure rather than a surprise.
+
+**Kept:** `data/pit.py`. Deleting five source parsers does not delete the
+point-in-time design — `pit.py` always encoded it, in `Observation`'s two-clock
+rule, `PITStore`'s as-of retrieval and `as_of_join`. What the connectors
+contributed was parsing for feeds nobody consumed.
+
+## The new home, and the defect it caught
+
+`pit.py` now runs in production rather than in the census. The bilateral exposure
+store's manifest already carried both clocks — `as_of` is the vintage a matrix
+*describes*, `uploaded_at` is when it *became known* — so
+`BilateralExposureStore.load_as_of()` resolves a matrix through `PITStore`, and
+`GET /api/v1/network/graph?as_of=<ISO 8601>` serves it. A cut-off before the
+stored matrix was uploaded returns `unavailable` with a reason naming the cut-off:
+**the current matrix is never substituted for a vintage that did not exist yet.**
+That is the anti-clairvoyance guarantee the connectors were built to provide,
+applied to the exposure path the engine actually consumes.
+
+Wiring it found a real defect, which is the argument for tests over prose. The
+first implementation checked "is anything stored" *before* parsing its argument,
+so a malformed `?as_of=not-a-timestamp` fell into the nothing-stored branch and
+returned `200 unavailable` — the "nothing was known then" answer — instead of
+`422`. The cut-off is now parsed before anything is read, and
+`test_a_malformed_as_of_is_a_422` fails against the old ordering.
+
+## Verification for the fourth sitting
+
+| Check | Result |
+|---|---|
+| Full backend suite | **1725 passed, 7 skipped** (was 1966; the connector suites held ~256 tests and the new vintage suite adds 15) |
+| Census after the deletion | 86 production modules, **12 unreachable**, all declared — the `decide` register fell from 11 to 4 |
+| `pit.py` | promoted from `KNOWN_UNREACHABLE` to `REQUIRED_REACHABLE`, reached through the exposure store |
+| No look-ahead | `load_as_of` returns nothing for a cut-off before the upload, asserted at both the store and the endpoint |
+| Malformed cut-off | `422`, not a `200` unavailable state — the ordering bug above |
+| Generated API inventory | `generate_api_docs.py --check` reports current (the new query parameter does not alter the inventory) |
 

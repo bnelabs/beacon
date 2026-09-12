@@ -13,7 +13,6 @@ they stayed stale for ten months without anyone noticing.
 | [`api.md`](api.md) | API protocol — error envelope and codes, jobs vs. pipeline, prediction gating, data-quality score, notifications, the job WebSocket |
 | [`api-endpoints.md`](api-endpoints.md) | **Generated.** Every route and tag, read from the FastAPI app |
 | [`frontend.md`](frontend.md) | UI stack, pages and navigation model, data fetching, ⌘K search, onboarding, risk map, jobs/WebSocket status |
-| [`data_connectors.md`](data_connectors.md) | NBFI / CCP ingestion feeds, their publication clocks, and what is assumed vs. real |
 | [`deployment.md`](deployment.md) | Deploying on this host: Docker Compose, GPU, model weights, secrets, verification |
 | [`../.github/workflows/README.md`](../.github/workflows/README.md) | CI/CD workflows and how to reproduce each locally |
 
@@ -26,8 +25,9 @@ tree.
 
 | Document | Contents |
 |---|---|
-| [`EXECUTIVE_REVIEW_REMEDIATION.md`](EXECUTIVE_REVIEW_REMEDIATION.md) | Finding-by-finding remediation of the executive review, then a second core-review round |
+| [`EXECUTIVE_REVIEW_REMEDIATION.md`](EXECUTIVE_REVIEW_REMEDIATION.md) | Finding-by-finding remediation of the executive review, then second and third core-review rounds |
 | [`G_SIB_BUILD.md`](G_SIB_BUILD.md) | The G-SIB-grade build: what was added, how each item is verified, and what is explicitly still not done |
+| [`data_connectors.md`](data_connectors.md) | Decision record: the NBFI / CCP connector layer — why it was deleted, and the point-in-time exposure path that replaced it |
 
 ## Deliberately not duplicated here
 

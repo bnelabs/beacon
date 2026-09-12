@@ -45,27 +45,51 @@ Backend (FastAPI + Celery + Redis)
   └── 6-stage data pipeline (collection → validation → cleaning → formatting → analysis → certification)
   └── Data-quality gate: nothing is certified or predicted on without a verified attestation
   └── 15 data plugins: ECB, FRED, BIS, IMF, World Bank, Yahoo Finance, FDIC, FMP, SEC, AI4Risk, Kaggle, Alpha Vantage
-  └── Temporal graph models with a frozen Toto 2.0 node encoder
+  └── Temporal graph models (Temporal Attention Networks, continuous-time memory)
   └── RESTful API (port 3456) + WebSocket job progress, relayed over Redis
       because progress is written by the Celery worker process
 
 Storage (TimescaleDB + Redis)
   └── TimescaleDB: PostgreSQL with hypertables, compression, and continuous
-      aggregates for indicator observations, risk scores, and model metrics
+      aggregates. The schema covers indicator observations, risk scores and model
+      metrics, but only observations have a writer — nothing calls the risk-score
+      or metric writer, so those hypertables stay empty *(not wired)*
   └── Redis: Celery broker and result backend
 
 ML Stack (PyTorch)
-  └── Toto 2.0 foundation-model node encoder (loaded from a local model folder)
+  └── Toto 2.0 foundation-model node encoder: loadable from a local model folder,
+      and constructed only by `backend/scripts/compare_encoder_sizes.py` — the
+      engine's inference path does not use it *(not wired)*
   └── Temporal Attention Networks and continuous-time temporal graph memory
-  └── Regime detection (Gaussian and Student-t HMM), Neural SDE latent dynamics,
-      NOTEARS causal discovery with declared-structure validation
+  └── Neural SDE latent dynamics, NOTEARS causal discovery with
+      declared-structure validation
+  └── Gaussian and Student-t HMM regime detection *(not wired)*
   └── Systemic risk: Basel III LCR/NSFR/leverage translation, coupled fire-sale
       equilibrium, crowded-trade overlap, persistence-vector topology
   └── Metrics: MSE, MAE, RMSE, R², directional accuracy
   └── Walk-forward backtesting with Sharpe, Sortino, Calmar, max drawdown, VaR/CVaR
-  └── SHAP values, attention weights, feature importance
+  └── No attribution is reported. The routine that presented gradient*input as
+      SHAP values was removed rather than re-tuned, and SubgraphX, which replaced
+      it, is implemented but not wired. Prediction results carry an empty
+      `feature_importances` and no attention weights
   └── CUDA + mixed precision training
 ```
+
+### Reachability
+
+"Implemented" and "running" are different claims, and this repository has been
+wrong about the difference three times — a module with a full test suite that no
+production code imports passes every test it has. The table above marks the
+capabilities that are implemented but reach *nothing*, because a feature list
+that implies otherwise is exactly what an auditor would rely on.
+
+`backend/tests/test_reachability.py` asserts the property mechanically: it walks
+the import graph from the production entry points (`backend.api.main`,
+`backend.tasks.celery_app`) and fails if any module is unreachable and
+unaccounted for, if a module recorded as unreachable quietly becomes reachable,
+or if a module marked as wired still contributes nothing. Each unreachable module
+is listed there with its blocker and the concrete next step, so the gap is a
+queued decision rather than a silent one.
 
 ---
 
@@ -204,7 +228,7 @@ Full index: [`docs/README.md`](docs/README.md).
 | [`docs/api-endpoints.md`](docs/api-endpoints.md) | **Generated** endpoint inventory — do not edit by hand |
 | [`docs/frontend.md`](docs/frontend.md) | UI pages, navigation, search, onboarding, risk map, known gaps |
 | [`docs/deployment.md`](docs/deployment.md) | Deploying on this host: Compose, GPU, model weights, secrets |
-| [`docs/data_connectors.md`](docs/data_connectors.md) | NBFI/CCP ingestion feeds and their publication clocks |
+| [`docs/data_connectors.md`](docs/data_connectors.md) | Decision record: the NBFI/CCP connector layer, deleted, and the point-in-time home that replaced it |
 | [`docs/G_SIB_BUILD.md`](docs/G_SIB_BUILD.md) | G-SIB-grade build: added, verified, and still missing |
 | [`docs/EXECUTIVE_REVIEW_REMEDIATION.md`](docs/EXECUTIVE_REVIEW_REMEDIATION.md) | Review findings mapped to code |
 | [`.github/workflows/README.md`](.github/workflows/README.md) | CI/CD workflows and local equivalents |

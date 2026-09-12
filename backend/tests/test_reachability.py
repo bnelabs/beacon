@@ -16,12 +16,9 @@ So this file asserts the property directly, by walking the import graph from the
 production entry points:
 
 * every module in :data:`REQUIRED_REACHABLE` is reachable from a root;
-* every module in :data:`KNOWN_UNREACHABLE` is not.
-
-The second assertion is what keeps the census honest. If someone wires one of the
-known orphans, this test fails and forces the entry to move up into
-:data:`REQUIRED_REACHABLE` -- so the census cannot rot into a stale claim, which
-is the failure mode that produced the problem in the first place.
+* every module in :data:`KNOWN_UNREACHABLE` is not;
+* **every unreachable production module is in the census** -- see
+  :class:`TestCensusIsComplete`.
 
 Why *transitive* and not "has an importer". An earlier draft of this file checked
 direct importers and misclassified `temporal_graph`: it is imported, but only by
@@ -30,20 +27,45 @@ has to be measured from the roots, or "imported by another orphan" reads as
 reachable. That distinction is also why a module can be reachable and still
 contribute nothing -- see :data:`UNUSED_SYMBOLS` for the class-level check.
 
+The disposition census
+----------------------
+
+The first version of this file declared one flat orphan list. That turned out to
+be the weaker half of the guard, for a reason worth recording: it asserted each
+list *independently* -- "these are reachable", "these are not" -- but never that
+the two covered the tree. So a new orphan could appear between them and nothing
+failed. Two already had: `data/pit.py` (dead once its only importers, the
+connectors, were dead) and `engine/foundation_encoders.py` (the Toto encoder,
+reachable only from `scripts/compare_encoder_sizes.py`, a developer benchmark).
+Both were missing from the census that claimed to have scanned the whole backend.
+
+Every unreachable module now carries a :class:`Disposition`, so an orphan is a
+queued decision rather than an anonymous entry:
+
+``wire``
+    A production home exists or is cheap to add. These are the next work items.
+``decide``
+    Blocked on a product or design call, not on effort. The blocker is named.
+``park``
+    No input exists and none is planned. Kept only because deletion is a
+    decision too, and it is recorded here rather than left implicit.
+
 Scope and limits. Importers are found statically with ``ast``, resolving relative
 imports. That misses genuinely dynamic loading, which is why ``backend/plugins/*``
 is excluded: plugins are resolved by name through ``get_plugin`` by design. A
-dynamic registry whose entry point has no caller is *not* excluded -- the
-connectors package is listed below, because ``build_connector`` is never called
-from production even though the registry itself is dynamic. Reachability is a
-necessary condition for a capability, not proof of usefulness.
+dynamic registry whose entry point has no caller is *not* excluded, which is how
+the connectors package was caught: ``build_connector`` was never called from
+production even though the registry itself was dynamic. That layer has since been
+deleted on the evidence -- see :data:`REMOVED` -- and
+``docs/data_connectors.md`` keeps the findings. Reachability is a necessary
+condition for a capability, not proof of usefulness.
 """
 
 from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import Dict, Set, Tuple
+from typing import Dict, NamedTuple, Set, Tuple
 
 BACKEND = Path(__file__).resolve().parents[1]
 
@@ -66,6 +88,7 @@ REQUIRED_REACHABLE: Dict[str, str] = {
     "backend.modules.engine.latent_dynamics": "the SDE scenario the engine accepts",
     "backend.modules.data.fractional": "ADF/KPSS and fractional differencing",
     "backend.modules.data.quality_gate": "the data certification gate",
+    "backend.modules.data.pit": "point-in-time exposure vintages behind the network graph (load_as_of)",
     "backend.modules.risk.clearing": "Eisenberg-Noe clearing",
     "backend.modules.risk.liquidity_spiral": "the spiral the clearing shortfall drives",
     "backend.modules.risk.bank_analyzer": "per-institution systemic analysis",
@@ -78,27 +101,122 @@ REQUIRED_REACHABLE: Dict[str, str] = {
     "backend.modules.engine.counterfactual": "the counterfactual scenario the engine accepts",
 }
 
+
+class Disposition(NamedTuple):
+    """What an unreachable module is waiting on, and what happens next.
+
+    ``blocker`` is *why* it does not run, ``plan`` is the disposition class
+    (``wire`` / ``decide`` / ``park``), and ``next_step`` is the concrete action
+    that would move it. All three are required: an entry with no next step is the
+    undifferentiated orphan this census exists to replace.
+    """
+
+    blocker: str
+    plan: str
+    next_step: str
+
+
 #: Modules implemented, tested and *not* reachable from production. Recorded
-#: rather than deleted, so the gap is visible instead of implied. Each entry
-#: carries what a real integration would need -- see the census in
-#: `docs/EXECUTIVE_REVIEW_REMEDIATION.md`.
-KNOWN_UNREACHABLE: Dict[str, str] = {
-    "backend.modules.engine.conformal": "split conformal + ACI; the prediction engine already documents a pending conformal calibration step, so this is the first recommended wiring",
-    "backend.modules.engine.federated": "Bonawitz-style masking; needs a federated training coordinator, which does not exist",
-    "backend.modules.engine.hidden_markov": "Student-t regime detection; needs a regime label attached to the per-source score",
-    "backend.modules.engine.uncertainty": "uncertainty helpers; superseded-or-pending relative to conformal",
-    "backend.modules.engine.subgraphx": "attribution; needs a liability network and a game value on a job result",
-    "backend.modules.engine.event_metrics": "event-precision metrics; needs an event target series in the pipeline",
-    "backend.modules.engine.causal_validation": "counterfactual validation; it validates a *pair* of graphs and needs both on a job result, which no producer supplies",
-    "backend.modules.engine.mixture_of_experts": "regime-conditioned experts; needs a regime input",
-    "backend.modules.data.network_gate": "network data-quality gate; not called by the collector",
-    "backend.modules.data.streaming": "streaming ingestion; no streaming source is configured",
-    "backend.modules.results.timeseries_store": "TimescaleDB store; no runtime caller writes through it",
-    "backend.modules.data.connectors.bis_credit": "connector registry entry point (build_connector) has no production caller",
-    "backend.modules.data.connectors.ecb_ccp": "connector registry entry point (build_connector) has no production caller",
-    "backend.modules.data.connectors.payments": "connector registry entry point (build_connector) has no production caller",
-    "backend.modules.data.connectors.sec_form_pf": "connector registry entry point (build_connector) has no production caller",
-    "backend.modules.data.connectors.sec_n_mfp": "connector registry entry point (build_connector) has no production caller",
+#: rather than deleted, so the gap is visible instead of implied.
+KNOWN_UNREACHABLE: Dict[str, Disposition] = {
+    # -- wire: a production home exists or is cheap to add -------------------
+    "backend.modules.engine.conformal": Disposition(
+        blocker="the prediction engine reports no calibrated interval, but the seam is written down",
+        plan="wire",
+        next_step="build the calibrator in prediction_engine (prediction_engine.py:731 reports (None, None)) from a held-out window per source",
+    ),
+    "backend.modules.engine.hidden_markov": Disposition(
+        blocker="a regime label is computed but never attached to a per-source score",
+        plan="wire",
+        next_step="attach the StudentTHMM regime label to the per-source score; this also supplies mixture_of_experts' missing regime input",
+    ),
+    "backend.modules.engine.mixture_of_experts": Disposition(
+        blocker="regime-conditioned experts have no regime input",
+        plan="wire",
+        next_step="wire together with hidden_markov -- one integration retires both orphans",
+    ),
+    "backend.modules.data.network_gate": Disposition(
+        blocker="the collector never calls the topology gate",
+        plan="wire",
+        next_step="call it at the collector's post-fetch step, where quality_gate is already applied",
+    ),
+    "backend.modules.results.timeseries_store": Disposition(
+        blocker="nothing writes risk scores or metrics through it, though the infrastructure for it is already deployed",
+        plan="wire",
+        next_step="call record_risk_scores on job completion; TimescaleDB is already in docker-compose.yml, and the timescale_timeseries migration already builds the hypertables this store is the only consumer of",
+    ),
+    "backend.modules.engine.uncertainty": Disposition(
+        blocker="nothing consumes a decomposed uncertainty signal",
+        plan="wire",
+        next_step="consume it after conformal: it answers the question conformal does not (is the interval wide because the world is noisy, or because the model is lost), and its docstring says an epistemic spike should refuse the prediction",
+    ),
+    # -- decide: blocked on a call, not on effort ----------------------------
+    "backend.modules.engine.foundation_encoders": Disposition(
+        blocker="the Toto node encoder loads but is constructed only by scripts/compare_encoder_sizes.py, and the engine's own temporal encoders in models.py are a separate path",
+        plan="decide",
+        next_step="either construct it in the engine or drop it -- it currently costs toto-2 plus gluonts/einops/safetensors/huggingface-hub in the production image (requirements.txt)",
+    ),
+    "backend.modules.engine.subgraphx": Disposition(
+        blocker="attribution needs a game value over liability-network subsets, and nothing produces one",
+        plan="decide",
+        next_step="decide whether a game value is coming; prediction_engine.py:17 already declines to pass gradient*input off as one, so it cannot be improvised",
+    ),
+    "backend.modules.engine.causal_validation": Disposition(
+        blocker="it validates a *pair* of graphs (declared against learned) and nothing produces both on a job result",
+        plan="decide",
+        next_step="decide where the declared-vs-learned comparison belongs in the product, then add the producer",
+    ),
+    "backend.modules.engine.event_metrics": Disposition(
+        blocker="event precision/lead-time metrics need a labelled event target series, which the pipeline does not produce",
+        plan="decide",
+        next_step="decide whether a binary event target is in scope; if it is, the model-quality report is the home",
+    ),
+    # -- park: no input exists and none is planned ---------------------------
+    "backend.modules.data.streaming": Disposition(
+        blocker="no streaming source is configured and the only transport is an in-memory test double",
+        plan="park",
+        next_step="keep only because temporal_graph and two test files use it as a harness; delete if no streaming source lands",
+    ),
+    "backend.modules.engine.federated": Disposition(
+        blocker="Bonawitz-style masking needs a multi-institution training coordinator owning the roster, model shape and transport; EngineOrchestrator and ModelTrainer are both single-node",
+        plan="park",
+        next_step="keep parked with the 'Reachability (honest status)' docstring; revisit only if a coordinator is funded",
+    ),
+}
+
+#: Modules removed from the tree by the disposition census. Recorded so a removal
+#: is a fact in the repository rather than a gap someone has to rediscover.
+REMOVED: Dict[str, str] = {
+    "backend.modules.explainability": (
+        "empty package: __init__.py was zero bytes and nothing imported it. The "
+        "explainability *routes* live in backend/api/routes/ and are unaffected."
+    ),
+    "backend.modules.data.connectors.base": (
+        "the connector layer, deleted after the ecb_ccp migration spike. It had no "
+        "production caller, none of its five feeds had an engine consumer at the "
+        "granularity the engine needs, and the plugin interface it would have been "
+        "bridged into cannot carry its two-clock guarantee -- fetch_indicator_data "
+        "returns Date, Value, and observed_at/revision appear nowhere in "
+        "backend/plugins/. docs/data_connectors.md keeps the findings."
+    ),
+    "backend.modules.data.connectors.bis_credit": "deleted with the connector layer; see connectors.base",
+    "backend.modules.data.connectors.ecb_ccp": "deleted with the connector layer; see connectors.base",
+    "backend.modules.data.connectors.payments": "deleted with the connector layer; see connectors.base",
+    "backend.modules.data.connectors.sec_form_pf": "deleted with the connector layer; see connectors.base",
+    "backend.modules.data.connectors.sec_n_mfp": "deleted with the connector layer; see connectors.base",
+}
+
+#: Modules deliberately outside the census. Excluding by rule rather than by
+#: omission is the point: an unlisted module is indistinguishable from a
+#: forgotten one, which is how the two omissions above happened.
+EXCLUDED_FROM_CENSUS: Dict[str, str] = {
+    "backend.plugins": (
+        "resolved by name through get_plugin, so static imports cannot see the "
+        "live path; the registry itself has live callers (collector.py, "
+        "data_source_service.py), which is what makes these not orphans"
+    ),
+    "backend.alembic": "migrations are not capabilities",
+    "backend.scripts": "developer entry points, not production entry points",
 }
 
 #: Classes whose *module* is reachable but whose class is referenced nowhere
@@ -205,6 +323,35 @@ _DEFINED, _IMPORTS = _build_import_graph()
 _REACHABLE = _reachable_from_roots(_IMPORTS)
 
 
+def _is_package(module: str) -> bool:
+    """True when the module name denotes a directory (a package), not a file."""
+    return (BACKEND.parent / Path(*module.split("."))).is_dir()
+
+
+def _is_excluded(module: str) -> bool:
+    return any(
+        module == prefix or module.startswith(prefix + ".")
+        for prefix in EXCLUDED_FROM_CENSUS
+    )
+
+
+def _census_universe() -> Set[str]:
+    """Every production module the census is responsible for covering.
+
+    Packages, the roots themselves and the declared exclusions are not
+    capabilities, so they are outside the universe rather than silently absent
+    from it.
+    """
+    prefixes = ("backend.modules.", "backend.services.", "backend.api.", "backend.tasks.")
+    return {
+        module
+        for module in _DEFINED
+        if module.startswith(prefixes)
+        and not _is_package(module)
+        and not _is_excluded(module)
+    }
+
+
 class TestReachabilityFromProductionRoots:
     """Every claimed capability must be reachable from a process entry point."""
 
@@ -229,6 +376,71 @@ class TestReachabilityFromProductionRoots:
             "these modules are claimed as production capabilities but are not "
             f"reachable from {PRODUCTION_ROOTS}: {unreachable}"
         )
+
+
+class TestCensusIsComplete:
+    """An incomplete census is the defect this file exists to prevent.
+
+    The first version asserted both lists independently and never that their
+    union covered the tree, so new orphans could appear in the gap. Two had.
+    """
+
+    def test_every_unreachable_production_module_is_in_the_census(self):
+        unlisted = sorted(_census_universe() - _REACHABLE - set(KNOWN_UNREACHABLE))
+        assert not unlisted, (
+            f"{unlisted} are unreachable from {PRODUCTION_ROOTS} but appear in "
+            "neither REQUIRED_REACHABLE nor KNOWN_UNREACHABLE. Add each to "
+            "KNOWN_UNREACHABLE with a Disposition (blocker, plan, next_step), or "
+            "wire it and promote it to REQUIRED_REACHABLE. Silence here is how "
+            "data/pit.py and engine/foundation_encoders.py stayed invisible."
+        )
+
+    def test_the_census_does_not_record_modules_that_do_not_exist(self):
+        # Only KNOWN_UNREACHABLE is checked here: a REMOVED entry is *expected*
+        # to be absent from the tree, and test_removed_modules_do_not_reappear
+        # is what stops it coming back.
+        ghost = sorted(set(KNOWN_UNREACHABLE) - _DEFINED)
+        assert not ghost, (
+            f"the census names modules that are not in the tree: {ghost}. If one "
+            "was deliberately deleted, move it to REMOVED with the reason."
+        )
+
+    def test_removed_modules_do_not_reappear(self):
+        back = sorted(module for module in REMOVED if module in _DEFINED)
+        assert not back, (
+            f"{back} were removed by the disposition census but exist again. If "
+            "one is genuinely reinstated, drop it from REMOVED and add it to "
+            "KNOWN_UNREACHABLE or REQUIRED_REACHABLE."
+        )
+
+
+class TestDispositionsAreRecorded:
+    """Every orphan must be a queued decision, not an anonymous entry."""
+
+    VALID_PLANS = ("wire", "decide", "park")
+
+    def test_every_orphan_has_a_verdict(self):
+        incomplete = {
+            module: record
+            for module, record in KNOWN_UNREACHABLE.items()
+            if record.plan not in self.VALID_PLANS
+            or not record.blocker.strip()
+            or not record.next_step.strip()
+        }
+        assert not incomplete, (
+            "these orphans carry no usable disposition; each needs a plan in "
+            f"{self.VALID_PLANS} plus a non-empty blocker and next_step: "
+            f"{sorted(incomplete)}"
+        )
+
+    def test_the_verdicts_are_counted_where_a_reader_will_see_them(self):
+        """The docstring claims three registers; this fails if that drifts."""
+        counted = {
+            plan: sum(1 for record in KNOWN_UNREACHABLE.values() if record.plan == plan)
+            for plan in self.VALID_PLANS
+        }
+        assert sum(counted.values()) == len(KNOWN_UNREACHABLE)
+        assert counted["wire"] > 0, "no orphan is queued for wiring, which is the point of the census"
 
 
 class TestKnownUnreachableStaysHonest:

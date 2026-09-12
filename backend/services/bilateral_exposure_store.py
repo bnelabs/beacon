@@ -90,7 +90,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -102,6 +102,7 @@ from backend.exceptions import (
     EmptyDatasetError,
     SchemaValidationError,
 )
+from backend.modules.data.pit import Observation, PITStore
 
 logger = logging.getLogger(__name__)
 
@@ -795,6 +796,120 @@ class BilateralExposureStore:
                 frame["debtor"], frame["creditor"], frame["amount"]
             )
         }
+
+    def load_observations(self) -> Optional[List[Observation]]:
+        """The stored matrix as point-in-time observations, or ``None``.
+
+        Each row becomes one :class:`~backend.modules.data.pit.Observation`:
+        ``entity_id`` is the debtor, ``series_id`` the creditor and ``value`` the
+        amount, so an exposure matrix is expressed in the same schema the
+        point-in-time store uses everywhere else.
+
+        The two clocks come from the manifest rather than being re-derived here.
+        ``valid_time`` is the vintage the matrix *describes* (its ``as_of``) and
+        ``observed_at`` is when it was *uploaded*. When the upload declared no
+        vintage, the matrix describes the instant it was supplied, so both clocks
+        take the upload time. Routing this through ``Observation`` is what
+        enforces ``observed_at >= valid_time`` on this path instead of leaving it
+        with a private copy of the rule.
+
+        Raises:
+            ExposureSchemaError: The manifest carries no upload clock, or a row
+                contradicts the two-clock rule.
+        """
+        frame = self.load()
+        if frame is None:
+            return None
+
+        manifest = self.manifest() or {}
+        observed_at = manifest.get("uploaded_at")
+        if not observed_at:
+            raise ExposureSchemaError(
+                "the stored exposure manifest carries no uploaded_at, so the "
+                "matrix has no publication clock and cannot be placed in time",
+                context={"manifest_file": MANIFEST_FILENAME},
+            )
+        valid_time = manifest.get("as_of") or observed_at
+
+        try:
+            return [
+                Observation(
+                    entity_id=str(debtor),
+                    series_id=str(creditor),
+                    valid_time=valid_time,
+                    observed_at=observed_at,
+                    value=float(amount),
+                )
+                for debtor, creditor, amount in zip(
+                    frame["debtor"], frame["creditor"], frame["amount"]
+                )
+            ]
+        except ValueError as exc:
+            raise ExposureSchemaError(
+                "the stored exposure matrix is inconsistent with its own "
+                f"manifest: {exc}",
+                context={"as_of": manifest.get("as_of"), "uploaded_at": observed_at},
+                cause=exc,
+            ) from exc
+
+    def load_as_of(self, as_of: object) -> Optional[pd.DataFrame]:
+        """The stored matrix as it was known at ``as_of``, or ``None``.
+
+        This is the point-in-time reader. It returns the vintage that had been
+        published by ``as_of``, and ``None`` when the matrix was not yet known
+        then -- so asking for the network as of a date before its upload returns
+        nothing rather than the current matrix. That is the same
+        anti-clairvoyance guarantee the rest of the pipeline relies on, and it is
+        why the current matrix is never substituted for a vintage that did not
+        exist.
+
+        Args:
+            as_of: Information cut-off. Anything ``pd.Timestamp`` accepts.
+
+        Returns:
+            A canonical matrix frame (``debtor``, ``creditor``, ``amount``, plus
+            ``as_of`` when the manifest declares a vintage), or ``None`` when
+            nothing was known at ``as_of`` or nothing is stored.
+
+        Raises:
+            ExposureSchemaError: The stored matrix and manifest disagree.
+            ValueError: ``as_of`` is not a timestamp.
+        """
+        # Parsed before anything is read. A malformed cut-off is a caller error
+        # whether or not a matrix happens to be stored, and must not be masked by
+        # the "nothing was known then" answer.
+        stamp = pd.Timestamp(as_of)
+        if stamp.tzinfo is not None:
+            stamp = stamp.tz_convert("UTC").tz_localize(None)
+
+        observations = self.load_observations()
+        if observations is None:
+            return None
+
+        store = PITStore()
+        store.append(observations)
+
+        records: List[Dict[str, Any]] = []
+        for entity_id in sorted({o.entity_id for o in observations}):
+            known = store.query(entity_id, as_of=stamp)
+            for series_id, value in zip(known["series_id"], known["value"]):
+                records.append(
+                    {
+                        "debtor": entity_id,
+                        "creditor": str(series_id),
+                        "amount": float(value),
+                    }
+                )
+        if not records:
+            return None
+
+        frame = pd.DataFrame.from_records(
+            records, columns=["debtor", "creditor", "amount"]
+        )
+        declared = (self.manifest() or {}).get("as_of")
+        if declared is not None:
+            frame["as_of"] = pd.to_datetime(declared)
+        return frame
 
     def manifest(self) -> Optional[Dict[str, Any]]:
         """Return the stored manifest, or ``None`` when absent or unreadable."""
