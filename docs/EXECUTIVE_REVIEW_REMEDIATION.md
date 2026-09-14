@@ -1414,3 +1414,111 @@ returned `200 unavailable` — the "nothing was known then" answer — instead o
 | Malformed cut-off | `422`, not a `200` unavailable state — the ordering bug above |
 | Generated API inventory | `generate_api_docs.py --check` reports current (the new query parameter does not alter the inventory) |
 
+
+---
+
+# Fourth Review Round — The Composition Gap (external quant review, 2026-09)
+
+The full findings, evidence and the phased plan are in
+[`QUANT_REVIEW_2026-09.md`](QUANT_REVIEW_2026-09.md). This section records what
+was changed in response, in the same checkable style as the rounds above.
+
+The round's premise: three previous rounds fixed *components* — and the
+components are good, with closed-form verification and hand-computed fixed
+points. What no round had tested is the **composition**: the code paths where
+`run_training`, `run_prediction`, `run_backtest` and the pipeline route actually
+glue those components together. Every defect below lived in that glue, and the
+suite was green with all of them present (1725 passed) because no test composed
+the trainers or the pipeline scorer end to end.
+
+## 6.1 The training path could not run, and when it ran it selected nothing — *Fixed*
+
+| Defect | Evidence | Fix |
+|---|---|---|
+| `ReduceLROnPlateau(verbose=True)` raises `TypeError` under the pinned `torch==2.14.0` — **every `run_training` job crashed before epoch one** | reproduction in `QUANT_REVIEW_2026-09.md` §9 | parameter removed in both trainers; `test_trainer_composition.py::TestTrainersActuallyRun` now trains both trainers end to end under the pinned torch |
+| Empty validation split → `_validate` returned `0.0` forever → best checkpoint frozen at **epoch 0** while the job reported success | reproduced: `best_epoch=0`, `val_loss=[0.0]*N` | empty val/test splits now raise; `_validate` refuses to report a loss for an empty loader (the single-scale twin divided by zero instead) |
+| Val/test datasets standardized themselves: reported metrics were computed in a space the deployed model never saw, and the evaluation split's own statistics leaked into them | reproduced: reported MSE 0.93× the deployment-space MSE on one seed; per-source mean offsets up to 190 raw units | `MultiSourceDataset` and `TimeSeriesDataset` accept the training split's stats and the trainers pass them; a source without training stats is skipped, never standardized ad hoc |
+| Production split was a positional `iloc` 80/20 cut over a **source-major** frame — a split by source, not time, which is also what stranded whole sources out of the training map and emptied validation | `test_positional_split_would_have_leaked_sources_regression` asserts the old behaviour directly | `split_train_val_by_date`: chronological within the training window, every source keeps temporal continuity on both sides |
+| Default train/test windows were hardcoded to 2023-01-01…2024-12-31: live collections were silently truncated to a stale historical slice | `run_training` defaults | `default_training_windows` derives the split from the payload's own date span; explicit parameters still win, and the result records `windows_derived_from_data` |
+| Short-window padding was `mode='edge'` in training but zero-padding at inference | `MultiSourceDataset` vs `_prepare_sequence` | both zero-pad at the standardized mean |
+
+## 6.2 The pipeline route was scoring noise and calling it risk — *Fixed*
+
+`POST /api/v1/pipeline` → `EngineOrchestrator` is the path behind the reports,
+the risk-level column in the database and the executive PDF. Before this round:
+
+* with no trained checkpoint it scored through a **randomly initialized**
+  `SimpleRiskPredictor` — an invented measurement, the exact category the DATA
+  stage's no-synthetic-fallback rule exists to prevent. It now fails closed with
+  `PredictionBlockedError`; the fallback survives only behind
+  `BEACON_ALLOW_UNTRAINED_FALLBACK=1` (mirroring `BEACON_ALLOW_UNSAFE_CHECKPOINT_LOAD`),
+  and `test_pipeline_integration.py` opts in explicitly, documented as a
+  plumbing smoke test rather than a scoring-validity test.
+* `_predict` read the source-major concatenation as **one series**: windows
+  straddled source seams, no normalization was applied even though
+  `_get_model` had loaded the checkpoint's `source_stats`, and every window
+  carried `source_id=0`. It now groups by source, normalizes with the
+  checkpoint's training stats (payload-window fallback recorded as
+  optimistic, as the prediction engine does), passes real source IDs, and
+  returns per-score source and window-end positions.
+* `_compute_risk_scores` thresholded the raw model mean at 30/60/80 as if a
+  standardized regression output were a percentage, banding it
+  low/medium/high/critical. The model's output is a one-step-ahead prediction
+  of a standardized value: unbounded, signed, and its direction meaning
+  depends on the indicator. Until a calibrated mapping exists (Phase 2 of the
+  review), `risk_level` is `"uncalibrated"` and the score carries an explicit
+  `score_semantics` block instead of an invented band.
+* `_evaluate` reported `stability_score = 1/(1+std(diff))` — smoothness of an
+  uncalibrated score presented as prediction quality. Removed. Its
+  ground-truth branch compared the flat score array against the flat target
+  column with no shift and across seams; it now joins each score to the target
+  at `window_end + 1` **within the same source**.
+
+## 6.3 The prediction/target alignment convention is now explicit — *Fixed*
+
+The model is trained on `window → next row`. `predict_risk_series` recorded
+only the window-END row, and `run_backtest` joined ground truth on it — a
+latent off-by-one that would mis-score every prediction the moment any
+producer supplied a target column. The frame now carries
+`predicted_row_offset` (`-1` where the predicted row falls outside its
+source's span, so a seam can never be crossed), `align_series_targets` in
+`backtesting.py` performs the join, fold metrics only receive actuals when
+every row in the fold is aligned, and the README's backtesting section
+documents the convention.
+
+## 6.4 Documentation corrected rather than left to mislead — *Fixed*
+
+The README still advertised `sharpe_ratio`, `sortino_ratio`, `max_drawdown`,
+`calmar_ratio`, `var_95`, `cvar_95` and "a rising predicted risk is treated as
+a negative return" — all deleted from the code in the second round with the
+reason recorded in `backtesting.py`'s docstring. The section now names the
+metrics that exist and says why return-based statistics are deliberately not
+computed on a risk-state series.
+
+## What this round did NOT do
+
+Stated explicitly, per the standing convention:
+
+* **The semantic gap is named, not closed.** `BankRiskAnalyzer._score_bank`
+  still thresholds a standardized next-value prediction at 0.3/0.6/0.85, and
+  the executive summary still renders `avg_risk * 100` as a percentage. The
+  pipeline path now says "uncalibrated"; the bank-analyzer path is left for
+  Phase 2 because the honest fix is a defined risk target plus calibration,
+  not a different squash of the same number.
+* **Conformal intervals are still not wired.** The census next-step stands;
+  Phase 2 of the review fixes the design (per-source held-out rolling
+  residuals → `SplitConformalCalibrator` → `confidence_*` fields).
+* **The event labeller does not exist yet.** Phase 2's first item; until it
+  does, "predictive validity" claims have no labelled target to be valid against.
+* Frontend risk-map mixing of live and bundled demo layers (finding F13) is
+  flagged, not fixed — outside the quant scope of this round.
+
+## Verification for this round
+
+| Check | Result |
+|---|---|
+| Full backend suite before changes | 1725 passed, 7 skipped (clean env; the only failures seen were `pyarrow` absence) |
+| `ruff check backend --select E9,F63,F7,F82` | clean |
+| New composition tests | `test_trainer_composition.py` (16), `test_engine_orchestrator_scoring.py` (14), `TestPredictedRowAlignment` (4) |
+| Reproduction of F1/F2/F3 | preserved in `QUANT_REVIEW_2026-09.md` §9 |
+| Full backend suite after changes | **1758 passed, 7 skipped** (was 1725 on `main` in the same environment; +33 new composition tests) |

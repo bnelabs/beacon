@@ -360,17 +360,20 @@ def run_training(self, job_id: int, parameters: dict):
 
         self.update_progress(job_id, 40.0)
 
-        # Get date range from parameters or use defaults
-        train_start = parameters.get("train_start", "2023-01-01")
-        train_end = parameters.get("train_end", "2024-06-30")
-        test_start = parameters.get("test_start", "2024-07-01")
-        test_end = parameters.get("test_end", "2024-12-31")
+        # Get date range from parameters, or derive it from the payload's own
+        # span. The previous defaults were hardcoded to 2023-01-01..2024-12-31:
+        # with a five-year collection window they silently discarded everything
+        # outside a fixed historical slice -- including the most recent
+        # observations a monitoring product exists to score.
+        from backend.modules.engine.trainer import (
+            default_training_windows,
+            split_train_val_by_date,
+        )
 
-        # Convert date strings to datetime for comparison
-        train_start_dt = pd.to_datetime(train_start)
-        train_end_dt = pd.to_datetime(train_end)
-        test_start_dt = pd.to_datetime(test_start)
-        test_end_dt = pd.to_datetime(test_end)
+        param_train_start = parameters.get("train_start")
+        param_train_end = parameters.get("train_end")
+        param_test_start = parameters.get("test_start")
+        param_test_end = parameters.get("test_end")
 
         # Find date column (could be 'date', 'Date', 'timestamp', etc.)
         date_col = None
@@ -385,17 +388,77 @@ def run_training(self, job_id: int, parameters: dict):
             raise ValueError(f"No date column found in timeseries data. Available columns: {list(timeseries_df.columns)}")
 
         # Ensure date column is datetime
-        timeseries_df[date_col] = pd.to_datetime(timeseries_df[date_col])
+        timeseries_df[date_col] = pd.to_datetime(timeseries_df[date_col], errors='coerce')
 
-        # Split data into train/test
+        # Resolve the window boundaries: explicit parameters win; anything
+        # missing is derived chronologically from the data actually collected.
+        windows_derived_from_data = not all(
+            [param_train_start, param_train_end, param_test_start, param_test_end]
+        )
+        data_min = timeseries_df[date_col].min()
+        data_max = timeseries_df[date_col].max()
+        if windows_derived_from_data:
+            derived_start, derived_train_end, derived_end = default_training_windows(
+                data_min, data_max, train_fraction=0.8
+            )
+        else:
+            derived_start = derived_train_end = derived_end = None
+
+        train_start = param_train_start or derived_start
+        train_end = param_train_end or derived_train_end
+        test_start = param_test_start or derived_train_end
+        test_end = param_test_end or derived_end
+
+        # Convert date strings to datetime for comparison
+        train_start_dt = pd.to_datetime(train_start)
+        train_end_dt = pd.to_datetime(train_end)
+        test_start_dt = pd.to_datetime(test_start)
+        test_end_dt = pd.to_datetime(test_end)
+
+        # Mixed explicit/derived parameters must still produce a chronological,
+        # non-overlapping split: training on rows the test window also contains
+        # would evaluate the model on data it saw.
+        if not (train_start_dt <= train_end_dt < test_end_dt):
+            raise ValueError(
+                f"Resolved training windows are not chronological: train "
+                f"[{train_start_dt}, {train_end_dt}], test end {test_end_dt}"
+            )
+        if test_start_dt <= train_end_dt:
+            if windows_derived_from_data:
+                # Derived test side starts strictly after train_end.
+                pass
+            else:
+                raise ValueError(
+                    f"Explicit test window starts at {test_start_dt}, which is not "
+                    f"after the training window end {train_end_dt}; the split "
+                    "would evaluate on training data"
+                )
+
+        logger.info(
+            "Training windows (%s): train [%s .. %s], test (%s .. %s]",
+            "derived from payload" if windows_derived_from_data else "from parameters",
+            train_start_dt.date(), train_end_dt.date(),
+            ">" if windows_derived_from_data and not param_test_start else ">=",
+            test_start_dt.date(),
+        )
+
+        # Split data into train/test. When the windows were derived, the test
+        # side is strictly after train_end so the boundary day cannot appear in
+        # both; explicit parameters keep their inclusive semantics.
         train_df = timeseries_df[
             (timeseries_df[date_col] >= train_start_dt) &
             (timeseries_df[date_col] <= train_end_dt)
         ]
-        test_df = timeseries_df[
-            (timeseries_df[date_col] >= test_start_dt) &
-            (timeseries_df[date_col] <= test_end_dt)
-        ]
+        if windows_derived_from_data and not param_test_start:
+            test_df = timeseries_df[
+                (timeseries_df[date_col] > train_end_dt) &
+                (timeseries_df[date_col] <= test_end_dt)
+            ]
+        else:
+            test_df = timeseries_df[
+                (timeseries_df[date_col] >= test_start_dt) &
+                (timeseries_df[date_col] <= test_end_dt)
+            ]
 
         logger.info(f"Train set: {len(train_df)} records, Test set: {len(test_df)} records")
 
@@ -426,10 +489,19 @@ def run_training(self, job_id: int, parameters: dict):
 
         trainer = TrainerClass(model_type=model_type, device=device, config=config)
 
-        # Split validation from train (80/20)
-        train_size = int(len(train_df) * 0.8)
-        train_subset = train_df.iloc[:train_size]
-        val_subset = train_df.iloc[train_size:]
+        # Split validation from train chronologically by date (80/20 of the
+        # training window's span). The previous positional iloc cut split the
+        # source-major frame by SOURCE, not by time: the validation side held
+        # sources the training side never saw, which the multi-scale dataset
+        # then skipped, leaving validation empty and model selection frozen at
+        # the epoch-0 checkpoint.
+        train_subset, val_subset, val_cutoff = split_train_val_by_date(
+            train_df, date_col, val_fraction=0.2
+        )
+        logger.info(
+            "Chronological train/val split at %s: Train=%d rows, Val=%d rows",
+            pd.to_datetime(val_cutoff).date(), len(train_subset), len(val_subset),
+        )
 
         if has_multi_source:
             sources = train_df['source_code'].nunique()
@@ -481,6 +553,8 @@ def run_training(self, job_id: int, parameters: dict):
             "multi_scale": has_multi_source,
             "train_period": f"{train_start} to {train_end}",
             "test_period": f"{test_start} to {test_end}",
+            "windows_derived_from_data": bool(windows_derived_from_data),
+            "split_method": "chronological_by_date",
             "train_records": len(train_subset),
             "val_records": len(val_subset),
             "test_records": len(test_df),
@@ -853,6 +927,8 @@ def run_backtest(self, job_id: int, parameters: dict):
         # is only used as a fallback when no series can be built.
         from backend.modules.engine.backtesting import (
             WalkForwardConfig,
+            align_series_targets,
+            boundaries_from_group_sizes,
             compute_metrics,
             directional_accuracy as _directional_accuracy,
             walk_forward_folds_per_segment,
@@ -877,14 +953,35 @@ def run_backtest(self, job_id: int, parameters: dict):
                 "Per-timestep risk series unavailable for job %s: %s", job_id, risk_series_error
             )
 
-        actuals = None
         pred_values = None
         boundaries: list = []
+        # Alignment state: a score at window-end row t predicts row t+1, so
+        # ground truth joins on the frame's `predicted_row_offset`, never on
+        # `row_offset` (which would score every prediction one step early).
+        aligned_actuals = None
+        aligned_preds = None
+        aligned_boundaries = None
+        actuals_full = None
         # Only a genuine per-timestep series may feed the return-based metrics. The
         # per-source fallback below is a vector of unrelated entities and must never
         # be differenced as if it were a time series.
         series_usable = False
         prediction_result = None
+
+        def _fold_actuals(full: "np.ndarray | None", test_idx: np.ndarray):
+            """Per-fold targets: only folds whose rows are ALL aligned carry actuals.
+
+            ``actuals_full`` is NaN where a row has no target at its predicted
+            position (each source's final window, or no target column at all).
+            A fold containing any NaN would poison every aggregate, so such a
+            fold reports prediction-only metrics instead of partial ones.
+            """
+            if full is None:
+                return None
+            subset = full[test_idx]
+            if subset.size == 0 or not bool(np.isfinite(subset).all()):
+                return None
+            return subset
 
         def _extract_risk_scores() -> np.ndarray:
             """Pull the engine's per-source risk scores out of the result frame."""
@@ -901,10 +998,8 @@ def run_backtest(self, job_id: int, parameters: dict):
             return np.asarray(column.values, dtype=float)
 
         if risk_series is not None and risk_series.n_steps > 1:
-            # Align by the caller's row positions, so each risk score is paired
-            # with the target of the very row it was predicted for.
-            offsets = np.asarray(risk_series.frame["row_offset"], dtype=int)
-            pred_values = np.asarray(risk_series.frame["risk_score"], dtype=float)
+            frame = risk_series.frame
+            pred_values = np.asarray(frame["risk_score"], dtype=float)
             boundaries = list(risk_series.boundaries)
             series_usable = True
             backtest_metrics = {
@@ -919,29 +1014,54 @@ def run_backtest(self, job_id: int, parameters: dict):
             )
             if target_col is not None:
                 target_series = np.asarray(test_data[target_col].values, dtype=float)
-                if offsets.size and offsets.max() < target_series.size:
-                    actuals = target_series[offsets]
+                predicted_offsets = np.asarray(frame["predicted_row_offset"], dtype=int)
+                mask, aligned_actuals, aligned_preds = align_series_targets(
+                    predicted_offsets, target_series, pred_values
+                )
+                if mask.any():
+                    # The aligned subset drops rows (each source's final window
+                    # has no predicted row in range), so the seam boundaries
+                    # are rebuilt from the aligned per-source counts rather
+                    # than reused from the full-length series.
+                    source_labels = frame["source"].to_numpy()
+                    valid_counts = [
+                        int(((source_labels == name) & mask).sum())
+                        for name in risk_series.sources
+                    ]
+                    aligned_boundaries = list(boundaries_from_group_sizes(valid_counts))
+                    actuals_full = np.full(pred_values.size, np.nan)
+                    actuals_full[mask] = aligned_actuals
                 else:
-                    backtest_metrics["target_alignment"] = "skipped: risk-series rows are no longer in range"
+                    aligned_actuals = None
+                    aligned_preds = None
+                    backtest_metrics["target_alignment"] = (
+                        "skipped: no risk-series row has a finite in-range target "
+                        "at the row it predicts (predicted_row_offset)"
+                    )
                     logger.warning(
-                        "Backtest target alignment skipped for job %s: risk-series row positions "
-                        "fall outside the test frame",
+                        "Backtest target alignment skipped for job %s: no predicted "
+                        "row position resolves to a finite target",
                         job_id,
                     )
 
-            if actuals is not None and pred_values.size == actuals.size and pred_values.size > 0:
-                mse = float(np.mean((actuals - pred_values) ** 2))
-                mae = float(np.mean(np.abs(actuals - pred_values)))
-                ss_res = float(np.sum((actuals - pred_values) ** 2))
-                ss_tot = float(np.sum((actuals - np.mean(actuals)) ** 2))
+            if aligned_actuals is not None and aligned_actuals.size > 0:
+                mse = float(np.mean((aligned_actuals - aligned_preds) ** 2))
+                mae = float(np.mean(np.abs(aligned_actuals - aligned_preds)))
+                ss_res = float(np.sum((aligned_actuals - aligned_preds) ** 2))
+                ss_tot = float(np.sum((aligned_actuals - np.mean(aligned_actuals)) ** 2))
                 backtest_metrics.update({
                     "mse": mse,
                     "mae": mae,
                     "rmse": float(np.sqrt(mse)),
                     "r2": float(1 - (ss_res / (ss_tot + 1e-8))),
+                    "n_aligned": int(aligned_actuals.size),
+                    "target_alignment": (
+                        "predicted_row_offset: the score for the window ending at "
+                        "row t is paired with the target at row t+1 of the same source"
+                    ),
                     # Awareness of source seams is part of the metric, not a caveat.
                     "directional_accuracy": _directional_accuracy(
-                        actuals, pred_values, boundaries
+                        aligned_actuals, aligned_preds, aligned_boundaries
                     ),
                 })
             elif target_col is None:
@@ -1011,9 +1131,19 @@ def run_backtest(self, job_id: int, parameters: dict):
         # point. A ground-truth target is optional: without it the error metrics
         # are undefined and only the direction-free diagnostics are reported.
         if series_usable:
-            quant_metrics = compute_metrics(
-                actual=actuals, predicted=pred_values, boundaries=boundaries or None
-            )
+            if aligned_actuals is not None:
+                # Error metrics are computed on the aligned subset with its own
+                # rebuilt seams; the full-length series stays available for the
+                # fold diagnostics below.
+                quant_metrics = compute_metrics(
+                    actual=aligned_actuals,
+                    predicted=aligned_preds,
+                    boundaries=aligned_boundaries or None,
+                )
+            else:
+                quant_metrics = compute_metrics(
+                    actual=None, predicted=pred_values, boundaries=boundaries or None
+                )
             for quant_key in quant_keys:
                 if quant_key in quant_metrics:
                     backtest_metrics[quant_key] = quant_metrics[quant_key]
@@ -1047,7 +1177,7 @@ def run_backtest(self, job_id: int, parameters: dict):
                         "n_train": int(train_idx.size),
                         "n_test": int(test_idx.size),
                         "metrics": compute_metrics(
-                            actual=None if actuals is None else actuals[test_idx],
+                            actual=_fold_actuals(actuals_full, test_idx),
                             predicted=pred_values[test_idx],
                         ),
                     })

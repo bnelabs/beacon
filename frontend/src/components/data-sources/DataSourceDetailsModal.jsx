@@ -187,41 +187,41 @@ export default function DataSourceDetailsModal({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {metadata.map((item) => (
             <div key={item.label}>
-              <p className="text-xs uppercase tracking-wide text-bne-steel">{item.label}</p>
+              <p className="text-xs uppercase tracking-wide text-bne-muted">{item.label}</p>
               <p className="text-sm font-medium text-bne-ink mt-1 break-words">{item.value}</p>
             </div>
           ))}
         </div>
 
         {source.error_message && (
-          <div className="rounded-lg border border-bne-crimson/30 bg-bne-crimson/10 px-4 py-3 text-sm text-bne-crimson">
+          <div className="rounded-lg border border-bne-clay/30 bg-bne-clay/10 px-4 py-3 text-sm text-bne-clay">
             <strong className="block mb-1">Last error</strong>
             <span className="font-mono">{source.error_message}</span>
           </div>
         )}
 
         <div>
-          <p className="text-xs uppercase tracking-wide text-bne-steel mb-2">Configuration</p>
-          <pre className="max-h-64 overflow-auto rounded-lg border border-bne-frost bg-bne-ice/60 p-4 text-xs text-bne-ink font-mono">
+          <p className="text-xs uppercase tracking-wide text-bne-muted mb-2">Configuration</p>
+          <pre className="max-h-64 overflow-auto rounded-lg border border-bne-line bg-bne-paper/60 p-4 text-xs text-bne-ink font-mono">
             {configJson}
           </pre>
         </div>
 
         <div>
-          <p className="text-xs uppercase tracking-wide text-bne-steel mb-2">Available Datasets</p>
+          <p className="text-xs uppercase tracking-wide text-bne-muted mb-2">Available Datasets</p>
           {isLoading ? (
             <div className="flex justify-center py-6">
               <LoadingSpinner message="Loading datasets..." />
             </div>
           ) : error ? (
-            <div className="rounded-lg border border-bne-crimson/30 bg-bne-crimson/10 px-4 py-3 text-sm text-bne-crimson">
+            <div className="rounded-lg border border-bne-clay/30 bg-bne-clay/10 px-4 py-3 text-sm text-bne-clay">
               Failed to load datasets: {error.message}
             </div>
           ) : catalogueItems && catalogueItems.length > 0 ? (
             <>
               <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 mb-4">
                 <div className="lg:col-span-2">
-                  <label className="block text-xs uppercase tracking-wide text-bne-steel mb-1">
+                  <label className="block text-xs uppercase tracking-wide text-bne-muted mb-1">
                     Search datasets
                   </label>
                   <input
@@ -229,17 +229,17 @@ export default function DataSourceDetailsModal({
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
                     placeholder="Filter by code, name, or category"
-                    className="w-full px-3 py-2 border border-bne-frost rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="w-full px-3 py-2 border border-bne-line rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs uppercase tracking-wide text-bne-steel mb-1">
+                  <label className="block text-xs uppercase tracking-wide text-bne-muted mb-1">
                     Region
                   </label>
                   <select
                     value={regionFilter}
                     onChange={(event) => setRegionFilter(event.target.value)}
-                    className="w-full px-3 py-2 border border-bne-frost rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="w-full px-3 py-2 border border-bne-line rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   >
                     <option value="all">All regions</option>
                     {regions.map((region) => (
@@ -250,13 +250,13 @@ export default function DataSourceDetailsModal({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs uppercase tracking-wide text-bne-steel mb-1">
+                  <label className="block text-xs uppercase tracking-wide text-bne-muted mb-1">
                     Country
                   </label>
                   <select
                     value={countryFilter}
                     onChange={(event) => setCountryFilter(event.target.value)}
-                    className="w-full px-3 py-2 border border-bne-frost rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="w-full px-3 py-2 border border-bne-line rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   >
                     <option value="all">All countries</option>
                     {countries.map((country) => (
@@ -266,17 +266,17 @@ export default function DataSourceDetailsModal({
                     ))}
                   </select>
                 </div>
-                <div className="bg-bne-ice/60 border border-bne-frost rounded-lg p-3">
-                  <p className="text-xs uppercase tracking-wide text-bne-steel mb-1">Quick summary</p>
+                <div className="bg-bne-paper/60 border border-bne-line rounded-lg p-3">
+                  <p className="text-xs uppercase tracking-wide text-bne-muted mb-1">Quick summary</p>
                   <p className="text-lg font-semibold text-bne-ink">{datasetSummary.total}</p>
-                  <p className="text-xs text-bne-steel mt-1">
+                  <p className="text-xs text-bne-muted mt-1">
                     datasets match your filters
                   </p>
                 </div>
               </div>
 
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
-                <span className="text-xs text-bne-steel">{selectionCount} selected</span>
+                <span className="text-xs text-bne-muted">{selectionCount} selected</span>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     type="button"
@@ -311,14 +311,14 @@ export default function DataSourceDetailsModal({
                 </div>
               </div>
 
-              <div className="max-h-64 overflow-y-auto rounded-lg border border-bne-frost">
+              <div className="max-h-64 overflow-y-auto rounded-lg border border-bne-line">
                 <table className="min-w-full text-sm">
-                  <thead className="bg-bne-ice/60 text-bne-steel text-xs uppercase">
+                  <thead className="bg-bne-paper/60 text-bne-muted text-xs uppercase">
                     <tr>
                       <th className="px-2 py-2 text-left">
                         <input
                           type="checkbox"
-                          className="h-4 w-4 rounded border-bne-frost text-bne-azure focus:ring-bne-azure"
+                          className="h-4 w-4 rounded border-bne-line text-bne-pine focus:ring-bne-pine"
                           checked={allSelected}
                           onChange={() => (allSelected ? clearSelection() : selectAll())}
                           aria-label="Select all datasets"
@@ -338,24 +338,24 @@ export default function DataSourceDetailsModal({
                       return (
                       <tr
                         key={item.id}
-                        className={`border-t border-bne-frost cursor-pointer hover:bg-bne-ice/40 ${isPreviewed ? 'bg-bne-ice/60' : ''}`}
+                        className={`border-t border-bne-line cursor-pointer hover:bg-bne-paper/40 ${isPreviewed ? 'bg-bne-paper/60' : ''}`}
                         onClick={() => setPreviewDataset(item)}
                       >
                         <td className="px-2 py-2">
                           <input
                             type="checkbox"
-                            className="h-4 w-4 rounded border-bne-frost text-bne-azure focus:ring-bne-azure"
+                            className="h-4 w-4 rounded border-bne-line text-bne-pine focus:ring-bne-pine"
                             checked={isSelected}
                             onChange={() => toggleDataset(item.id)}
                             aria-label={`Select dataset ${item.code}`}
                             onClick={(event) => event.stopPropagation()}
                           />
                         </td>
-                        <td className="px-3 py-2 font-mono text-xs text-bne-steel">{item.id}</td>
+                        <td className="px-3 py-2 font-mono text-xs text-bne-muted">{item.id}</td>
                         <td className="px-3 py-2 font-mono text-xs text-bne-ink">{item.code}</td>
                         <td className="px-3 py-2 text-bne-ink">{item.name}</td>
-                        <td className="px-3 py-2 text-bne-steel text-xs uppercase">{item.category?.replace(/_/g, ' ')}</td>
-                        <td className="px-3 py-2 text-bne-steel text-xs uppercase">{item.region?.replace(/_/g, ' ')}</td>
+                        <td className="px-3 py-2 text-bne-muted text-xs uppercase">{item.category?.replace(/_/g, ' ')}</td>
+                        <td className="px-3 py-2 text-bne-muted text-xs uppercase">{item.region?.replace(/_/g, ' ')}</td>
                       </tr>
                     )})}
                   </tbody>
@@ -363,14 +363,14 @@ export default function DataSourceDetailsModal({
               </div>
 
               {previewDataset && (
-                <div className="mt-4 rounded-lg border border-bne-frost bg-bne-ice/40 p-4">
+                <div className="mt-4 rounded-lg border border-bne-line bg-bne-paper/40 p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-bne-steel mb-1">
+                      <p className="text-xs uppercase tracking-wide text-bne-muted mb-1">
                         Dataset insight
                       </p>
                       <h4 className="text-lg font-semibold text-bne-ink">{previewDataset.name}</h4>
-                      <p className="text-xs text-bne-steel mt-1">
+                      <p className="text-xs text-bne-muted mt-1">
                         {previewDataset.code} · {previewDataset.region || 'Global'} · {previewDataset.category?.replace(/_/g, ' ')}
                       </p>
                     </div>
@@ -387,34 +387,34 @@ export default function DataSourceDetailsModal({
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 text-sm">
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-bne-steel">Country</p>
+                      <p className="text-xs uppercase tracking-wide text-bne-muted">Country</p>
                       <p className="font-medium text-bne-ink mt-1">
                         {previewDataset.country_code || previewDataset.country || 'Multiple'}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-bne-steel">Frequency</p>
+                      <p className="text-xs uppercase tracking-wide text-bne-muted">Frequency</p>
                       <p className="font-medium text-bne-ink mt-1">
                         {previewDataset.frequency || previewDataset.update_frequency || 'Not provided'}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-bne-steel">Latest coverage</p>
+                      <p className="text-xs uppercase tracking-wide text-bne-muted">Latest coverage</p>
                       <p className="font-medium text-bne-ink mt-1">
                         {previewDataset.last_updated || previewDataset.coverage_end || 'Unknown'}
                       </p>
                     </div>
                   </div>
                   {previewDataset.description && (
-                    <p className="text-sm text-bne-steel mt-3">
+                    <p className="text-sm text-bne-muted mt-3">
                       {previewDataset.description}
                     </p>
                   )}
                   {previewDataset.sample_metrics && (
                     <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                       {Object.entries(previewDataset.sample_metrics).map(([key, value]) => (
-                        <div key={key} className="rounded-lg border border-bne-frost bg-white px-3 py-2">
-                          <p className="uppercase tracking-wide text-bne-steel">{key.replace(/_/g, ' ')}</p>
+                        <div key={key} className="rounded-lg border border-bne-line bg-bne-card px-3 py-2">
+                          <p className="uppercase tracking-wide text-bne-muted">{key.replace(/_/g, ' ')}</p>
                           <p className="text-sm font-semibold text-bne-ink mt-1">{value}</p>
                         </div>
                       ))}
@@ -424,7 +424,7 @@ export default function DataSourceDetailsModal({
               )}
             </>
           ) : (
-            <p className="text-sm text-bne-steel">No datasets registered for this data source yet.</p>
+            <p className="text-sm text-bne-muted">No datasets registered for this data source yet.</p>
           )}
         </div>
       </div>

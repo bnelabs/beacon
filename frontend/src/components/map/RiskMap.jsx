@@ -10,7 +10,8 @@ import { normalizeNetworkGraph, useNetworkGraph } from '../../hooks/useApi'
 import { regions } from '../../data/regions'
 import regionBoundaries from '../../data/region-boundaries.json'
 
-const BASEMAP_URL = 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+// Warm-light basemap: the identity is paper, ink and clay — no dark chrome.
+const BASEMAP_URL = 'https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'
 
 // Visual placeholder for a region with no scored corridor. It is a colour input,
 // not a financial figure: a risk score is never invented for an exposure that
@@ -20,7 +21,7 @@ const NEUTRAL_REGION_RISK = 0.35
 // Neutral arc colour used when the API reports no risk score for an edge.
 // Painting an unscored exposure with a "low risk" green would assert something
 // the data does not say.
-const UNSCORED_ARC_COLOR = [96, 165, 250]
+const UNSCORED_ARC_COLOR = [138, 129, 104]
 
 const MAX_BANK_POINTS = 500
 
@@ -35,10 +36,11 @@ const INITIAL_VIEW_STATE = {
 }
 
 const HEAT_COLOR_RANGE = [
-  [29, 78, 216, 0],
-  [16, 185, 129, 120],
-  [245, 158, 11, 180],
-  [220, 38, 38, 230]
+  [103, 133, 79, 0],
+  [103, 133, 79, 100],
+  [194, 154, 51, 160],
+  [192, 95, 44, 205],
+  [138, 51, 32, 235]
 ]
 
 const MAP_VIEW = new MapView({ id: 'risk-map-view', controller: true, repeat: true })
@@ -253,9 +255,9 @@ export default function RiskMap({
         filled: true,
         pickable: true,
         getFillColor: (feature) =>
-          feature.properties.iso3 === selectedIso3 ? [0, 102, 204, 70] : [15, 23, 42, 40],
+          feature.properties.iso3 === selectedIso3 ? [44, 85, 69, 46] : [110, 102, 83, 14],
         getLineColor: (feature) =>
-          feature.properties.iso3 === selectedIso3 ? [147, 197, 253, 255] : [96, 165, 250, 110],
+          feature.properties.iso3 === selectedIso3 ? [44, 85, 69, 255] : [110, 102, 83, 105],
         getLineWidth: (feature) => (feature.properties.iso3 === selectedIso3 ? 2 : 1),
         lineWidthUnits: 'pixels',
         updateTriggers: {
@@ -318,8 +320,8 @@ export default function RiskMap({
         lineWidthUnits: 'pixels',
         getPosition: (point) => point.position,
         getRadius: regionPointRadius,
-        getFillColor: (point) => riskColor(point.risk, 200),
-        getLineColor: [15, 23, 42, 220],
+        getFillColor: (point) => riskColor(point.risk, 215),
+        getLineColor: [252, 250, 244, 235],
         getLineWidth: 1.5
       })
     )
@@ -336,8 +338,8 @@ export default function RiskMap({
           lineWidthUnits: 'pixels',
           getPosition: (point) => point.position,
           getRadius: (point) => 3.5 + point.risk * 9,
-          getFillColor: (point) => riskColor(point.risk, 210),
-          getLineColor: [248, 250, 252, 180],
+          getFillColor: (point) => riskColor(point.risk, 225),
+          getLineColor: [252, 250, 244, 210],
           getLineWidth: 1
         })
       )
@@ -356,8 +358,8 @@ export default function RiskMap({
           getPosition: (region) => [region.lon, region.lat],
           getRadius: (region) =>
             regionPointRadius({ bankCount: region.bankCount, risk: riskByRegion[region.id] ?? 0.35 }) + 5,
-          getLineColor: [255, 255, 255, 235],
-          getLineWidth: 3
+          getLineColor: [38, 33, 26, 235],
+          getLineWidth: 2.5
         })
       )
     }
@@ -370,14 +372,14 @@ export default function RiskMap({
         getPosition: (point) => point.position,
         getText: (point) => point.name,
         getSize: 11,
-        getColor: [226, 232, 240, 230],
+        getColor: [38, 33, 26, 235],
         getPixelOffset: [0, 16],
         getTextAnchor: 'middle',
         getAlignmentBaseline: 'top',
-        fontFamily: 'Inter, system-ui, sans-serif',
+        fontFamily: 'ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif',
         fontWeight: 600,
         outlineWidth: 2,
-        outlineColor: [15, 23, 42, 220]
+        outlineColor: [246, 242, 233, 235]
       })
     )
 
@@ -444,7 +446,7 @@ export default function RiskMap({
     <div
       data-testid="risk-map"
       aria-label="Systemic liquidity risk map"
-      className="relative h-full w-full overflow-hidden rounded-2xl bg-[#0b1120]"
+      className="relative h-full w-full overflow-hidden rounded-md border border-bne-line bg-bne-paper-dim"
     >
       <DeckGL
         views={MAP_VIEW}
@@ -462,10 +464,10 @@ export default function RiskMap({
           className={[
             'absolute left-4 top-4 z-10 max-w-xs rounded-lg px-3 py-2 text-xs',
             fallbackActive
-              ? 'bg-amber-500/90 text-slate-950'
+              ? 'bg-bne-ochre-50/95 text-bne-ochre-600 border border-bne-ochre/40'
               : networkIsError
-              ? 'bg-red-900/85 text-red-50'
-              : 'bg-slate-950/80 text-slate-200'
+              ? 'bg-bne-clay-50/95 text-bne-clay-600 border border-bne-clay/40'
+              : 'bg-bne-card/95 text-bne-ink-soft border border-bne-line'
           ].join(' ')}
         >
           <p>{networkStatus}</p>
@@ -485,7 +487,7 @@ export default function RiskMap({
 
       <div
         data-testid="map-attribution"
-        className="pointer-events-none absolute bottom-0 left-0 z-10 rounded-tr-lg bg-slate-950/70 px-2 py-1 text-[10px] text-slate-300"
+        className="pointer-events-none absolute bottom-0 left-0 z-10 rounded-tr-md bg-bne-card/85 border-r border-t border-bne-line px-2 py-1 text-[10px] text-bne-faint"
       >
         © OpenStreetMap contributors © CARTO
       </div>

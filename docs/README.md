@@ -12,10 +12,11 @@ they stayed stale for ten months without anyone noticing.
 | [`../README.md`](../README.md) | Project entry point: quick start, architecture, data governance, model security, backtesting, migrations, CI |
 | [`api.md`](api.md) | API protocol — error envelope and codes, jobs vs. pipeline, prediction gating, data-quality score, notifications, the job WebSocket |
 | [`api-endpoints.md`](api-endpoints.md) | **Generated.** Every route and tag, read from the FastAPI app |
-| [`frontend.md`](frontend.md) | UI stack, pages and navigation model, data fetching, ⌘K search, onboarding, risk map, jobs/WebSocket status |
+| [`frontend.md`](frontend.md) | Design system and brand, UI stack, pages and navigation model, data fetching, ⌘K search, onboarding, risk map, jobs/WebSocket status |
 | [`deployment.md`](deployment.md) | Deploying on this host: Docker Compose, GPU, model weights, secrets, verification |
 | [`../.github/workflows/README.md`](../.github/workflows/README.md) | CI/CD workflows and how to reproduce each locally |
 | [`FIFTH_ROUND_RESPONSE.md`](FIFTH_ROUND_RESPONSE.md) | Fifth-round (last-mile) review: claim audit, wiring executed, rejections with reasons |
+| [`QUANT_REVIEW_2026-09.md`](QUANT_REVIEW_2026-09.md) | Fourth-round external quant review: trajectory, per-subsystem verdicts, findings register with dispositions, phased fix plan |
 
 ## Historical records
 

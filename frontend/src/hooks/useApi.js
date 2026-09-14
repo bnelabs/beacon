@@ -1,50 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { fetchApi } from '../utils/apiClient'
 
-const API_BASE_URL = '/api'
-
-async function fetchApi(endpoint, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers
-    },
-    ...options
-  })
-
-  if (!response.ok) {
-    const errorPayload = await response.json().catch(() => ({ detail: 'Request failed' }))
-    const detail = errorPayload.detail
-    let message
-
-    if (typeof detail === 'string') {
-      message = detail
-    } else if (detail?.user_friendly) {
-      message = detail.user_friendly
-    } else if (detail?.technical) {
-      message = detail.technical
-    } else if (detail) {
-      try {
-        message = JSON.stringify(detail)
-      } catch (error) {
-        message = 'Request failed'
-      }
-    } else {
-      message = `HTTP ${response.status}`
-    }
-
-    throw new Error(message)
-  }
-
-  // A 204 (or any empty body) must not be parsed as JSON: response.json()
-  // throws on an empty body, which surfaced as a spurious "Request failed"
-  // error on DELETE endpoints that correctly return no content.
-  if (response.status === 204) {
-    return null
-  }
-
-  const body = await response.text()
-  return body ? JSON.parse(body) : null
-}
 
 function buildQueryString(params = {}) {
   const query = new URLSearchParams()
@@ -334,4 +290,20 @@ export function normalizeNetworkGraph(payload) {
     metadata:
       payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}
   }
+}
+
+/**
+ * Live system status from GET /api/v1/system/status (cpu/memory/gpu/disk).
+ * The dashboard used to render hardcoded "Operational/Connected/Active"
+ * badges — invented states. It now renders what the backend measured, and
+ * an unreachable backend renders as unknown, not as green.
+ */
+export function useSystemStatus(options = {}) {
+  return useQuery({
+    queryKey: ['systemStatus'],
+    queryFn: () => fetchApi('/v1/system/status'),
+    refetchInterval: options.refetchInterval ?? 30_000,
+    retry: 1,
+    ...options
+  })
 }

@@ -19,10 +19,10 @@ function ModelActionsMenu({ onEdit, onDuplicate, onDelete }) {
         </svg>
       </Button>
       {open && (
-        <div className="absolute right-0 mt-2 w-40 rounded-xl border border-bne-frost bg-white shadow-bne-card z-20">
-          <button className="w-full px-4 py-2 text-left text-sm hover:bg-bne-ice" onClick={() => { setOpen(false); onEdit?.() }}>Edit Metadata</button>
-          <button className="w-full px-4 py-2 text-left text-sm hover:bg-bne-ice" onClick={() => { setOpen(false); onDuplicate?.() }}>Duplicate</button>
-          <button className="w-full px-4 py-2 text-left text-sm text-bne-crimson hover:bg-bne-crimson/10" onClick={() => { setOpen(false); onDelete?.() }}>Delete</button>
+        <div className="absolute right-0 mt-2 w-40 rounded-md border border-bne-line bg-bne-card shadow-bne-card z-20">
+          <button className="w-full px-4 py-2 text-left text-sm hover:bg-bne-paper" onClick={() => { setOpen(false); onEdit?.() }}>Edit Metadata</button>
+          <button className="w-full px-4 py-2 text-left text-sm hover:bg-bne-paper" onClick={() => { setOpen(false); onDuplicate?.() }}>Duplicate</button>
+          <button className="w-full px-4 py-2 text-left text-sm text-bne-clay hover:bg-bne-clay/10" onClick={() => { setOpen(false); onDelete?.() }}>Delete</button>
         </div>
       )}
     </div>
@@ -33,11 +33,11 @@ function TrainModelModal({ isOpen, onClose, model }) {
   if (!isOpen || !model) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bne-ink/40">
       <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" as="div">
         <CardHeader className="flex items-center justify-between">
           <CardTitle>Train Model · {model.name}</CardTitle>
-          <button onClick={onClose} className="p-2 hover:bg-bne-frost rounded-lg">
+          <button onClick={onClose} className="p-2 hover:bg-bne-paper-dim rounded-lg">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -47,26 +47,26 @@ function TrainModelModal({ isOpen, onClose, model }) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-bne-ink mb-2">Training Job Name</label>
-              <input type="text" defaultValue={`${model.name} Training`} className="w-full px-4 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure" />
+              <input type="text" defaultValue={`${model.name} Training`} className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine" />
             </div>
             <div>
               <label className="block text-sm font-medium text-bne-ink mb-2">Epochs</label>
-              <input type="number" defaultValue={25} min={1} className="w-full px-4 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure" />
+              <input type="number" defaultValue={25} min={1} className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine" />
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-bne-ink mb-2">Learning Rate</label>
-              <input type="number" step="0.0001" defaultValue={0.001} className="w-full px-4 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure" />
+              <input type="number" step="0.0001" defaultValue={0.001} className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine" />
             </div>
             <div>
               <label className="block text-sm font-medium text-bne-ink mb-2">Batch Size</label>
-              <input type="number" defaultValue={32} className="w-full px-4 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure" />
+              <input type="number" defaultValue={32} className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine" />
             </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-bne-ink mb-2">Notes</label>
-            <textarea rows={3} className="w-full px-4 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure" placeholder="Describe training objective, dataset, or experiment notes." />
+            <textarea rows={3} className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine" placeholder="Describe training objective, dataset, or experiment notes." />
           </div>
         </CardContent>
         <CardFooter className="justify-end">
@@ -155,14 +155,14 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div className="absolute inset-0 bg-bne-ink/25" onClick={onClose} />
       <Card className="relative z-50 w-full max-w-xl h-full overflow-y-auto shadow-2xl" as="div">
         <CardHeader className="flex items-center justify-between">
           <div>
             <CardTitle>{model.name}</CardTitle>
-            <p className="text-sm text-bne-steel mt-1">{model.description || 'No description provided'}</p>
+            <p className="text-sm text-bne-muted mt-1">{model.description || 'No description provided'}</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-bne-frost rounded-lg">
+          <button onClick={onClose} className="p-2 hover:bg-bne-paper-dim rounded-lg">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -171,7 +171,7 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
         <CardContent className="space-y-6">
           <section className="space-y-4">
             <h4 className="text-sm font-semibold text-bne-ink">Scenario Builder</h4>
-            <p className="text-xs text-bne-steel">
+            <p className="text-xs text-bne-muted">
               Adjust key data series to explore what-if outcomes without retraining. Positive values increase the series, negative values decrease it.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -182,7 +182,7 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
                   value={scenarioName}
                   onChange={(event) => setScenarioName(event.target.value)}
                   placeholder="e.g., Volatility +20%"
-                  className="w-full px-3 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                  className="w-full px-3 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
                 />
               </div>
               <div>
@@ -190,7 +190,7 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
                 <select
                   value={horizonDays}
                   onChange={(event) => setHorizonDays(Number(event.target.value))}
-                  className="w-full px-3 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                  className="w-full px-3 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
                 >
                   {[7, 14, 30, 60, 90].map((value) => (
                     <option key={value} value={value}>{value} days</option>
@@ -207,7 +207,7 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
                     <div key={source}>
                       <div className="flex items-center justify-between text-xs font-medium text-bne-ink mb-1">
                         <span>{source}</span>
-                        <span className="text-bne-steel">{value > 0 ? '+' : ''}{value}%</span>
+                        <span className="text-bne-muted">{value > 0 ? '+' : ''}{value}%</span>
                       </div>
                       <input
                         type="range"
@@ -223,13 +223,13 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
                 })}
               </div>
             ) : (
-              <p className="text-xs text-bne-steel">
+              <p className="text-xs text-bne-muted">
                 No per-source metrics available for this model. Scenario adjustments require identifiable source series.
               </p>
             )}
 
             {scenarioError && (
-              <div className="rounded-lg border border-bne-crimson/30 bg-bne-crimson/10 px-3 py-2 text-xs text-bne-crimson">
+              <div className="rounded-lg border border-bne-clay/30 bg-bne-clay/10 px-3 py-2 text-xs text-bne-clay">
                 {scenarioError}
               </div>
             )}
@@ -244,19 +244,19 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
             </div>
 
             {scenarioResult && (
-              <div className="rounded-xl border border-bne-frost bg-bne-ice/40 p-4 space-y-3">
+              <div className="rounded-md border border-bne-line bg-bne-paper/40 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-semibold text-bne-ink">{scenarioResult.name}</p>
-                    <p className="text-xs text-bne-steel">
+                    <p className="text-xs text-bne-muted">
                       Avg risk score: {scenarioResult.summary?.avg_risk_score?.toFixed?.(4) ?? '0.0000'} · Sources: {scenarioResult.summary?.num_series ?? 0}
                     </p>
                   </div>
                   <Badge variant="primary" size="sm">Scenario</Badge>
                 </div>
-                <div className="max-h-48 overflow-y-auto rounded-lg border border-bne-frost">
+                <div className="max-h-48 overflow-y-auto rounded-lg border border-bne-line">
                   <table className="min-w-full text-xs">
-                    <thead className="bg-bne-ice/60 text-bne-steel uppercase">
+                    <thead className="bg-bne-paper/60 text-bne-muted uppercase">
                       <tr>
                         <th className="text-left px-3 py-2">Source</th>
                         <th className="text-left px-3 py-2">Prediction</th>
@@ -265,7 +265,7 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
                     </thead>
                     <tbody>
                       {scenarioResult.predictions.map((item) => (
-                        <tr key={item.source} className="border-t border-bne-frost">
+                        <tr key={item.source} className="border-t border-bne-line">
                           <td className="px-3 py-2 font-medium text-bne-ink">{item.source}</td>
                           <td className="px-3 py-2 font-mono text-bne-ink">{item.prediction?.toFixed?.(4) ?? '—'}</td>
                           <td className="px-3 py-2 font-mono text-bne-ink">{item.risk_score?.toFixed?.(4) ?? '—'}</td>
@@ -280,18 +280,18 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
           <section>
             <h4 className="text-sm font-semibold text-bne-ink mb-2">Overview</h4>
             <div className="grid grid-cols-2 gap-4 text-sm">
-              <div><span className="text-bne-steel">Status</span><p className="font-medium text-bne-ink">{model.status}</p></div>
-              <div><span className="text-bne-steel">Architecture</span><p className="font-medium text-bne-ink">{model.architecture || 'LSTM'}</p></div>
-              <div><span className="text-bne-steel">Input Features</span><p className="font-medium text-bne-ink">{model.input_features || '—'}</p></div>
-              <div><span className="text-bne-steel">Prediction Steps</span><p className="font-medium text-bne-ink">{model.prediction_steps || '—'}</p></div>
-              <div><span className="text-bne-steel">Last Trained</span><p className="font-medium text-bne-ink">{model.last_trained ? new Date(model.last_trained).toLocaleString() : 'Never'}</p></div>
-              <div><span className="text-bne-steel">Accuracy</span><p className="font-medium text-bne-emerald">{model.accuracy ? `${model.accuracy}%` : '—'}</p></div>
+              <div><span className="text-bne-muted">Status</span><p className="font-medium text-bne-ink">{model.status}</p></div>
+              <div><span className="text-bne-muted">Architecture</span><p className="font-medium text-bne-ink">{model.architecture || 'LSTM'}</p></div>
+              <div><span className="text-bne-muted">Input Features</span><p className="font-medium text-bne-ink">{model.input_features || '—'}</p></div>
+              <div><span className="text-bne-muted">Prediction Steps</span><p className="font-medium text-bne-ink">{model.prediction_steps || '—'}</p></div>
+              <div><span className="text-bne-muted">Last Trained</span><p className="font-medium text-bne-ink">{model.last_trained ? new Date(model.last_trained).toLocaleString() : 'Never'}</p></div>
+              <div><span className="text-bne-muted">Accuracy</span><p className="font-medium text-bne-moss">{model.accuracy ? `${model.accuracy}%` : '—'}</p></div>
             </div>
           </section>
           {model.hyperparameters && (
             <section>
               <h4 className="text-sm font-semibold text-bne-ink mb-2">Hyperparameters</h4>
-              <pre className="bg-bne-ice/70 rounded-xl p-4 text-xs text-bne-ink font-mono overflow-auto">
+              <pre className="bg-bne-paper/70 rounded-md p-4 text-xs text-bne-ink font-mono overflow-auto">
                 {JSON.stringify(model.hyperparameters, null, 2)}
               </pre>
             </section>
@@ -299,7 +299,7 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
           {model.metrics && (
             <section>
               <h4 className="text-sm font-semibold text-bne-ink mb-2">Performance Metrics</h4>
-              <pre className="bg-bne-ice/70 rounded-xl p-4 text-xs text-bne-ink font-mono overflow-auto">
+              <pre className="bg-bne-paper/70 rounded-md p-4 text-xs text-bne-ink font-mono overflow-auto">
                 {JSON.stringify(model.metrics, null, 2)}
               </pre>
             </section>
@@ -307,7 +307,7 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
           {model.data_summary && (
             <section>
               <h4 className="text-sm font-semibold text-bne-ink mb-2">Data Summary</h4>
-              <pre className="bg-bne-ice/70 rounded-xl p-4 text-xs text-bne-ink font-mono overflow-auto">
+              <pre className="bg-bne-paper/70 rounded-md p-4 text-xs text-bne-ink font-mono overflow-auto">
                 {JSON.stringify(model.data_summary, null, 2)}
               </pre>
             </section>
@@ -338,7 +338,7 @@ function ModelCard({ model, onTrain, onViewDetails, onShowMenu }) {
         <div className="flex items-start justify-between">
           <div>
             <CardTitle>{model.name}</CardTitle>
-            <p className="text-sm text-bne-steel mt-1">{model.description}</p>
+            <p className="text-sm text-bne-muted mt-1">{model.description}</p>
           </div>
           <Badge variant={statusVariants[model.status] || 'default'}>
             {model.status}
@@ -349,25 +349,25 @@ function ModelCard({ model, onTrain, onViewDetails, onShowMenu }) {
       <CardContent>
         <div className="space-y-3">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-bne-steel">Architecture</span>
+            <span className="text-bne-muted">Architecture</span>
             <span className="font-medium text-bne-ink">{model.architecture || 'LSTM'}</span>
           </div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-bne-steel">Input Features</span>
+            <span className="text-bne-muted">Input Features</span>
             <span className="font-medium text-bne-ink">{model.input_features || 12}</span>
           </div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-bne-steel">Prediction Steps</span>
+            <span className="text-bne-muted">Prediction Steps</span>
             <span className="font-medium text-bne-ink">{model.prediction_steps || 4}</span>
           </div>
           {model.accuracy && (
             <div className="flex items-center justify-between text-sm">
-              <span className="text-bne-steel">Accuracy</span>
-              <span className="font-medium text-bne-emerald">{model.accuracy}%</span>
+              <span className="text-bne-muted">Accuracy</span>
+              <span className="font-medium text-bne-moss">{model.accuracy}%</span>
             </div>
           )}
           <div className="flex items-center justify-between text-sm">
-            <span className="text-bne-steel">Last Trained</span>
+            <span className="text-bne-muted">Last Trained</span>
             <span className="font-medium text-bne-ink">
               {model.last_trained ? new Date(model.last_trained).toLocaleDateString() : 'Never'}
             </span>
@@ -396,14 +396,14 @@ function NewModelModal({ isOpen, onClose }) {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-bne-ink/40 flex items-center justify-center z-50">
       <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>Create New Model</CardTitle>
             <button
               onClick={onClose}
-              className="p-2 hover:bg-bne-frost rounded-lg transition-colors"
+              className="p-2 hover:bg-bne-paper-dim rounded-lg transition-colors"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -420,7 +420,7 @@ function NewModelModal({ isOpen, onClose }) {
               </label>
               <input
                 type="text"
-                className="w-full px-4 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
                 placeholder="e.g., FDIC Multi-Scale LSTM"
               />
             </div>
@@ -430,7 +430,7 @@ function NewModelModal({ isOpen, onClose }) {
                 Description
               </label>
               <textarea
-                className="w-full px-4 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
                 rows={3}
                 placeholder="Describe your model..."
               />
@@ -441,7 +441,7 @@ function NewModelModal({ isOpen, onClose }) {
                 <label className="block text-sm font-medium text-bne-ink mb-2">
                   Architecture
                 </label>
-                <select className="w-full px-4 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure">
+                <select className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine">
                   <option>LSTM</option>
                   <option>GRU</option>
                   <option>Transformer</option>
@@ -454,7 +454,7 @@ function NewModelModal({ isOpen, onClose }) {
                 </label>
                 <input
                   type="number"
-                  className="w-full px-4 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                  className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   defaultValue={12}
                 />
               </div>
@@ -467,7 +467,7 @@ function NewModelModal({ isOpen, onClose }) {
                 </label>
                 <input
                   type="number"
-                  className="w-full px-4 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                  className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   defaultValue={20}
                 />
               </div>
@@ -478,7 +478,7 @@ function NewModelModal({ isOpen, onClose }) {
                 </label>
                 <input
                   type="number"
-                  className="w-full px-4 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                  className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   defaultValue={4}
                 />
               </div>
@@ -488,7 +488,7 @@ function NewModelModal({ isOpen, onClose }) {
               <label className="block text-sm font-medium text-bne-ink mb-2">
                 Data Source
               </label>
-              <select className="w-full px-4 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure">
+              <select className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine">
                 <option>FDIC</option>
                 <option>ECB Banking</option>
                 <option>FMP</option>
@@ -612,10 +612,10 @@ export default function Models() {
           </div>
 
           {filteredModels.length === 0 ? (
-            <Card className="border-2 border-dashed border-bne-frost bg-bne-ice/50">
+            <Card className="border-2 border-dashed border-bne-line bg-bne-paper/50">
               <div className="text-center py-12">
                 <svg
-                  className="w-16 h-16 mx-auto text-bne-steel/50 mb-4"
+                  className="w-16 h-16 mx-auto text-bne-muted/50 mb-4"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -628,7 +628,7 @@ export default function Models() {
                   />
                 </svg>
                 <h3 className="text-lg font-semibold text-bne-ink mb-2">No models found</h3>
-                <p className="text-sm text-bne-steel mb-4">
+                <p className="text-sm text-bne-muted mb-4">
                   {filter === 'all'
                     ? 'Create your first model to get started'
                     : `No models with status "${filter}"`}
@@ -675,13 +675,13 @@ export default function Models() {
       />
       <TrainModelModal isOpen={!!trainModelId} onClose={() => setTrainModelId(null)} model={trainTarget} />
       {menuAction && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-bne-ink/25">
           <Card className="w-full max-w-md">
             <CardHeader>
               <CardTitle>Action: {menuAction.action}</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-bne-steel">
+              <p className="text-sm text-bne-muted">
                 Placeholder for {menuAction.action} action on model "{menuAction.model?.name}".
               </p>
             </CardContent>

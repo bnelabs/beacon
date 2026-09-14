@@ -98,6 +98,13 @@ class RiskSeriesResult:
     Rows are grouped by source and time-ordered inside each group, so
     ``boundaries`` marks the seam between consecutive sources: those seams are
     not observations and must never be differenced as if they were.
+
+    Alignment convention: the model predicts the row *after* its window ends.
+    ``frame['row_offset']`` is the caller-frame position of the window's last
+    input row; ``frame['predicted_row_offset']`` is the caller-frame position
+    of the row the score predicts, or ``-1`` when that row falls outside the
+    source's span (each source's final window). Ground-truth comparison must
+    join on ``predicted_row_offset``, never on ``row_offset``.
     """
 
     frame: pd.DataFrame
@@ -625,11 +632,26 @@ class RealPredictionEngine:
                 windows, self._map_source_id(source_code), window_batch
             )
 
-            # Row i of `windows` ends at index i + sequence_length - 1.
+            # Row i of `windows` ends at index i + sequence_length - 1, and the
+            # model was trained to predict the row AFTER the window end
+            # (target = normalized[i + window]). `row_offset` therefore marks
+            # the row the window ends on, and `predicted_row_offset` marks the
+            # row the score is a prediction FOR -- the caller-frame position of
+            # the next row within the same source, or -1 for each source's
+            # final window, whose predicted row lies beyond the source's span
+            # and must never resolve into the next source's rows.
             ends = np.arange(sequence_length - 1, values.size)
+            row_offsets = np.asarray(ordered['__row_offset'])
+            next_positions = ends + 1
+            predicted_row_offsets = np.where(
+                next_positions < values.size,
+                row_offsets[np.minimum(next_positions, values.size - 1)],
+                -1,
+            )
             frame = pd.DataFrame({
                 'source': source_code,
-                'row_offset': np.asarray(ordered['__row_offset'])[ends],
+                'row_offset': row_offsets[ends],
+                'predicted_row_offset': predicted_row_offsets,
                 'risk_score': scores,
                 'prediction': scores * std + mean,
             })
@@ -764,11 +786,16 @@ class RealPredictionEngine:
             avg_risk = max_risk = min_risk = 0.0
 
         executive_summary = f"""
-LIQUIDITY RISK PREDICTION SUMMARY
+LIQUIDITY STRESS FORECAST SUMMARY
 
-Overall Risk Level: {avg_risk * 100:.1f}%
-Maximum Risk: {max_risk * 100:.1f}%
+Overall model score: {avg_risk:+.3f} (standardized units, uncalibrated)
+Maximum model score: {max_risk:+.3f} (standardized units, uncalibrated)
 Data Sources Analyzed: {len(predictions_df)}
+
+The model score is a one-step-ahead prediction of each indicator's
+standardized next value. It is not a probability, it is not bounded to
+0-100, and its direction of stress depends on the indicator; no calibrated
+mapping to a risk level exists yet (docs/QUANT_REVIEW_2026-09.md, Phase 2).
 
 KEY FINDINGS:
 {self._generate_key_findings(predictions_df)}
@@ -1056,11 +1083,15 @@ reported here rather than approximated.
         valid = predictions_df['prediction'].dropna()
         if len(valid) > 0:
             peak = predictions_df.loc[valid.idxmax()]
+            scores = predictions_df['risk_score'].dropna()
             findings.append(
-                f"- Highest risk score: {peak['source']} ({peak['risk_score'] * 100:.1f}%)"
+                f"- Highest model score: {peak['source']} "
+                f"({float(peak['risk_score']):+.3f} standardized units)"
             )
             findings.append(
-                f"- Mean risk score across {len(valid)} source(s): {valid.mean() * 100:.1f}%"
+                f"- Mean model score across {len(valid)} source(s): "
+                f"{scores.mean():+.3f} (standardized units; indicators carry "
+                f"mixed stress directions, so treat the mean as indicative only)"
             )
         else:
             findings.append("- No valid risk predictions available")

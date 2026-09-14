@@ -11,7 +11,7 @@ export default function LoadingSpinner({ size = 'md', className, message }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3">
       <svg
-        className={cn('animate-spin text-bne-azure', sizes[size], className)}
+        className={cn('animate-spin text-bne-pine', sizes[size], className)}
         viewBox="0 0 24 24"
       >
         <circle
@@ -30,7 +30,7 @@ export default function LoadingSpinner({ size = 'md', className, message }) {
         />
       </svg>
       {message && (
-        <p className="text-sm text-bne-steel animate-pulse">{message}</p>
+        <p className="text-sm text-bne-muted animate-pulse">{message}</p>
       )}
     </div>
   )

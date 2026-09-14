@@ -16,16 +16,16 @@ import DataSourceDetailsModal from '../components/data-sources/DataSourceDetails
 import JobCreationModal from '../components/jobs/JobCreationModal'
 
 const AVAILABLE_PLUGINS = [
-  { value: 'fdic', label: 'FDIC', description: 'Federal Deposit Insurance Corporation', icon: '🏦', enabled: true },
-  { value: 'ecb_banking', label: 'ECB Banking', description: 'European Central Bank Data', icon: '🇪🇺', enabled: true },
-  { value: 'fmp', label: 'FMP', description: 'Financial Modeling Prep', icon: '📊', enabled: true },
-  { value: 'kaggle', label: 'Kaggle Bulk', description: 'Bulk historical datasets', icon: '🗃️', enabled: true },
-  { value: 'yfinance', label: 'Yahoo Finance', description: 'Market data and financials', icon: '📈', enabled: false },
-  { value: 'world_bank', label: 'World Bank', description: 'Global economic indicators', icon: '🌍', enabled: false },
-  { value: 'imf', label: 'IMF', description: 'International Monetary Fund', icon: '💰', enabled: false },
-  { value: 'fred', label: 'FRED', description: 'Federal Reserve Economic Data', icon: '🏛️', enabled: true },
-  { value: 'bis', label: 'BIS', description: 'Bank for International Settlements', icon: '🌐', enabled: true },
-  { value: 'sec_edgar', label: 'SEC EDGAR', description: 'SEC Company Filings', icon: '📄', enabled: true }
+  { value: 'fdic', label: 'FDIC', description: 'Federal Deposit Insurance Corporation', icon: 'FD', enabled: true },
+  { value: 'ecb_banking', label: 'ECB Banking', description: 'European Central Bank Data', icon: 'EC', enabled: true },
+  { value: 'fmp', label: 'FMP', description: 'Financial Modeling Prep', icon: 'FM', enabled: true },
+  { value: 'kaggle', label: 'Kaggle Bulk', description: 'Bulk historical datasets', icon: 'KG', enabled: true },
+  { value: 'yfinance', label: 'Yahoo Finance', description: 'Market data and financials', icon: 'YF', enabled: false },
+  { value: 'world_bank', label: 'World Bank', description: 'Global economic indicators', icon: 'WB', enabled: false },
+  { value: 'imf', label: 'IMF', description: 'International Monetary Fund', icon: 'IM', enabled: false },
+  { value: 'fred', label: 'FRED', description: 'Federal Reserve Economic Data', icon: 'FR', enabled: true },
+  { value: 'bis', label: 'BIS', description: 'Bank for International Settlements', icon: 'BI', enabled: true },
+  { value: 'sec_edgar', label: 'SEC EDGAR', description: 'SEC Company Filings', icon: 'SE', enabled: true }
 ]
 
 function DataSourceCard({ source, onSync, onConfigure, onView, isSyncing = false }) {
@@ -53,7 +53,7 @@ function DataSourceCard({ source, onSync, onConfigure, onView, isSyncing = false
                 {source.status || 'active'}
               </Badge>
             </div>
-            <p className="text-sm text-bne-steel">{source.description}</p>
+            <p className="text-sm text-bne-muted">{source.description}</p>
           </div>
         </div>
       </CardHeader>
@@ -61,24 +61,24 @@ function DataSourceCard({ source, onSync, onConfigure, onView, isSyncing = false
       <CardContent>
         <div className="space-y-3">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-bne-steel">Source Type</span>
+            <span className="text-bne-muted">Source Type</span>
             <span className="font-medium text-bne-ink uppercase">
               {source.plugin_name || source.plugin_type || source.type}
             </span>
           </div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-bne-steel">Last Updated</span>
+            <span className="text-bne-muted">Last Updated</span>
             <span className="font-medium text-bne-ink">
               {lastUpdated ? new Date(lastUpdated).toLocaleDateString() : 'Never'}
             </span>
           </div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-bne-steel">Records</span>
+            <span className="text-bne-muted">Records</span>
             <span className="font-medium text-bne-ink">{source.record_count?.toLocaleString() || '-'}</span>
           </div>
           {source.api_endpoint && (
             <div className="flex items-center justify-between text-sm">
-              <span className="text-bne-steel">Endpoint</span>
+              <span className="text-bne-muted">Endpoint</span>
               <span className="font-mono text-xs text-bne-ink truncate max-w-[200px]">
                 {source.api_endpoint}
               </span>
@@ -86,7 +86,7 @@ function DataSourceCard({ source, onSync, onConfigure, onView, isSyncing = false
           )}
           {(source.coverage_description || source.coverage) && (
             <div className="flex items-center justify-between text-sm">
-              <span className="text-bne-steel">Coverage</span>
+              <span className="text-bne-muted">Coverage</span>
               <span className="font-medium text-bne-ink">{source.coverage_description || source.coverage}</span>
             </div>
           )}
@@ -281,21 +281,21 @@ export default function DataSources() {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {workflowSteps.map((step) => (
-                <div key={step.number} className="rounded-xl border border-bne-frost bg-bne-ice/40 p-4">
+                <div key={step.number} className="rounded-md border border-bne-line bg-bne-paper/40 p-4">
                   <div className="flex items-center gap-3">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-bne-azure text-white text-sm font-semibold">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-bne-pine text-bne-chalk text-sm font-semibold">
                       {step.number}
                     </span>
                     <h4 className="text-sm font-semibold text-bne-ink">{step.title}</h4>
                   </div>
-                  <p className="text-xs text-bne-steel mt-3 leading-relaxed">{step.description}</p>
+                  <p className="text-xs text-bne-muted mt-3 leading-relaxed">{step.description}</p>
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-bne-azure to-bne-indigo text-white">
+        <Card className="bg-bne-pine text-bne-chalk">
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div>
@@ -324,16 +324,16 @@ export default function DataSources() {
                 {selectedDatasets.map((dataset) => (
                   <span
                     key={dataset.id}
-                    className="inline-flex items-center gap-2 rounded-full border border-bne-azure bg-bne-azure/10 px-3 py-1 text-sm text-bne-ink"
+                    className="inline-flex items-center gap-2 rounded-full border border-bne-pine bg-bne-pine/10 px-3 py-1 text-sm text-bne-ink"
                   >
                     <div>
                       <span className="font-mono text-xs text-bne-ink">{dataset.code}</span>
-                      <span className="block text-[11px] text-bne-steel/80">{dataset.name}</span>
+                      <span className="block text-[11px] text-bne-muted/80">{dataset.name}</span>
                     </div>
                     <button
                       type="button"
                       onClick={() => handleRemoveSelectedDataset(dataset.id)}
-                      className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-bne-azure text-white text-xs hover:bg-bne-azure-600"
+                      className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-bne-pine text-bne-chalk text-xs hover:bg-bne-pine-600"
                       aria-label={`Remove ${dataset.code}`}
                     >
                       ×
@@ -341,7 +341,7 @@ export default function DataSources() {
                   </span>
                 ))}
               </div>
-              <p className="text-xs text-bne-steel mt-3">
+              <p className="text-xs text-bne-muted mt-3">
                 These datasets will be pre-filled when you create a new data collection job.
               </p>
             </CardContent>
@@ -393,10 +393,10 @@ export default function DataSources() {
         )}
 
         {sources?.length === 0 && (
-          <Card className="border-2 border-dashed border-bne-frost bg-bne-ice/50">
+          <Card className="border-2 border-dashed border-bne-line bg-bne-paper/50">
             <div className="text-center py-12">
               <svg
-                className="w-16 h-16 mx-auto text-bne-steel/50 mb-4"
+                className="w-16 h-16 mx-auto text-bne-muted/50 mb-4"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -409,7 +409,7 @@ export default function DataSources() {
                 />
               </svg>
               <h3 className="text-lg font-semibold text-bne-ink mb-2">No data sources configured</h3>
-              <p className="text-sm text-bne-steel mb-4">
+              <p className="text-sm text-bne-muted mb-4">
                 Add your first data source to start collecting banking data
               </p>
               <Button variant="primary" onClick={handleAddSource}>
@@ -430,12 +430,12 @@ export default function DataSources() {
                   key={plugin.value}
                   className={`p-4 rounded-lg border-2 ${
                     plugin.enabled
-                      ? 'border-bne-azure/20 bg-bne-azure/5'
-                      : 'border-bne-frost bg-white'
+                      ? 'border-bne-pine/20 bg-bne-pine/5'
+                      : 'border-bne-line bg-bne-card'
                   }`}
                 >
                   <div className="flex items-start gap-3">
-                    <span className="text-2xl">{plugin.icon}</span>
+                    <span className="w-10 h-10 shrink-0 rounded-md border border-bne-line bg-bne-paper-raise flex items-center justify-center font-display text-[13px] font-semibold tracking-wide text-bne-muted">{plugin.icon}</span>
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <h4 className="font-medium text-bne-ink">{plugin.label}</h4>
@@ -443,7 +443,7 @@ export default function DataSources() {
                           <Badge variant="success" size="sm">Enabled</Badge>
                         )}
                       </div>
-                      <p className="text-xs text-bne-steel">{plugin.description}</p>
+                      <p className="text-xs text-bne-muted">{plugin.description}</p>
                     </div>
                   </div>
                 </div>

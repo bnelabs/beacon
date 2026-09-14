@@ -6,8 +6,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 // stack usable from another machine on the LAN. Hard-coding localhost:3456 baked
 // the *build* machine's idea of the backend into the bundle and then resolved it
 // against the *browser's* localhost, so a remote browser silently called itself.
+import { API_ORIGIN, fetchApi, fetchJson } from '../utils/apiClient'
+
 // Set VITE_API_BASE_URL only to point at a genuinely different origin.
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 // Fetch countries with filters
 export function useCountries(filters = {}) {
@@ -24,16 +25,12 @@ export function useCountries(filters = {}) {
   }
 
   const queryString = params.toString()
-  const url = `${API_BASE}/api/v1/countries/${queryString ? `?${queryString}` : ''}`
+  const url = `${API_ORIGIN}/api/v1/countries/${queryString ? `?${queryString}` : ''}`
 
   return useQuery({
     queryKey: ['countries', filters],
     queryFn: async () => {
-      const response = await fetch(url)
-      if (!response.ok) {
-        throw new Error('Failed to fetch countries')
-      }
-      return response.json()
+      return fetchJson(url)
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
   })
@@ -44,11 +41,7 @@ export function useCountry(countryCode) {
   return useQuery({
     queryKey: ['country', countryCode],
     queryFn: async () => {
-      const response = await fetch(`${API_BASE}/api/v1/countries/${countryCode}`)
-      if (!response.ok) {
-        throw new Error('Failed to fetch country')
-      }
-      return response.json()
+      return fetchJson(`${API_ORIGIN}/api/v1/countries/${countryCode}`)
     },
     enabled: !!countryCode,
     staleTime: 5 * 60 * 1000,
@@ -65,16 +58,12 @@ export function useCountryIndicators(countryCode, options = {}) {
   if (options.end_year) params.append('end_year', options.end_year)
 
   const queryString = params.toString()
-  const url = `${API_BASE}/api/v1/countries/${countryCode}/indicators${queryString ? `?${queryString}` : ''}`
+  const url = `${API_ORIGIN}/api/v1/countries/${countryCode}/indicators${queryString ? `?${queryString}` : ''}`
 
   return useQuery({
     queryKey: ['country-indicators', countryCode, options],
     queryFn: async () => {
-      const response = await fetch(url)
-      if (!response.ok) {
-        throw new Error('Failed to fetch indicators')
-      }
-      return response.json()
+      return fetchJson(url)
     },
     enabled: !!countryCode,
     staleTime: 10 * 60 * 1000, // 10 minutes
@@ -85,17 +74,10 @@ export function useCountryIndicators(countryCode, options = {}) {
 export function useCountryComparison() {
   return useMutation({
     mutationFn: async (request) => {
-      const response = await fetch(`${API_BASE}/api/v1/countries/compare`, {
+      return fetchApi('/v1/countries/compare', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
+        body: JSON.stringify(request)
       })
-      if (!response.ok) {
-        throw new Error('Failed to compare countries')
-      }
-      return response.json()
     },
   })
 }
@@ -106,18 +88,10 @@ export function useCountrySync() {
 
   return useMutation({
     mutationFn: async (request) => {
-      const response = await fetch(`${API_BASE}/api/v1/countries/sync`, {
+      return fetchApi('/v1/countries/sync', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
+        body: JSON.stringify(request)
       })
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || 'Failed to sync country data')
-      }
-      return response.json()
     },
     onSuccess: () => {
       // Invalidate countries queries to refetch
@@ -131,11 +105,7 @@ export function useRegions() {
   return useQuery({
     queryKey: ['regions'],
     queryFn: async () => {
-      const response = await fetch(`${API_BASE}/api/v1/countries/regions/list`)
-      if (!response.ok) {
-        throw new Error('Failed to fetch regions')
-      }
-      return response.json()
+      return fetchJson(`${API_ORIGIN}/api/v1/countries/regions/list`)
     },
     staleTime: 60 * 60 * 1000, // 1 hour
   })
@@ -146,11 +116,7 @@ export function useRiskLevelsSummary() {
   return useQuery({
     queryKey: ['risk-levels-summary'],
     queryFn: async () => {
-      const response = await fetch(`${API_BASE}/api/v1/countries/risk-levels/summary`)
-      if (!response.ok) {
-        throw new Error('Failed to fetch risk levels summary')
-      }
-      return response.json()
+      return fetchJson(`${API_ORIGIN}/api/v1/countries/risk-levels/summary`)
     },
     staleTime: 10 * 60 * 1000, // 10 minutes
   })

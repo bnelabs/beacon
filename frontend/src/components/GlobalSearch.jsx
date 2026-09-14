@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { API_ORIGIN, asList, fetchJson } from '../utils/apiClient'
 import { useRouter } from '../store/useRouter'
 import { useQuery } from '@tanstack/react-query'
 import Card from './ui/Card'
@@ -7,29 +8,9 @@ import LoadingSpinner from './ui/LoadingSpinner'
 
 // Same-origin by default; nginx proxies /api/ to the backend. See the note in
 // hooks/useCountries.js for why localhost:3456 is the wrong default here.
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
-
 // Fetch and refuse a non-2xx response. Previously the queries returned
 // res.json() unconditionally, so a 404 yielded {"detail": "Not Found"} and the
 // category silently came back empty — which is how a wrong URL went unnoticed.
-async function fetchJson(url) {
-  const res = await fetch(url)
-  if (!res.ok) {
-    throw new Error(`${url} returned HTTP ${res.status}`)
-  }
-  return res.json()
-}
-
-// The list endpoints are inconsistent: /jobs and /models and /catalogue answer
-// with a bare array, while /countries wraps it in a `countries` key. Normalise
-// both shapes rather than assuming one, and treat anything else as no results
-// instead of throwing inside a render.
-function asList(data, key) {
-  if (Array.isArray(data)) return data
-  if (data && key && Array.isArray(data[key])) return data[key]
-  return []
-}
-
 // Fuzzy match scoring
 function fuzzyMatch(str, pattern) {
   const patternLower = pattern.toLowerCase()
@@ -70,14 +51,14 @@ export default function GlobalSearch() {
   // model catalogue (the backend mounts it at both /api/models and /api/v1/models).
   const { data: jobsData } = useQuery({
     queryKey: ['jobs'],
-    queryFn: () => fetchJson(`${API_BASE}/api/v1/jobs`),
+    queryFn: () => fetchJson(`${API_ORIGIN}/api/v1/jobs`),
     enabled: isOpen,
     staleTime: 30000
   })
 
   const { data: modelsData } = useQuery({
     queryKey: ['models'],
-    queryFn: () => fetchJson(`${API_BASE}/api/models`),
+    queryFn: () => fetchJson(`${API_ORIGIN}/api/models`),
     enabled: isOpen,
     staleTime: 60000
   })
@@ -86,14 +67,14 @@ export default function GlobalSearch() {
   // /api/v1/catalogue (see docs/api-endpoints.md).
   const { data: catalogueData } = useQuery({
     queryKey: ['catalogue'],
-    queryFn: () => fetchJson(`${API_BASE}/api/v1/catalogue`),
+    queryFn: () => fetchJson(`${API_ORIGIN}/api/v1/catalogue`),
     enabled: isOpen,
     staleTime: 60000
   })
 
   const { data: countriesData } = useQuery({
     queryKey: ['countries-search'],
-    queryFn: () => fetchJson(`${API_BASE}/api/v1/countries/`),
+    queryFn: () => fetchJson(`${API_ORIGIN}/api/v1/countries/`),
     enabled: isOpen,
     staleTime: 60000
   })
@@ -104,15 +85,15 @@ export default function GlobalSearch() {
 
     // Static pages
     items.push(
-      { id: 'dashboard', title: 'Dashboard', category: 'Page', page: 'dashboard', icon: '🏠' },
-      { id: 'globe', title: 'Risk Map', category: 'Page', page: 'globe', icon: '📍' },
-      { id: 'models', title: 'Models', category: 'Page', page: 'models', icon: '📊' },
-      { id: 'jobs', title: 'Jobs', category: 'Page', page: 'jobs', icon: '⏱️' },
-      { id: 'datasources', title: 'Data Sources', category: 'Page', page: 'datasources', icon: '💾' },
-      { id: 'countries', title: 'Country Profiles', category: 'Page', page: 'countries', icon: '🗺️' },
-      { id: 'results', title: 'Results', category: 'Page', page: 'results', icon: '📈' },
-      { id: 'settings', title: 'Settings', category: 'Page', page: 'settings', icon: '⚙️' },
-      { id: 'help', title: 'Help', category: 'Page', page: 'help', icon: '❓' }
+      { id: 'dashboard', title: 'Dashboard', category: 'Page', page: 'dashboard', icon: 'DA' },
+      { id: 'globe', title: 'Risk Map', category: 'Page', page: 'globe', icon: 'RM' },
+      { id: 'models', title: 'Models', category: 'Page', page: 'models', icon: 'MD' },
+      { id: 'jobs', title: 'Jobs', category: 'Page', page: 'jobs', icon: 'JB' },
+      { id: 'datasources', title: 'Data Sources', category: 'Page', page: 'datasources', icon: 'DS' },
+      { id: 'countries', title: 'Country Profiles', category: 'Page', page: 'countries', icon: 'CP' },
+      { id: 'results', title: 'Results', category: 'Page', page: 'results', icon: 'RS' },
+      { id: 'settings', title: 'Settings', category: 'Page', page: 'settings', icon: 'ST' },
+      { id: 'help', title: 'Help', category: 'Page', page: 'help', icon: 'HP' }
     )
 
     // Jobs — GET /api/v1/jobs answers with a bare array of JobResponse.
@@ -123,7 +104,7 @@ export default function GlobalSearch() {
         subtitle: job.status,
         category: 'Job',
         page: 'jobs',
-        icon: job.status === 'completed' ? '✅' : job.status === 'running' ? '▶️' : job.status === 'failed' ? '❌' : '⏸️',
+        icon: 'JB',
         meta: `${Math.round(job.progress ?? 0)}%`
       })
     })
@@ -137,7 +118,7 @@ export default function GlobalSearch() {
         subtitle: model.model_type,
         category: 'Model',
         page: 'models',
-        icon: '🧠',
+        icon: 'MD',
         meta: model.model_version
       })
     })
@@ -151,7 +132,7 @@ export default function GlobalSearch() {
         subtitle: item.description,
         category: 'Data Catalogue',
         page: 'datasources',
-        icon: '📁',
+        icon: 'DS',
         meta: item.data_source?.name
       })
     })
@@ -164,7 +145,7 @@ export default function GlobalSearch() {
         subtitle: country.region,
         category: 'Country',
         page: 'countries',
-        icon: '🏴',
+        icon: 'CP',
         meta: country.country_code
       })
     })
@@ -243,7 +224,7 @@ export default function GlobalSearch() {
 
   return (
     <div
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center pt-[15vh]"
+      className="fixed inset-0 bg-bne-ink/40 z-50 flex items-start justify-center pt-[15vh]"
       onClick={() => setIsOpen(false)}
     >
       <div
@@ -252,9 +233,9 @@ export default function GlobalSearch() {
       >
         <Card className="overflow-hidden shadow-2xl">
           {/* Search Input */}
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-bne-frost">
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-bne-line">
             <svg
-              className="w-5 h-5 text-bne-steel"
+              className="w-5 h-5 text-bne-muted"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -275,9 +256,9 @@ export default function GlobalSearch() {
                 setQuery(e.target.value)
                 setSelectedIndex(0)
               }}
-              className="flex-1 text-base text-bne-ink placeholder-bne-steel bg-transparent border-none outline-none"
+              className="flex-1 text-base text-bne-ink placeholder-bne-muted bg-transparent border-none outline-none"
             />
-            <kbd className="hidden sm:inline-block px-2 py-1 text-xs font-mono text-bne-steel bg-bne-ice rounded border border-bne-frost">
+            <kbd className="hidden sm:inline-block px-2 py-1 text-xs font-mono text-bne-muted bg-bne-paper rounded border border-bne-line">
               ESC
             </kbd>
           </div>
@@ -289,7 +270,7 @@ export default function GlobalSearch() {
                 {query ? (
                   <>
                     <svg
-                      className="w-12 h-12 mx-auto text-bne-steel/30 mb-3"
+                      className="w-12 h-12 mx-auto text-bne-muted/30 mb-3"
                       fill="none"
                       viewBox="0 0 24 24"
                       stroke="currentColor"
@@ -301,7 +282,7 @@ export default function GlobalSearch() {
                         d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                       />
                     </svg>
-                    <p className="text-sm text-bne-steel">No results found for "{query}"</p>
+                    <p className="text-sm text-bne-muted">No results found for "{query}"</p>
                   </>
                 ) : (
                   <LoadingSpinner message="Loading search index..." />
@@ -320,24 +301,24 @@ export default function GlobalSearch() {
                     onMouseEnter={() => setSelectedIndex(index)}
                     className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
                       index === selectedIndex
-                        ? 'bg-bne-azure/10 border-l-2 border-bne-azure'
-                        : 'hover:bg-bne-ice/50'
+                        ? 'bg-bne-pine/10 border-l-2 border-bne-pine'
+                        : 'hover:bg-bne-paper/50'
                     }`}
                   >
-                    <span className="text-2xl">{item.icon}</span>
+                    <span className="w-9 h-9 shrink-0 rounded-md border border-bne-line bg-bne-paper-raise flex items-center justify-center font-display text-[12px] font-semibold tracking-wide text-bne-muted">{item.icon}</span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-medium text-bne-ink truncate">
                           {item.title}
                         </p>
                         {item.meta && (
-                          <span className="text-xs font-mono text-bne-steel">
+                          <span className="text-xs font-mono text-bne-muted">
                             {item.meta}
                           </span>
                         )}
                       </div>
                       {item.subtitle && (
-                        <p className="text-xs text-bne-steel truncate mt-0.5">
+                        <p className="text-xs text-bne-muted truncate mt-0.5">
                           {item.subtitle}
                         </p>
                       )}
@@ -352,20 +333,20 @@ export default function GlobalSearch() {
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between px-4 py-2 border-t border-bne-frost bg-bne-ice/30 text-xs text-bne-steel">
+          <div className="flex items-center justify-between px-4 py-2 border-t border-bne-line bg-bne-paper/30 text-xs text-bne-muted">
             <div className="flex items-center gap-4">
               <span className="flex items-center gap-1">
-                <kbd className="px-1.5 py-0.5 font-mono bg-white rounded border border-bne-frost">↑</kbd>
-                <kbd className="px-1.5 py-0.5 font-mono bg-white rounded border border-bne-frost">↓</kbd>
+                <kbd className="px-1.5 py-0.5 font-mono bg-bne-card rounded border border-bne-line">↑</kbd>
+                <kbd className="px-1.5 py-0.5 font-mono bg-bne-card rounded border border-bne-line">↓</kbd>
                 <span>Navigate</span>
               </span>
               <span className="flex items-center gap-1">
-                <kbd className="px-1.5 py-0.5 font-mono bg-white rounded border border-bne-frost">↵</kbd>
+                <kbd className="px-1.5 py-0.5 font-mono bg-bne-card rounded border border-bne-line">↵</kbd>
                 <span>Select</span>
               </span>
             </div>
             <span className="flex items-center gap-1">
-              <kbd className="px-1.5 py-0.5 font-mono bg-white rounded border border-bne-frost">⌘K</kbd>
+              <kbd className="px-1.5 py-0.5 font-mono bg-bne-card rounded border border-bne-line">⌘K</kbd>
               <span>Toggle</span>
             </span>
           </div>

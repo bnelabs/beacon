@@ -278,3 +278,86 @@ class TestRiskSeriesValidation:
         payload = _frame(rows=SEQUENCE_LENGTH)
         with pytest.raises(SchemaValidationError):
             engine.predict_risk_series(payload, attestation=_attestation())
+
+
+class TestPredictedRowAlignment:
+    """The score for the window ending at row t predicts row t+1, and says so.
+
+    Training pairs the window ``normalized[i:i+L]`` with the target
+    ``normalized[i+L]`` -- the row AFTER the window end. Ground truth must
+    therefore join on that next row, never on the window-end row itself; the
+    frame carries both positions so the convention is explicit and the source
+    seam can never be crossed by an alignment.
+    """
+
+    def test_predicted_row_offset_is_the_window_end_plus_one_within_source(self, engine):
+        payload = _frame()
+        result = engine.predict_risk_series(payload, attestation=_attestation())
+        frame = result.frame
+
+        for index, source in enumerate(SOURCES):
+            block = frame.iloc[
+                index * WINDOWS_PER_SOURCE:(index + 1) * WINDOWS_PER_SOURCE
+            ]
+            source_positions = np.flatnonzero(
+                (payload["source_code"] == source).to_numpy()
+            )
+            ends = source_positions[SEQUENCE_LENGTH - 1:]
+            expected_predicted = ends + 1
+            # The final window of the source has no next row inside the
+            # source's span: it must be -1, never the first row of the next
+            # source.
+            expected_predicted[-1] = -1
+            assert block["row_offset"].tolist() == ends.tolist()
+            assert block["predicted_row_offset"].tolist() == expected_predicted.tolist()
+
+    def test_alignment_helper_pairs_scores_with_the_next_row_target(self, engine):
+        from backend.modules.engine.backtesting import align_series_targets
+
+        payload = _frame()
+        result = engine.predict_risk_series(payload, attestation=_attestation())
+        frame = result.frame
+
+        # A target column whose value at row r is 1000 + r, so the correct
+        # pairing is checkable by arithmetic alone.
+        targets = np.full(payload.shape[0], np.nan)
+        targets[:] = 1000.0 + np.arange(payload.shape[0])
+
+        mask, actuals, preds = align_series_targets(
+            frame["predicted_row_offset"].to_numpy(),
+            targets,
+            frame["risk_score"].to_numpy(),
+        )
+
+        # Every source's final window is unalignable; everything else pairs
+        # with target[end + 1].
+        assert int(mask.sum()) == frame.shape[0] - len(SOURCES)
+        expected_actuals = []
+        for index in range(len(SOURCES)):
+            ends = np.arange(SEQUENCE_LENGTH - 1, ROWS_PER_SOURCE)
+            base = index * ROWS_PER_SOURCE
+            expected_actuals.extend(
+                1000.0 + base + ends[ends + 1 < ROWS_PER_SOURCE] + 1
+            )
+        assert actuals.tolist() == pytest.approx(expected_actuals)
+        assert preds.tolist() == pytest.approx(
+            frame.loc[mask, "risk_score"].to_numpy().tolist()
+        )
+
+    def test_alignment_helper_rejects_length_mismatch(self):
+        from backend.modules.engine.backtesting import align_series_targets
+
+        with pytest.raises(ValueError):
+            align_series_targets([1, 2], [0.0, 1.0, 2.0], [5.0])
+
+    def test_alignment_helper_excludes_nan_targets(self):
+        from backend.modules.engine.backtesting import align_series_targets
+
+        # Offset 1 -> targets[1] = NaN (excluded); offset 2 -> targets[2] = 30
+        # (included); offset -1 -> outside the source's span (excluded).
+        mask, actuals, preds = align_series_targets(
+            [1, 2, -1], [10.0, np.nan, 30.0, 40.0], [1.0, 2.0, 3.0]
+        )
+        assert mask.tolist() == [False, True, False]
+        assert actuals.tolist() == pytest.approx([30.0])
+        assert preds.tolist() == pytest.approx([2.0])

@@ -28,9 +28,9 @@ function JobStatusBadge({ status }) {
 
 function ProgressBar({ progress }) {
   return (
-    <div className="w-full h-2 bg-bne-frost rounded-full overflow-hidden">
+    <div className="w-full h-2 bg-bne-paper-dim rounded-full overflow-hidden">
       <div
-        className="h-full bg-bne-azure transition-all duration-300"
+        className="h-full bg-bne-pine transition-all duration-300"
         style={{ width: `${progress}%` }}
       />
     </div>
@@ -57,8 +57,8 @@ function JobRow({ job, onSelect, isSelected, onCheckboxChange, isChecked, showCh
       onClick={() => onSelect(job)}
       className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
         isSelected
-          ? 'border-bne-azure bg-bne-azure/5'
-          : 'border-bne-frost hover:border-bne-azure/50'
+          ? 'border-bne-pine bg-bne-pine/5'
+          : 'border-bne-line hover:border-bne-pine/50'
       }`}
     >
       <div className="flex items-start justify-between mb-3">
@@ -69,7 +69,7 @@ function JobRow({ job, onSelect, isSelected, onCheckboxChange, isChecked, showCh
               checked={isChecked}
               onChange={handleCheckboxClick}
               onClick={(e) => e.stopPropagation()}
-              className="w-4 h-4 rounded border-bne-frost text-bne-azure focus:ring-2 focus:ring-bne-azure"
+              className="w-4 h-4 rounded border-bne-line text-bne-pine focus:ring-2 focus:ring-bne-pine"
             />
           )}
           <div className="flex-1">
@@ -77,7 +77,7 @@ function JobRow({ job, onSelect, isSelected, onCheckboxChange, isChecked, showCh
               <h4 className="font-medium text-bne-ink">{job.model_id || 'Unknown Model'}</h4>
               <JobStatusBadge status={job.status} />
             </div>
-            <p className="text-sm text-bne-steel font-mono">ID: {job.job_id ?? job.id ?? '-'}</p>
+            <p className="text-sm text-bne-muted font-mono">ID: {job.job_id ?? job.id ?? '-'}</p>
           </div>
         </div>
         {(job.status === 'running' || job.status === 'pending') && (
@@ -95,7 +95,7 @@ function JobRow({ job, onSelect, isSelected, onCheckboxChange, isChecked, showCh
       {job.status === 'running' && (
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-bne-steel">Progress</span>
+            <span className="text-bne-muted">Progress</span>
             <span className="font-medium text-bne-ink">{job.progress || 0}%</span>
           </div>
           <ProgressBar progress={job.progress || 0} />
@@ -104,14 +104,14 @@ function JobRow({ job, onSelect, isSelected, onCheckboxChange, isChecked, showCh
 
       <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
         <div>
-          <span className="text-bne-steel">Started</span>
+          <span className="text-bne-muted">Started</span>
           <p className="font-medium text-bne-ink">
             {job.started_at ? new Date(job.started_at).toLocaleString() : '-'}
           </p>
         </div>
         {job.completed_at && (
           <div>
-            <span className="text-bne-steel">Completed</span>
+            <span className="text-bne-muted">Completed</span>
             <p className="font-medium text-bne-ink">
               {new Date(job.completed_at).toLocaleString()}
             </p>
@@ -127,7 +127,7 @@ function LossChart({ train = [], val = [] }) {
   const valPoints = Array.isArray(val) ? val.map(Number).filter((value) => Number.isFinite(value)) : []
   const series = trainPoints.length || valPoints.length
   if (!series) {
-    return <p className="text-sm text-bne-steel">Training history will appear once the first epoch completes.</p>
+    return <p className="text-sm text-bne-muted">Training history will appear once the first epoch completes.</p>
   }
 
   const width = 360
@@ -157,7 +157,7 @@ function LossChart({ train = [], val = [] }) {
   return (
     <div className="space-y-3">
       <svg width={width} height={height} className="w-full">
-        <rect x={0} y={0} width={width} height={height} fill="white" rx={12} className="stroke-bne-frost stroke-1" />
+        <rect x={0} y={0} width={width} height={height} fill="white" rx={12} className="stroke-bne-line stroke-1" />
         {gridLines.map((line, index) => (
           <g key={index}>
             <line
@@ -165,16 +165,16 @@ function LossChart({ train = [], val = [] }) {
               y1={line.y}
               x2={width - padding}
               y2={line.y}
-              stroke="#E5ECF6"
+              stroke="#E2DAC8"
               strokeDasharray="4 4"
             />
-            <text x={8} y={line.y + 4} fontSize="10" fill="#7A8CA6">{line.value}</text>
+            <text x={8} y={line.y + 4} fontSize="10" fill="#948A72">{line.value}</text>
           </g>
         ))}
         {trainPoints.length > 0 && (
           <polyline
             fill="none"
-            stroke="#2563EB"
+            stroke="#2C5545"
             strokeWidth={2}
             points={buildPoints(trainPoints)}
           />
@@ -182,19 +182,19 @@ function LossChart({ train = [], val = [] }) {
         {valPoints.length > 0 && (
           <polyline
             fill="none"
-            stroke="#F97316"
+            stroke="#BE5F2E"
             strokeWidth={2}
             points={buildPoints(valPoints)}
           />
         )}
       </svg>
-      <div className="flex items-center gap-6 text-xs text-bne-steel">
+      <div className="flex items-center gap-6 text-xs text-bne-muted">
         <span className="flex items-center gap-2">
-          <span className="h-2 w-8 rounded-full bg-bne-azure" />
+          <span className="h-2 w-8 rounded-full bg-bne-pine" />
           Training loss
         </span>
         <span className="flex items-center gap-2">
-          <span className="h-2 w-8 rounded-full bg-bne-amber" />
+          <span className="h-2 w-8 rounded-full bg-bne-ochre" />
           Validation loss
         </span>
       </div>
@@ -267,37 +267,37 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining }) {
         <CardContent>
           <div className="space-y-4">
             <div>
-              <label className="text-sm text-bne-steel">Job ID</label>
+              <label className="text-sm text-bne-muted">Job ID</label>
               <p className="font-mono text-sm text-bne-ink mt-1">{job.job_id ?? job.id ?? '-'}</p>
             </div>
             <div>
-              <label className="text-sm text-bne-steel">Model</label>
+              <label className="text-sm text-bne-muted">Model</label>
               <p className="font-medium text-bne-ink mt-1">{job.model_id}</p>
             </div>
             <div>
-              <label className="text-sm text-bne-steel">Status</label>
+              <label className="text-sm text-bne-muted">Status</label>
               <div className="mt-1">
                 <JobStatusBadge status={job.status} />
               </div>
             </div>
             {job.status === 'running' && (
               <div>
-                <label className="text-sm text-bne-steel">Progress</label>
+                <label className="text-sm text-bne-muted">Progress</label>
                 <div className="mt-2">
                   <ProgressBar progress={job.progress || 0} />
-                  <p className="text-sm text-bne-steel mt-1">{job.progress || 0}%</p>
+                  <p className="text-sm text-bne-muted mt-1">{job.progress || 0}%</p>
                 </div>
               </div>
             )}
             <div>
-              <label className="text-sm text-bne-steel">Created</label>
+              <label className="text-sm text-bne-muted">Created</label>
               <p className="text-sm text-bne-ink mt-1">
                 {job.created_at ? new Date(job.created_at).toLocaleString() : '-'}
               </p>
             </div>
             {job.started_at && (
               <div>
-                <label className="text-sm text-bne-steel">Started</label>
+                <label className="text-sm text-bne-muted">Started</label>
                 <p className="text-sm text-bne-ink mt-1">
                   {new Date(job.started_at).toLocaleString()}
                 </p>
@@ -305,7 +305,7 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining }) {
             )}
             {job.completed_at && (
               <div>
-                <label className="text-sm text-bne-steel">Completed</label>
+                <label className="text-sm text-bne-muted">Completed</label>
                 <p className="text-sm text-bne-ink mt-1">
                   {new Date(job.completed_at).toLocaleString()}
                 </p>
@@ -334,27 +334,27 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining }) {
               <LoadingSpinner message="Evaluating data quality..." />
             ) : showQuality ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="rounded-lg border border-bne-frost bg-bne-ice/40 p-4">
-                  <p className="text-xs uppercase tracking-wide text-bne-steel">Quality score</p>
+                <div className="rounded-lg border border-bne-line bg-bne-paper/40 p-4">
+                  <p className="text-xs uppercase tracking-wide text-bne-muted">Quality score</p>
                   <p className="text-2xl font-semibold text-bne-ink mt-2">
                     {formatPercent(qualityData.quality_score)}
                   </p>
-                  <p className="text-xs text-bne-steel mt-2">
+                  <p className="text-xs text-bne-muted mt-2">
                     Completeness {formatPercent(qualityData.completeness)}
                   </p>
                 </div>
-                <div className="rounded-lg border border-bne-frost bg-bne-ice/40 p-4">
-                  <p className="text-xs uppercase tracking-wide text-bne-steel">Anomaly review</p>
+                <div className="rounded-lg border border-bne-line bg-bne-paper/40 p-4">
+                  <p className="text-xs uppercase tracking-wide text-bne-muted">Anomaly review</p>
                   <p className="text-sm text-bne-ink mt-2">
                     Detected: {qualityData.anomalies_detected ?? 0} · Fixed: {qualityData.anomalies_fixed ?? 0}
                   </p>
-                  <p className="text-xs text-bne-steel mt-2">
+                  <p className="text-xs text-bne-muted mt-2">
                     Fit for engine: {qualityData.fit_for_engine ? 'Yes' : 'No'}
                   </p>
                 </div>
                 {(qualityData.warnings || []).length > 0 && (
-                  <div className="sm:col-span-2 rounded-lg border border-bne-amber/30 bg-bne-amber/10 p-4">
-                    <p className="text-xs uppercase tracking-wide text-bne-amber mb-2">Warnings</p>
+                  <div className="sm:col-span-2 rounded-lg border border-bne-ochre/30 bg-bne-ochre/10 p-4">
+                    <p className="text-xs uppercase tracking-wide text-bne-ochre mb-2">Warnings</p>
                     <ul className="list-disc list-inside text-sm text-bne-ink space-y-1">
                       {qualityData.warnings.map((warning, index) => (
                         <li key={index}>{warning}</li>
@@ -363,9 +363,9 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining }) {
                   </div>
                 )}
                 {(qualityData.errors || []).length > 0 && (
-                  <div className="sm:col-span-2 rounded-lg border border-bne-crimson/30 bg-bne-crimson/10 p-4">
-                    <p className="text-xs uppercase tracking-wide text-bne-crimson mb-2">Errors</p>
-                    <ul className="list-disc list-inside text-sm text-bne-crimson space-y-1">
+                  <div className="sm:col-span-2 rounded-lg border border-bne-clay/30 bg-bne-clay/10 p-4">
+                    <p className="text-xs uppercase tracking-wide text-bne-clay mb-2">Errors</p>
+                    <ul className="list-disc list-inside text-sm text-bne-clay space-y-1">
                       {qualityData.errors.map((message, index) => (
                         <li key={index}>{message}</li>
                       ))}
@@ -374,7 +374,7 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining }) {
                 )}
               </div>
             ) : (
-              <p className="text-sm text-bne-steel">
+              <p className="text-sm text-bne-muted">
                 Data quality metrics appear once the collection job has finished processing.
               </p>
             )}
@@ -415,8 +415,8 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining }) {
               />
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                 {trainingHighlights.map((item) => (
-                  <div key={item.label} className="rounded-lg border border-bne-frost bg-bne-ice/40 p-4">
-                    <p className="text-xs uppercase tracking-wide text-bne-steel">{item.label}</p>
+                  <div key={item.label} className="rounded-lg border border-bne-line bg-bne-paper/40 p-4">
+                    <p className="text-xs uppercase tracking-wide text-bne-muted">{item.label}</p>
                     <p className="font-semibold text-bne-ink mt-2">{item.value}</p>
                   </div>
                 ))}
@@ -432,7 +432,7 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining }) {
             <CardTitle>Configuration</CardTitle>
           </CardHeader>
           <CardContent>
-            <pre className="bg-bne-ice p-4 rounded-lg text-xs font-mono overflow-x-auto">
+            <pre className="bg-bne-paper p-4 rounded-lg text-xs font-mono overflow-x-auto">
               {JSON.stringify(job.config, null, 2)}
             </pre>
           </CardContent>
@@ -445,8 +445,8 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining }) {
             <CardTitle>Error Details</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="bg-bne-crimson/5 border border-bne-crimson/20 rounded-lg p-4">
-              <p className="text-sm text-bne-crimson font-mono">{job.error}</p>
+            <div className="bg-bne-clay/5 border border-bne-clay/20 rounded-lg p-4">
+              <p className="text-sm text-bne-clay font-mono">{job.error}</p>
             </div>
           </CardContent>
         </Card>
@@ -458,10 +458,10 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining }) {
             <CardTitle>Logs</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="bg-bne-ink text-bne-ice p-4 rounded-lg font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto">
+            <div className="bg-bne-ink text-bne-paper p-4 rounded-lg font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto">
               {job.logs.map((log, i) => (
                 <div key={i} className="mb-1">
-                  <span className="text-bne-steel">[{log.timestamp}]</span>{' '}
+                  <span className="text-bne-muted">[{log.timestamp}]</span>{' '}
                   <span>{log.message}</span>
                 </div>
               ))}
@@ -587,8 +587,8 @@ export default function Jobs() {
         title="Jobs"
         subtitle={
           isConnected && (
-            <span className="flex items-center gap-2 text-sm text-bne-emerald">
-              <span className="w-2 h-2 bg-bne-emerald rounded-full animate-pulse"></span>
+            <span className="flex items-center gap-2 text-sm text-bne-moss">
+              <span className="w-2 h-2 bg-bne-moss rounded-full animate-pulse"></span>
               Live updates active
             </span>
           )
@@ -622,12 +622,12 @@ export default function Jobs() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <h3 className="text-sm font-semibold text-bne-ink mb-2">What is a job?</h3>
-                    <p className="text-sm text-bne-steel leading-relaxed">
+                    <p className="text-sm text-bne-muted leading-relaxed">
                       Jobs are background tasks that move data through Beacon: collecting sources,
                       training models, and running predictions. Track every step here and drill into any failures.
                     </p>
                   </div>
-                  <div className="rounded-lg border border-bne-frost bg-bne-ice/40 p-4 text-xs text-bne-steel space-y-2">
+                  <div className="rounded-lg border border-bne-line bg-bne-paper/40 p-4 text-xs text-bne-muted space-y-2">
                     {Object.entries(jobTypeLookup).map(([key, description]) => (
                       <div key={key}>
                         <span className="font-semibold text-bne-ink uppercase tracking-wide">{key.replace(/_/g, ' ')}</span>
@@ -640,7 +640,7 @@ export default function Jobs() {
             </Card>
 
             {batchMode && selectedJobIds.length > 0 && (
-              <Card className="bg-bne-azure/10 border-bne-azure">
+              <Card className="bg-bne-pine/10 border-bne-pine">
                 <CardContent className="py-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
@@ -713,10 +713,10 @@ export default function Jobs() {
             </div>
 
             {filteredJobs.length === 0 ? (
-              <Card className="border-2 border-dashed border-bne-frost bg-bne-ice/50">
+              <Card className="border-2 border-dashed border-bne-line bg-bne-paper/50">
                 <div className="text-center py-12">
                   <svg
-                    className="w-16 h-16 mx-auto text-bne-steel/50 mb-4"
+                    className="w-16 h-16 mx-auto text-bne-muted/50 mb-4"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -729,7 +729,7 @@ export default function Jobs() {
                     />
                   </svg>
                   <h3 className="text-lg font-semibold text-bne-ink mb-2">No jobs found</h3>
-                  <p className="text-sm text-bne-steel">
+                  <p className="text-sm text-bne-muted">
                     {filter === 'all'
                       ? 'No jobs have been created yet'
                       : `No jobs with status "${filter}"`}
@@ -771,10 +771,10 @@ export default function Jobs() {
                 }}
               />
             ) : (
-              <Card className="border-2 border-dashed border-bne-frost bg-bne-ice/50">
+              <Card className="border-2 border-dashed border-bne-line bg-bne-paper/50">
                 <div className="text-center py-12">
                   <svg
-                    className="w-12 h-12 mx-auto text-bne-steel/50 mb-3"
+                    className="w-12 h-12 mx-auto text-bne-muted/50 mb-3"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -786,7 +786,7 @@ export default function Jobs() {
                       d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                     />
                   </svg>
-                  <p className="text-sm text-bne-steel">
+                  <p className="text-sm text-bne-muted">
                     Select a job to view details
                   </p>
                 </div>
