@@ -119,3 +119,4 @@ frontend/npm-debug.log*
 frontend/yarn-debug.log*
 frontend/yarn-error.log*
 frontend/lerna-debug.log*
+data/predictions/*

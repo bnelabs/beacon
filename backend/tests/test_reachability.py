@@ -152,9 +152,9 @@ KNOWN_UNREACHABLE: Dict[str, Disposition] = {
     ),
     # -- decide: blocked on a call, not on effort ----------------------------
     "backend.modules.engine.foundation_encoders": Disposition(
-        blocker="the Toto node encoder loads but is constructed only by scripts/compare_encoder_sizes.py, and the engine's own temporal encoders in models.py are a separate path",
+        blocker="the encoder contract, compose_input and the deterministic stand-in survive; the Toto wrapper and its dependency train were deleted in the 2026-09 hygiene round because no production path ever embedded a node with them",
         plan="decide",
-        next_step="either construct it in the engine or drop it -- it currently costs toto-2 plus gluonts/einops/safetensors/huggingface-hub in the production image (requirements.txt)",
+        next_step="re-add a foundation model only in the same change that wires the engine path embedding nodes with it (the TemporalGraphNetwork in UNUSED_SYMBOLS); the dependency alone must never return",
     ),
     "backend.modules.engine.subgraphx": Disposition(
         blocker="attribution needs a game value over liability-network subsets, and nothing produces one",
@@ -187,6 +187,15 @@ KNOWN_UNREACHABLE: Dict[str, Disposition] = {
 #: Modules removed from the tree by the disposition census. Recorded so a removal
 #: is a fact in the repository rather than a gap someone has to rediscover.
 REMOVED: Dict[str, str] = {
+    "backend.modules.engine.foundation_encoders.TotoEncoder": (
+        "the Toto 2.0 wrapper, its local-weights resolution machinery and "
+        "backend/scripts/compare_encoder_sizes.py, deleted in the 2026-09 "
+        "hygiene round. Implemented and tested, but constructed only by the "
+        "developer benchmark while every production image paid for toto-2 plus "
+        "einops, gluonts[torch], safetensors, jaxtyping, dd-unit-scaling and "
+        "huggingface-hub. The encoder contract, compose_input and "
+        "HashedFallbackEncoder remain in the module and keep their tests."
+    ),
     "backend.modules.explainability": (
         "empty package: __init__.py was zero bytes and nothing imported it. The "
         "explainability *routes* live in backend/api/routes/ and are unaffected."
