@@ -708,6 +708,7 @@ class BilateralExposureStore:
         }
 
         self._write_matrix(validated.frame, manifest)
+        manifest["topology_assessment"] = self.assess_topology()
         logger.info(
             "Stored bilateral exposure matrix from %s: %d institutions, %d edges, "
             "%d duplicate row(s) collapsed (%s)",
@@ -851,6 +852,68 @@ class BilateralExposureStore:
                 context={"as_of": manifest.get("as_of"), "uploaded_at": observed_at},
                 cause=exc,
             ) from exc
+
+    def assess_topology(self) -> Optional[Dict[str, Any]]:
+        """Assess the live network topology against its own published history.
+
+        The topology gate (``backend/modules/data/network_gate.py``) compares a
+        live graph signature against a reference of past signatures and says
+        when the live graph is topologically novel. It was implemented and
+        tested but reached from nothing (census ``wire`` item; fifth-round
+        review). The reference here is point-in-time by construction: one
+        signature per published vintage via :meth:`load_as_of`, with the live
+        signature being the newest. With fewer than two vintages the gate
+        reports unavailable -- never passed -- because a reference of one
+        snapshot cannot reject anything.
+        """
+        current = self.load()
+        if current is None:
+            return None
+
+        from backend.modules.data.network_gate import GraphSignature, TopologyReference
+        from backend.modules.data.pit import PITStore
+        from backend.modules.engine.multiplex import MultiplexLayer, RelationKind
+
+        try:
+            frame = PITStore().to_frame()
+            if frame.empty:
+                return {"status": "no_vintages", "assessment": None}
+            stamps = sorted(pd.Timestamp(value) for value in frame["observed_at"].unique())
+
+            signatures = []
+            for stamp in stamps:
+                vintage = self.load_as_of(stamp)
+                if vintage is None or getattr(vintage, "empty", True):
+                    continue
+                node_ids = tuple(str(n) for n in vintage.columns)
+                signatures.append(
+                    GraphSignature.from_layer(
+                        MultiplexLayer(
+                            name="interbank",
+                            kind=RelationKind.EXPOSURE,
+                            adjacency=vintage.to_numpy(dtype=float),
+                            node_ids=node_ids,
+                            as_of=stamp,
+                            directed=True,
+                        )
+                    )
+                )
+            if not signatures:
+                return {"status": "no_signatures", "assessment": None}
+            if len(signatures) < 2:
+                return {
+                    "status": "single_vintage",
+                    "assessment": None,
+                    "note": (
+                        "the topology gate needs at least two published vintages; "
+                        "the assessment is unavailable, not passed"
+                    ),
+                }
+            assessment = TopologyReference(signatures[:-1]).assess(signatures[-1])
+            return {"status": "assessed", "assessment": assessment.to_dict()}
+        except Exception as exc:  # noqa: BLE001 - an assessment outage must not block ingest
+            logger.warning("Topology assessment unavailable: %s", exc)
+            return {"status": "unavailable", "assessment": None, "reason": f"{type(exc).__name__}: {exc}"}
 
     def load_as_of(self, as_of: object) -> Optional[pd.DataFrame]:
         """The stored matrix as it was known at ``as_of``, or ``None``.

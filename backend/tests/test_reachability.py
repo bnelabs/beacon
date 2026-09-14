@@ -89,6 +89,8 @@ REQUIRED_REACHABLE: Dict[str, str] = {
     "backend.modules.data.fractional": "ADF/KPSS and fractional differencing",
     "backend.modules.data.quality_gate": "the data certification gate",
     "backend.modules.data.pit": "point-in-time exposure vintages behind the network graph (load_as_of)",
+    "backend.modules.data.event_labeller": "declared stress-event labels feeding event_metrics in run_backtest",
+    "backend.modules.engine.event_metrics": "event precision/lead-time scoring of the risk series in run_backtest",
     "backend.modules.risk.clearing": "Eisenberg-Noe clearing",
     "backend.modules.risk.liquidity_spiral": "the spiral the clearing shortfall drives",
     "backend.modules.risk.bank_analyzer": "per-institution systemic analysis",
@@ -99,6 +101,7 @@ REQUIRED_REACHABLE: Dict[str, str] = {
     "backend.modules.engine.causal_discovery": "NOTEARS, linear and non-linear basis",
     "backend.modules.engine.tncm_vae": "abduction / intervention / propagation",
     "backend.modules.engine.counterfactual": "the counterfactual scenario the engine accepts",
+    "backend.modules.engine.conformal": "split-conformal intervals computed per source in RealPredictionEngine.predict",
 }
 
 
@@ -120,30 +123,10 @@ class Disposition(NamedTuple):
 #: rather than deleted, so the gap is visible instead of implied.
 KNOWN_UNREACHABLE: Dict[str, Disposition] = {
     # -- wire: a production home exists or is cheap to add -------------------
-    "backend.modules.engine.conformal": Disposition(
-        blocker="the prediction engine reports no calibrated interval, but the seam is written down",
-        plan="wire",
-        next_step="build the calibrator in prediction_engine (prediction_engine.py:731 reports (None, None)) from a held-out window per source",
-    ),
-    "backend.modules.engine.hidden_markov": Disposition(
-        blocker="a regime label is computed but never attached to a per-source score",
-        plan="wire",
-        next_step="attach the StudentTHMM regime label to the per-source score; this also supplies mixture_of_experts' missing regime input",
-    ),
     "backend.modules.engine.mixture_of_experts": Disposition(
         blocker="regime-conditioned experts have no regime input",
         plan="wire",
-        next_step="wire together with hidden_markov -- one integration retires both orphans",
-    ),
-    "backend.modules.data.network_gate": Disposition(
-        blocker="the collector never calls the topology gate",
-        plan="wire",
-        next_step="call it at the collector's post-fetch step, where quality_gate is already applied",
-    ),
-    "backend.modules.results.timeseries_store": Disposition(
-        blocker="nothing writes risk scores or metrics through it, though the infrastructure for it is already deployed",
-        plan="wire",
-        next_step="call record_risk_scores on job completion; TimescaleDB is already in docker-compose.yml, and the timescale_timeseries migration already builds the hypertables this store is the only consumer of",
+        next_step="the live regime label now exists (prediction engine); route per-regime expert scores through RegimeRoutedMoE once experts are trained on labelled regimes",
     ),
     "backend.modules.engine.uncertainty": Disposition(
         blocker="nothing consumes a decomposed uncertainty signal",
@@ -165,11 +148,6 @@ KNOWN_UNREACHABLE: Dict[str, Disposition] = {
         blocker="it validates a *pair* of graphs (declared against learned) and nothing produces both on a job result",
         plan="decide",
         next_step="decide where the declared-vs-learned comparison belongs in the product, then add the producer",
-    ),
-    "backend.modules.engine.event_metrics": Disposition(
-        blocker="event precision/lead-time metrics need a labelled event target series, which the pipeline does not produce",
-        plan="decide",
-        next_step="decide whether a binary event target is in scope; if it is, the model-quality report is the home",
     ),
     # -- park: no input exists and none is planned ---------------------------
     "backend.modules.data.streaming": Disposition(
