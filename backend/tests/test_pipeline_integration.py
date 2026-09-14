@@ -33,11 +33,20 @@ def _prepare_csv_dataset(csv_path: Path, asset: str = "TEST_ASSET") -> None:
 
 
 def test_execute_pipeline_end_to_end(tmp_path):
-    """Ensure the DATA → ENGINE → RESULTS pipeline completes successfully offline."""
+    """Ensure the DATA → ENGINE → RESULTS pipeline completes successfully offline.
+
+    This test exercises the plumbing (stage transitions, artefact writes, job
+    rows), not the validity of the scores: it trains nothing, so the ENGINE
+    stage would otherwise fail closed on the missing checkpoint -- the correct
+    production behaviour. The untrained fallback is opted into explicitly for
+    the smoke run, mirroring how ``BEACON_ALLOW_UNSAFE_CHECKPOINT_LOAD`` gates
+    the model loader.
+    """
     db_path = tmp_path / "pipeline.sqlite3"
     os.environ["USE_SQLITE"] = "true"
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
     os.environ["PIPELINE_DATA_DIR"] = str(tmp_path / "pipelines")
+    os.environ["BEACON_ALLOW_UNTRAINED_FALLBACK"] = "1"
 
     import backend.database as database
 

@@ -76,19 +76,34 @@ class TimeSeriesDataset(Dataset):
     """Dataset for time series data."""
 
     def __init__(self, data: pd.DataFrame, sequence_length: int = 30,
-                 target_col: str = 'Value', feature_cols: Optional[List[str]] = None):
+                 target_col: str = 'Value', feature_cols: Optional[List[str]] = None,
+                 norm_stats: Optional[Dict[str, Any]] = None):
         """
         Args:
             data: DataFrame with date index and features
             sequence_length: Number of time steps to look back
             target_col: Column to predict
             feature_cols: Feature columns to use (if None, use all numeric)
+            norm_stats: Optional normalization statistics captured from the
+                TRAINING dataset (:meth:`normalization_stats`). Val/test
+                datasets must be built with the training stats: each split
+                standardizing itself evaluates the model in a space it never
+                saw and leaks the split's own data into the reported metric.
         """
         self.sequence_length = sequence_length
         self.target_col = target_col
 
         # Get numeric columns
-        if feature_cols is None:
+        if norm_stats is not None:
+            # The training split decides the feature columns; an evaluation
+            # frame missing one is an error, not a silent schema change.
+            feature_cols = list(norm_stats['feature_cols'])
+            missing = [c for c in feature_cols if c not in data.columns]
+            if missing:
+                raise ValueError(
+                    f"Evaluation frame is missing training feature columns: {missing}"
+                )
+        elif feature_cols is None:
             feature_cols = data.select_dtypes(include=[np.number]).columns.tolist()
             if target_col in feature_cols:
                 feature_cols.remove(target_col)
@@ -106,33 +121,42 @@ class TimeSeriesDataset(Dataset):
         )
         self.target = pd.to_numeric(data[target_col], errors='coerce').to_numpy(dtype=float)
 
-        # Statistics are computed from observed values only. Treating a gap as
-        # zero would drag the mean toward zero and inflate the variance.
+        # Statistics come from the TRAINING split when provided (norm_stats),
+        # otherwise from this frame's observed values only. Treating a gap as
+        # zero would drag the mean toward zero and inflate the variance, so
+        # only observed entries contribute either way.
         target_observed_mask = np.isfinite(self.target)
-        target_observed = self.target[target_observed_mask]
-        self.target_mean = float(target_observed.mean()) if target_observed.size else 0.0
-        self.target_std = float(target_observed.std()) + 1e-8 if target_observed.size else 1.0
-
         feature_observed_mask = np.isfinite(self.features)
-        feature_counts = feature_observed_mask.sum(axis=0)
-        feature_sums = np.where(feature_observed_mask, self.features, 0.0).sum(axis=0)
-        self.feature_mean = np.divide(
-            feature_sums,
-            feature_counts,
-            out=np.zeros_like(feature_sums, dtype=float),
-            where=feature_counts > 0,
-        )
+        if norm_stats is not None:
+            self.target_mean = float(norm_stats['target_mean'])
+            self.target_std = float(norm_stats['target_std'])
+            self.feature_mean = np.asarray(norm_stats['feature_mean'], dtype=float)
+            self.feature_std = np.asarray(norm_stats['feature_std'], dtype=float)
+        else:
+            target_observed = self.target[target_observed_mask]
+            self.target_mean = float(target_observed.mean()) if target_observed.size else 0.0
+            self.target_std = float(target_observed.std()) + 1e-8 if target_observed.size else 1.0
+
+            feature_counts = feature_observed_mask.sum(axis=0)
+            feature_sums = np.where(feature_observed_mask, self.features, 0.0).sum(axis=0)
+            self.feature_mean = np.divide(
+                feature_sums,
+                feature_counts,
+                out=np.zeros_like(feature_sums, dtype=float),
+                where=feature_counts > 0,
+            )
+
+            feature_variance = np.divide(
+                (np.where(feature_observed_mask, self.features - self.feature_mean, 0.0) ** 2).sum(axis=0),
+                feature_counts,
+                out=np.zeros_like(feature_sums, dtype=float),
+                where=feature_counts > 0,
+            )
+            self.feature_std = np.sqrt(feature_variance) + 1e-8
 
         centered = np.where(
             feature_observed_mask, self.features - self.feature_mean, 0.0
         )
-        feature_variance = np.divide(
-            (centered ** 2).sum(axis=0),
-            feature_counts,
-            out=np.zeros_like(feature_sums, dtype=float),
-            where=feature_counts > 0,
-        )
-        self.feature_std = np.sqrt(feature_variance) + 1e-8
 
         # Impute at the observed mean (standardised value 0) rather than carrying
         # the previous observation forward.
@@ -169,6 +193,21 @@ class TimeSeriesDataset(Dataset):
         """Denormalize predictions back to original scale."""
         return values * self.target_std + self.target_mean
 
+    def normalization_stats(self) -> Dict[str, Any]:
+        """Capture the stats an evaluation split must reuse.
+
+        Built from the TRAINING dataset and passed to val/test datasets as
+        ``norm_stats``, so every split lives in one standardized space -- the
+        one the model was trained in.
+        """
+        return {
+            'feature_cols': list(self.feature_cols),
+            'target_mean': float(self.target_mean),
+            'target_std': float(self.target_std),
+            'feature_mean': np.asarray(self.feature_mean, dtype=float).tolist(),
+            'feature_std': np.asarray(self.feature_std, dtype=float).tolist(),
+        }
+
 
 class ModelTrainer:
     """Trainer with the training/validation loop."""
@@ -200,12 +239,39 @@ class ModelTrainer:
         logger.info(f"Starting training with {self.model_type} model")
         logger.info(f"Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)} records")
 
-        # Create datasets
+        # Create datasets. Val/test reuse the TRAINING split's normalization
+        # stats: each split standardizing itself evaluates the model in a
+        # space it never saw, and lets the evaluation split's own data leak
+        # into the reported metric.
         sequence_length = self.config.get('sequence_length', 30)
 
         train_dataset = TimeSeriesDataset(train_df, sequence_length=sequence_length)
-        val_dataset = TimeSeriesDataset(val_df, sequence_length=sequence_length)
-        test_dataset = TimeSeriesDataset(test_df, sequence_length=sequence_length)
+        train_stats = train_dataset.normalization_stats()
+        val_dataset = TimeSeriesDataset(val_df, sequence_length=sequence_length,
+                                        norm_stats=train_stats)
+        test_dataset = TimeSeriesDataset(test_df, sequence_length=sequence_length,
+                                         norm_stats=train_stats)
+
+        # Empty splits are a loud failure, not a warning: an empty validation
+        # loader makes model selection meaningless, and an empty test loader
+        # would report metrics for data that does not exist.
+        if len(train_dataset) == 0:
+            raise ValueError(
+                "Training dataset is empty - no valid sequences created "
+                f"(need more than sequence_length={sequence_length} rows)"
+            )
+        if len(val_dataset) == 0:
+            raise ValueError(
+                "Validation dataset is empty - refusing to train, because "
+                "model selection against an empty split silently ships the "
+                "first checkpoint. Check that the train/val split is "
+                "chronological and leaves enough rows for a window."
+            )
+        if len(test_dataset) == 0:
+            raise ValueError(
+                "Test dataset is empty - refusing to report evaluation metrics "
+                "for data that does not exist."
+            )
 
         # Create data loaders
         batch_size = self.config.get('batch_size', 32)
@@ -229,7 +295,7 @@ class ModelTrainer:
 
         # Learning rate scheduler
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=5, verbose=True
+            self.optimizer, mode='min', factor=0.5, patience=5
         )
 
         # Training loop
@@ -448,7 +514,17 @@ class ModelTrainer:
         return total_loss / len(dataloader)
 
     def _validate(self, dataloader: DataLoader) -> float:
-        """Validate model."""
+        """Validate model.
+
+        An empty loader is a hard error: the previous code divided by
+        ``len(dataloader)`` (a ZeroDivisionError), and the multi-scale twin
+        returned 0.0, which froze model selection at the first checkpoint.
+        """
+        if len(dataloader) == 0:
+            raise ValueError(
+                "Validation dataloader is empty; refusing to report a loss "
+                "that would make model selection meaningless"
+            )
         self.model.eval()
         total_loss = 0.0
 
@@ -510,3 +586,81 @@ class ModelTrainer:
             'r2': r2,
             'predictions_df': predictions_df
         }
+
+
+def default_training_windows(
+    date_min: Any,
+    date_max: Any,
+    train_fraction: float = 0.8,
+) -> Tuple[Any, Any, Any]:
+    """Derive chronological train/test window boundaries from the payload's own range.
+
+    Returns ``(train_start, train_end, test_end)`` as pandas Timestamps. The
+    test window is the strictly-later remainder of the observed span: rows with
+    ``date <= train_end`` train, rows with ``date > train_end`` test, so the
+    boundary day cannot appear in both.
+
+    This replaces the previous hardcoded defaults (2023-01-01..2024-12-31),
+    which silently discarded live data outside a fixed historical window --
+    including the most recent observations, the ones a monitoring product
+    exists to score.
+    """
+    import pandas as pd
+
+    dmin = pd.to_datetime(date_min)
+    dmax = pd.to_datetime(date_max)
+    if pd.isna(dmin) or pd.isna(dmax):
+        raise ValueError("Cannot derive training windows from an empty or unparsable date range")
+    if dmax <= dmin:
+        raise ValueError(
+            f"Payload date range is degenerate (min={dmin}, max={dmax}); "
+            "cannot derive chronological training windows"
+        )
+    if not 0.0 < train_fraction < 1.0:
+        raise ValueError(f"train_fraction must be in (0, 1), got {train_fraction}")
+    train_end = dmin + (dmax - dmin) * train_fraction
+    return dmin, train_end, dmax
+
+
+def split_train_val_by_date(
+    df: "pd.DataFrame",
+    date_col: str,
+    val_fraction: float = 0.2,
+) -> Tuple["pd.DataFrame", "pd.DataFrame", Any]:
+    """Split a training frame into (train, val) chronologically by date.
+
+    The validation subset is the most recent ``val_fraction`` of the frame's
+    own date span; every source keeps its temporal order, and no validation
+    date precedes a training date. Returns ``(train_df, val_df, cutoff)``.
+
+    This replaces a positional ``iloc`` 80/20 cut. On the source-major frames
+    the collector produces, a positional cut splits by *source*, not by time:
+    the validation set ends up holding sources the training set never saw,
+    whose IDs are not in the training source map -- so the multi-scale
+    dataset skips them, validation is empty, and model selection freezes at
+    the epoch-0 checkpoint.
+    """
+    import pandas as pd
+
+    if not 0.0 < val_fraction < 1.0:
+        raise ValueError(f"val_fraction must be in (0, 1), got {val_fraction}")
+    if date_col not in df.columns:
+        raise ValueError(f"No column '{date_col}' to split on; columns are {sorted(df.columns)}")
+    dates = pd.to_datetime(df[date_col], errors='coerce')
+    dmin, dmax = dates.min(), dates.max()
+    if pd.isna(dmin) or pd.isna(dmax):
+        raise ValueError(f"Column '{date_col}' has no parsable dates; cannot split chronologically")
+    if dmax <= dmin:
+        raise ValueError(
+            f"Training window spans a single timestamp ({dmin}); cannot hold out "
+            "a chronological validation subset"
+        )
+    cutoff = dmin + (dmax - dmin) * (1.0 - val_fraction)
+    train_part = df[dates <= cutoff]
+    val_part = df[dates > cutoff]
+    if train_part.empty or val_part.empty:
+        raise ValueError(
+            "Chronological split produced an empty side; the training window is "
+            "too short for the requested validation fraction"
+        )
+    return train_part, val_part, cutoff

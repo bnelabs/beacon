@@ -67,7 +67,9 @@ ML Stack (PyTorch)
   └── Systemic risk: Basel III LCR/NSFR/leverage translation, coupled fire-sale
       equilibrium, crowded-trade overlap, persistence-vector topology
   └── Metrics: MSE, MAE, RMSE, R², directional accuracy
-  └── Walk-forward backtesting with Sharpe, Sortino, Calmar, max drawdown, VaR/CVaR
+  └── Walk-forward backtesting with seam-aware metrics; return-based portfolio
+      statistics (Sharpe, drawdown, VaR) are deliberately NOT computed -- a risk
+      score is a latent state, not a priced return
   └── No attribution is reported. The routine that presented gradient*input as
       SHAP values was removed rather than re-tuned, and SubgraphX, which replaced
       it, is implemented but not wired. Prediction results carry an empty
@@ -131,12 +133,19 @@ time that the artifact will load under the restricted unpickler.
 ## Backtesting
 
 Backtest jobs run a walk-forward evaluation (expanding or rolling windows with
-an optional embargo) and report both ML and quantitative-finance metrics:
+an optional embargo), folded *within each source's own contiguous span* so no
+fold trains on one indicator and tests on another, and report the supervised
+metrics that are meaningful for a risk-state series:
 
-`sharpe_ratio`, `sortino_ratio`, `max_drawdown`, `calmar_ratio`,
-`annualized_volatility`, `hit_rate`, `var_95`, `cvar_95`, plus per-fold results.
+`mse`, `mae`, `rmse`, `r2`, `directional_accuracy`, `hit_rate`, plus per-fold
+results and per-source skips.
 
-A rising predicted risk is treated as a negative return. Available via
+Return-based portfolio statistics (Sharpe, Sortino, Calmar, drawdown,
+volatility, VaR/CVaR) are deliberately not computed: they characterise the
+return of a priced asset, and a liquidity-risk score is a latent state, not a
+price. Ground truth, when a target column exists, is joined on
+`predicted_row_offset` -- the score for the window ending at row `t` predicts
+row `t+1` of the same source. Available via
 `GET /api/v2/reports/backtest/{job_id}`.
 
 ---

@@ -196,6 +196,44 @@ def boundaries_from_group_sizes(sizes: Sequence[int]) -> np.ndarray:
     return np.cumsum(non_empty)[:-1].astype(int)
 
 
+def align_series_targets(
+    predicted_row_offsets: ArrayLike,
+    target_values: ArrayLike,
+    risk_scores: ArrayLike,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Align per-timestep predictions with the target of the row they predict.
+
+    ``predict_risk_series`` scores the window that *ends* on a row, but the
+    model was trained to predict the row *after* its window end. The frame
+    carries that row in ``predicted_row_offset`` (``-1`` where the predicted
+    row falls outside its source's span, so a seam is never crossed). Joining
+    ground truth on ``row_offset`` instead would score every prediction
+    against the observation one step too early.
+
+    Returns ``(mask, actuals, predictions)`` where ``mask`` selects the rows
+    of ``risk_scores`` that have a finite in-range target, and ``actuals`` and
+    ``predictions`` are the aligned equal-length arrays. Rows whose target is
+    NaN are excluded rather than poisoning every aggregate.
+    """
+    offsets = np.asarray(predicted_row_offsets, dtype=int).ravel()
+    targets = _as_1d(target_values)
+    scores = _as_1d(risk_scores)
+
+    if offsets.size != scores.size:
+        raise ValueError(
+            f"predicted_row_offsets has {offsets.size} entries but risk_scores "
+            f"has {scores.size}; they must describe the same rows"
+        )
+    if targets.size == 0:
+        empty = np.array([], dtype=float)
+        return np.zeros(offsets.size, dtype=bool), empty, empty
+
+    in_range = (offsets >= 0) & (offsets < targets.size)
+    safe_offsets = np.where(in_range, offsets, 0)
+    finite = in_range & np.isfinite(targets[safe_offsets])
+    return finite, targets[safe_offsets[finite]], scores[finite]
+
+
 # ---------------------------------------------------------------------------
 # Evaluation metrics
 # ---------------------------------------------------------------------------
