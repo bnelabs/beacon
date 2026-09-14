@@ -429,9 +429,9 @@ export default function JobCreationModal({
       <form id="job-create-form" className="space-y-5" onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <label className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-bne-steel">Job Type</span>
+            <span className="text-sm font-medium text-bne-muted">Job Type</span>
             <select
-              className="rounded-lg border border-bne-frost bg-white px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+              className="rounded-lg border border-bne-line bg-bne-card px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
               value={jobType}
               onChange={(event) => setJobType(event.target.value)}
             >
@@ -444,34 +444,34 @@ export default function JobCreationModal({
           </label>
 
           <label className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-bne-steel">Job Name</span>
+            <span className="text-sm font-medium text-bne-muted">Job Name</span>
             <input
               type="text"
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder="Liquidity Data Run"
-              className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+              className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
             />
           </label>
         </div>
 
         <label className="flex flex-col gap-2">
-          <span className="text-sm font-medium text-bne-steel">Description</span>
+          <span className="text-sm font-medium text-bne-muted">Description</span>
           <textarea
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             rows={3}
             placeholder="Optional context for the team."
-            className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+            className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
           />
         </label>
 
-        <div className="rounded-xl border border-bne-frost bg-bne-ice/50 p-4">
+        <div className="rounded-md border border-bne-line bg-bne-paper/50 p-4">
           <h3 className="text-sm font-semibold text-bne-ink mb-3">Job Settings</h3>
           {JOB_TYPES.map(
             (type) =>
               type.value === jobType && (
-                <p key={type.value} className="text-xs text-bne-steel mb-4">
+                <p key={type.value} className="text-xs text-bne-muted mb-4">
                   {type.description}
                 </p>
               )
@@ -481,11 +481,11 @@ export default function JobCreationModal({
             <div className="space-y-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Region</span>
+                  <span className="text-sm font-medium text-bne-muted">Region</span>
                   <select
                     value={region}
                     onChange={(event) => setRegion(event.target.value)}
-                    className="rounded-lg border border-bne-frost bg-white px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line bg-bne-card px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   >
                     {REGION_OPTIONS.map((option) => (
                       <option key={option.value || 'all'} value={option.value}>
@@ -496,42 +496,42 @@ export default function JobCreationModal({
                 </label>
 
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Countries</span>
+                  <span className="text-sm font-medium text-bne-muted">Countries</span>
                   <input
                     type="text"
                     value={countries}
                     onChange={(event) => setCountries(event.target.value)}
                     placeholder="Comma separated (e.g. United States, Canada)"
-                    className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   />
                 </label>
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Start Date</span>
+                  <span className="text-sm font-medium text-bne-muted">Start Date</span>
                   <input
                     type="date"
                     value={startDate}
                     onChange={(event) => setStartDate(event.target.value)}
-                    className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   />
                 </label>
 
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">End Date</span>
+                  <span className="text-sm font-medium text-bne-muted">End Date</span>
                   <input
                     type="date"
                     value={endDate}
                     onChange={(event) => setEndDate(event.target.value)}
-                    className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   />
                 </label>
               </div>
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-bne-steel">
+                  <span className="text-sm font-medium text-bne-muted">
                     Selected Datasets ({selectedDatasets.length})
                   </span>
                   <Button
@@ -546,16 +546,16 @@ export default function JobCreationModal({
                 </div>
 
                 {selectedDatasets.length > 0 ? (
-                  <div className="rounded-lg border border-bne-frost bg-white/70 max-h-44 overflow-y-auto">
+                  <div className="rounded-lg border border-bne-line bg-bne-card/85 max-h-44 overflow-y-auto">
                     {selectedDatasets.map((dataset) => (
                       <div
                         key={dataset.id}
-                        className="flex items-start justify-between gap-3 px-3 py-2 border-b border-bne-frost last:border-b-0"
+                        className="flex items-start justify-between gap-3 px-3 py-2 border-b border-bne-line last:border-b-0"
                       >
                         <div>
                           <p className="text-sm font-medium text-bne-ink">{dataset.code}</p>
-                          <p className="text-xs text-bne-steel">{dataset.name}</p>
-                          <p className="text-[11px] text-bne-steel/80 mt-1">
+                          <p className="text-xs text-bne-muted">{dataset.name}</p>
+                          <p className="text-[11px] text-bne-muted/80 mt-1">
                             {dataset.category ? dataset.category.replace(/_/g, ' ') : '—'} ·{' '}
                             {dataset.region ? dataset.region.replace(/_/g, ' ') : '—'}
                           </p>
@@ -572,14 +572,14 @@ export default function JobCreationModal({
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-bne-steel">
+                  <p className="text-xs text-bne-muted">
                     Nothing selected yet. Use the catalogue list below or jump to Data Sources → “View Data” to pin datasets first.
                   </p>
                 )}
 
                 <div className="space-y-2">
                   <label className="flex flex-col gap-2">
-                    <span className="text-xs font-semibold uppercase text-bne-steel">
+                    <span className="text-xs font-semibold uppercase text-bne-muted">
                       Catalogue
                     </span>
                     <input
@@ -587,20 +587,20 @@ export default function JobCreationModal({
                       value={catalogueFilterTerm}
                       onChange={(event) => setCatalogueFilterTerm(event.target.value)}
                       placeholder="Filter by name, code, category, or region"
-                      className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                      className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                     />
                   </label>
 
                   {isCatalogueLoading ? (
-                    <p className="text-sm text-bne-steel">Loading catalogue…</p>
+                    <p className="text-sm text-bne-muted">Loading catalogue…</p>
                   ) : filteredCatalogueOptions.length === 0 ? (
-                    <p className="text-sm text-bne-crimson/80">
+                    <p className="text-sm text-bne-clay/80">
                       No datasets match “{catalogueFilterTerm.trim()}”.
                     </p>
                   ) : (
-                    <div className="rounded-lg border border-bne-frost bg-white shadow-sm">
-                      <div className="flex flex-col gap-2 border-b border-bne-frost px-3 py-2 md:flex-row md:items-center md:justify-between">
-                        <span className="text-xs text-bne-steel">
+                    <div className="rounded-lg border border-bne-line bg-bne-card shadow-sm">
+                      <div className="flex flex-col gap-2 border-b border-bne-line px-3 py-2 md:flex-row md:items-center md:justify-between">
+                        <span className="text-xs text-bne-muted">
                           Showing {filteredDatasetCount} dataset{filteredDatasetCount === 1 ? '' : 's'}
                         </span>
                         <div className="flex flex-wrap items-center gap-2">
@@ -627,7 +627,7 @@ export default function JobCreationModal({
                       <div className="max-h-60 overflow-y-auto px-3 py-3 space-y-4">
                         {filteredCatalogueOptions.map(([groupName, items]) => (
                           <div key={groupName} className="space-y-2">
-                            <p className="text-xs font-semibold uppercase tracking-wide text-bne-steel">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-bne-muted">
                               {groupName}
                             </p>
                             <div className="space-y-1.5">
@@ -636,12 +636,12 @@ export default function JobCreationModal({
                                 return (
                                   <div
                                     key={dataset.id}
-                                    className="flex items-start gap-2 rounded-lg border border-transparent px-2 py-1.5 hover:border-bne-azure hover:bg-bne-azure/5 cursor-pointer"
+                                    className="flex items-start gap-2 rounded-lg border border-transparent px-2 py-1.5 hover:border-bne-pine hover:bg-bne-pine/5 cursor-pointer"
                                     onClick={() => handleDatasetSelectionChange(dataset, !checked)}
                                   >
                                     <input
                                       type="checkbox"
-                                      className="mt-1 h-4 w-4 rounded border-bne-frost text-bne-azure focus:ring-bne-azure cursor-pointer"
+                                      className="mt-1 h-4 w-4 rounded border-bne-line text-bne-pine focus:ring-bne-pine cursor-pointer"
                                       checked={checked}
                                       onChange={(event) => {
                                         event.stopPropagation()
@@ -650,8 +650,8 @@ export default function JobCreationModal({
                                     />
                                     <div className="flex-1">
                                       <p className="text-sm font-medium text-bne-ink">{dataset.code}</p>
-                                      <p className="text-xs text-bne-steel">{dataset.name}</p>
-                                      <p className="text-[11px] text-bne-steel/75 mt-1">
+                                      <p className="text-xs text-bne-muted">{dataset.name}</p>
+                                      <p className="text-[11px] text-bne-muted/75 mt-1">
                                         {(dataset.category ? dataset.category.replace(/_/g, ' ') : '—')} ·{' '}
                                         {(dataset.region ? dataset.region.replace(/_/g, ' ') : '—')} {dataset.frequency ? `· ${dataset.frequency}` : ''}{' '}
                                         {dataset.unit ? `· ${dataset.unit}` : ''}
@@ -669,7 +669,7 @@ export default function JobCreationModal({
                 </div>
               </div>
 
-              <p className="text-xs text-bne-steel">
+              <p className="text-xs text-bne-muted">
                 Leave the dataset list empty to use the default catalogue selection configured in the backend.
               </p>
             </div>
@@ -677,11 +677,11 @@ export default function JobCreationModal({
             <div className="space-y-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Data Collection Job</span>
+                  <span className="text-sm font-medium text-bne-muted">Data Collection Job</span>
                   <select
                     value={dataJobId}
                     onChange={(event) => setDataJobId(event.target.value)}
-                    className="rounded-lg border border-bne-frost bg-white px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line bg-bne-card px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   >
                     <option value="">Select completed data job</option>
                     {dataCollectionJobs.map((job) => (
@@ -691,24 +691,24 @@ export default function JobCreationModal({
                     ))}
                   </select>
                   {dataCollectionJobs.length === 0 && (
-                    <span className="text-xs text-bne-crimson">
+                    <span className="text-xs text-bne-clay">
                       No completed data collection jobs available. Run one first.
                     </span>
                   )}
                 </label>
 
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Model Type</span>
+                  <span className="text-sm font-medium text-bne-muted">Model Type</span>
                   <select
                     value={modelType}
                     onChange={(event) => setModelType(event.target.value)}
-                    className="rounded-lg border border-bne-frost bg-white px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line bg-bne-card px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   >
                     <option value="temporal_attention">Temporal Attention</option>
                     <option value="hgt">Heterogeneous Graph Transformer</option>
                     <option value="lstm">LSTM</option>
                   </select>
-                  <p className="text-xs text-bne-steel leading-snug">
+                  <p className="text-xs text-bne-muted leading-snug">
                     {MODEL_TYPE_DESCRIPTIONS[modelType] ?? 'Select the architecture that best matches your data relationships.'}
                   </p>
                 </label>
@@ -716,93 +716,93 @@ export default function JobCreationModal({
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Train Period Start</span>
+                  <span className="text-sm font-medium text-bne-muted">Train Period Start</span>
                   <input
                     type="date"
                     value={trainStart}
                     onChange={(event) => setTrainStart(event.target.value)}
-                    className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   />
                 </label>
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Train Period End</span>
+                  <span className="text-sm font-medium text-bne-muted">Train Period End</span>
                   <input
                     type="date"
                     value={trainEnd}
                     onChange={(event) => setTrainEnd(event.target.value)}
-                    className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   />
                 </label>
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Test Period Start</span>
+                  <span className="text-sm font-medium text-bne-muted">Test Period Start</span>
                   <input
                     type="date"
                     value={testStart}
                     onChange={(event) => setTestStart(event.target.value)}
-                    className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   />
                 </label>
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Test Period End</span>
+                  <span className="text-sm font-medium text-bne-muted">Test Period End</span>
                   <input
                     type="date"
                     value={testEnd}
                     onChange={(event) => setTestEnd(event.target.value)}
-                    className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   />
                 </label>
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Epochs</span>
+                  <span className="text-sm font-medium text-bne-muted">Epochs</span>
                   <input
                     type="number"
                     min="1"
                     value={epochs}
                     onChange={(event) => setEpochs(event.target.value)}
-                    className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   />
                 </label>
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Sequence Length</span>
+                  <span className="text-sm font-medium text-bne-muted">Sequence Length</span>
                   <input
                     type="number"
                     min="1"
                     value={sequenceLength}
                     onChange={(event) => setSequenceLength(event.target.value)}
-                    className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   />
                 </label>
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Batch Size</span>
+                  <span className="text-sm font-medium text-bne-muted">Batch Size</span>
                   <input
                     type="number"
                     min="1"
                     value={batchSize}
                     onChange={(event) => setBatchSize(event.target.value)}
-                    className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   />
                 </label>
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Learning Rate</span>
+                  <span className="text-sm font-medium text-bne-muted">Learning Rate</span>
                   <input
                     type="number"
                     step="0.0001"
                     min="0"
                     value={learningRate}
                     onChange={(event) => setLearningRate(event.target.value)}
-                    className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   />
                 </label>
                 <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-bne-steel">Dropout</span>
+                  <span className="text-sm font-medium text-bne-muted">Dropout</span>
                   <input
                     type="number"
                     step="0.01"
@@ -810,7 +810,7 @@ export default function JobCreationModal({
                     max="1"
                     value={dropout}
                     onChange={(event) => setDropout(event.target.value)}
-                    className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                    className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
                   />
                 </label>
               </div>
@@ -819,7 +819,7 @@ export default function JobCreationModal({
         </div>
 
         {formError && (
-          <div className="rounded-lg border border-bne-crimson/40 bg-bne-crimson/10 px-4 py-3 text-sm text-bne-crimson">
+          <div className="rounded-lg border border-bne-clay/40 bg-bne-clay/10 px-4 py-3 text-sm text-bne-clay">
             {formError}
           </div>
         )}

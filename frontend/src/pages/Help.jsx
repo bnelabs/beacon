@@ -19,7 +19,7 @@ const knowledgeBaseArticles = [
 export default function Help() {
   return (
     <PageContainer title="Help Center" className="space-y-6">
-      <p className="text-sm text-bne-steel">
+      <p className="text-sm text-bne-muted">
         Explore guides, best practices, and support options for the Beacon banking network engine. Everything here is kept concise so you can keep momentum while investigating portfolios.
       </p>
 
@@ -30,14 +30,14 @@ export default function Help() {
           </CardHeader>
           <CardContent className="space-y-4">
             {knowledgeBaseArticles.map((article) => (
-              <div key={article.title} className="rounded-xl border border-bne-frost px-4 py-3">
+              <div key={article.title} className="rounded-md border border-bne-line px-4 py-3">
                 <h3 className="text-sm font-semibold text-bne-ink">{article.title}</h3>
-                <p className="mt-2 text-xs text-bne-steel">{article.blurb}</p>
+                <p className="mt-2 text-xs text-bne-muted">{article.blurb}</p>
                 <a
                   href="https://docs.usebeacon.ai"
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-bne-azure hover:underline"
+                  className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-bne-pine hover:underline"
                 >
                   Open guide
                   <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -53,17 +53,17 @@ export default function Help() {
           <CardHeader>
             <CardTitle>System status</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4 text-sm text-bne-steel">
-            <div className="flex items-center justify-between rounded-xl border border-bne-frost px-4 py-3">
+          <CardContent className="space-y-4 text-sm text-bne-muted">
+            <div className="flex items-center justify-between rounded-md border border-bne-line px-4 py-3">
               <div>
                 <p className="text-sm font-semibold text-bne-ink">Beacon Cloud</p>
-                <p className="text-xs text-bne-steel">API latency and job execution queues</p>
+                <p className="text-xs text-bne-muted">API latency and job execution queues</p>
               </div>
-              <span className="rounded-full bg-bne-emerald/10 px-3 py-1 text-xs font-semibold text-bne-emerald">Operational</span>
+              <span className="rounded-full bg-bne-moss/10 px-3 py-1 text-xs font-semibold text-bne-moss">Operational</span>
             </div>
             <p>
               Incident history and uptime reports are available at{' '}
-              <a href="https://status.usebeacon.ai" target="_blank" rel="noreferrer" className="font-medium text-bne-azure hover:underline">
+              <a href="https://status.usebeacon.ai" target="_blank" rel="noreferrer" className="font-medium text-bne-pine hover:underline">
                 status.usebeacon.ai
               </a>.
             </p>
@@ -75,25 +75,25 @@ export default function Help() {
         <CardHeader>
           <CardTitle>Need more help?</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3 text-sm text-bne-steel">
-          <div className="rounded-xl border border-bne-frost p-4">
+        <CardContent className="grid gap-4 md:grid-cols-3 text-sm text-bne-muted">
+          <div className="rounded-md border border-bne-line p-4">
             <p className="text-sm font-semibold text-bne-ink">Ask Beacon Support</p>
-            <p className="mt-2 text-xs text-bne-steel">Weekdays 8:00&ndash;18:00 GMT</p>
-            <a href="mailto:support@usebeacon.ai" className="mt-3 inline-flex text-sm font-medium text-bne-azure hover:underline">
+            <p className="mt-2 text-xs text-bne-muted">Weekdays 8:00&ndash;18:00 GMT</p>
+            <a href="mailto:support@usebeacon.ai" className="mt-3 inline-flex text-sm font-medium text-bne-pine hover:underline">
               support@usebeacon.ai
             </a>
           </div>
-          <div className="rounded-xl border border-bne-frost p-4">
+          <div className="rounded-md border border-bne-line p-4">
             <p className="text-sm font-semibold text-bne-ink">Join the community</p>
-            <p className="mt-2 text-xs text-bne-steel">Share strategies and learn from other risk teams.</p>
-            <a href="https://community.usebeacon.ai" target="_blank" rel="noreferrer" className="mt-3 inline-flex text-sm font-medium text-bne-azure hover:underline">
+            <p className="mt-2 text-xs text-bne-muted">Share strategies and learn from other risk teams.</p>
+            <a href="https://community.usebeacon.ai" target="_blank" rel="noreferrer" className="mt-3 inline-flex text-sm font-medium text-bne-pine hover:underline">
               Community hub
             </a>
           </div>
-          <div className="rounded-xl border border-bne-frost p-4">
+          <div className="rounded-md border border-bne-line p-4">
             <p className="text-sm font-semibold text-bne-ink">Schedule a workshop</p>
-            <p className="mt-2 text-xs text-bne-steel">Hands-on sessions to review models, data gaps, and governance.</p>
-            <a href="https://cal.usebeacon.ai" target="_blank" rel="noreferrer" className="mt-3 inline-flex text-sm font-medium text-bne-azure hover:underline">
+            <p className="mt-2 text-xs text-bne-muted">Hands-on sessions to review models, data gaps, and governance.</p>
+            <a href="https://cal.usebeacon.ai" target="_blank" rel="noreferrer" className="mt-3 inline-flex text-sm font-medium text-bne-pine hover:underline">
               Book time
             </a>
           </div>

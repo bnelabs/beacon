@@ -119,21 +119,21 @@ export default function DataSourceFormModal({
       <form id="data-source-form" className="space-y-4" onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-bne-steel">Name</span>
+            <span className="text-sm font-medium text-bne-muted">Name</span>
             <input
               type="text"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+              className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
             />
           </label>
 
           <label className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-bne-steel">Plugin Type</span>
+            <span className="text-sm font-medium text-bne-muted">Plugin Type</span>
             <select
               value={pluginType}
               onChange={(event) => setPluginType(event.target.value)}
-              className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+              className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
             >
               <option value="" disabled>
                 Select plugin
@@ -148,32 +148,32 @@ export default function DataSourceFormModal({
         </div>
 
         <label className="flex flex-col gap-2">
-          <span className="text-sm font-medium text-bne-steel">Description</span>
+          <span className="text-sm font-medium text-bne-muted">Description</span>
           <textarea
             rows={2}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+            className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
           />
         </label>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <label className="flex items-center gap-2 text-sm text-bne-steel">
+          <label className="flex items-center gap-2 text-sm text-bne-muted">
             <input
               type="checkbox"
               checked={enabled}
               onChange={(event) => setEnabled(event.target.checked)}
-              className="h-4 w-4 rounded border-bne-frost text-bne-azure focus:ring-bne-azure"
+              className="h-4 w-4 rounded border-bne-line text-bne-pine focus:ring-bne-pine"
             />
             Enabled
           </label>
 
-          <label className="flex items-center gap-2 text-sm text-bne-steel">
+          <label className="flex items-center gap-2 text-sm text-bne-muted">
             <input
               type="checkbox"
               checked={registrationRequired}
               onChange={(event) => setRegistrationRequired(event.target.checked)}
-              className="h-4 w-4 rounded border-bne-frost text-bne-azure focus:ring-bne-azure"
+              className="h-4 w-4 rounded border-bne-line text-bne-pine focus:ring-bne-pine"
             />
             Registration required
           </label>
@@ -181,50 +181,50 @@ export default function DataSourceFormModal({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-bne-steel">Registration URL</span>
+            <span className="text-sm font-medium text-bne-muted">Registration URL</span>
             <input
               type="url"
               value={registrationUrl}
               onChange={(event) => setRegistrationUrl(event.target.value)}
               placeholder="https://"
-              className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+              className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
             />
           </label>
 
           <label className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-bne-steel">Free Tier Limits</span>
+            <span className="text-sm font-medium text-bne-muted">Free Tier Limits</span>
             <input
               type="text"
               value={freeTierLimits}
               onChange={(event) => setFreeTierLimits(event.target.value)}
-              className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+              className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
             />
           </label>
         </div>
 
         <label className="flex flex-col gap-2">
-          <span className="text-sm font-medium text-bne-steel">Coverage Description</span>
+          <span className="text-sm font-medium text-bne-muted">Coverage Description</span>
           <textarea
             rows={2}
             value={coverageDescription}
             onChange={(event) => setCoverageDescription(event.target.value)}
-            className="rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+            className="rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
           />
         </label>
 
         <label className="flex flex-col gap-2">
-          <span className="text-sm font-medium text-bne-steel">Configuration (JSON)</span>
+          <span className="text-sm font-medium text-bne-muted">Configuration (JSON)</span>
           <textarea
             rows={8}
             value={configText}
             onChange={(event) => setConfigText(event.target.value)}
             spellCheck={false}
-            className="font-mono rounded-lg border border-bne-frost px-3 py-2 text-sm text-bne-ink focus:border-bne-azure focus:outline-none focus:ring-2 focus:ring-bne-azure"
+            className="font-mono rounded-lg border border-bne-line px-3 py-2 text-sm text-bne-ink focus:border-bne-pine focus:outline-none focus:ring-2 focus:ring-bne-pine"
           />
         </label>
 
         {error && (
-          <div className="rounded-lg border border-bne-crimson/30 bg-bne-crimson/10 px-4 py-3 text-sm text-bne-crimson">
+          <div className="rounded-lg border border-bne-clay/30 bg-bne-clay/10 px-4 py-3 text-sm text-bne-clay">
             {error}
           </div>
         )}

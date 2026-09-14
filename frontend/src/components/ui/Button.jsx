@@ -1,18 +1,29 @@
 import { cn } from '../../utils/cn'
 
+/**
+ * Buttons: flat fills and hairline outlines — no gradients, no glows.
+ * The primary action carries the brand pine; destructive actions carry clay;
+ * everything else stays quiet so the page reads as a document, not a dashboard.
+ */
 const variants = {
-  primary: 'bg-bne-azure text-white hover:bg-bne-azure-600 active:bg-bne-azure-600',
-  secondary: 'bg-bne-steel text-white hover:bg-opacity-90 active:bg-opacity-80',
-  success: 'bg-bne-emerald text-white hover:bg-bne-emerald-600 active:bg-bne-emerald-600',
-  danger: 'bg-bne-crimson text-white hover:bg-bne-crimson-600 active:bg-bne-crimson-600',
-  ghost: 'bg-transparent text-bne-ink hover:bg-bne-ice active:bg-bne-frost',
-  outline: 'border-2 border-bne-azure text-bne-azure hover:bg-bne-azure hover:text-white'
+  primary:
+    'bg-bne-pine text-bne-chalk hover:bg-bne-pine-600 active:bg-bne-pine-700 shadow-bne-panel',
+  secondary:
+    'bg-bne-card text-bne-ink border border-bne-line-strong hover:bg-bne-paper-dim active:bg-bne-line-soft',
+  success:
+    'bg-bne-moss text-bne-chalk hover:bg-bne-moss-600 active:bg-bne-moss-600 shadow-bne-panel',
+  danger:
+    'bg-bne-clay text-bne-chalk hover:bg-bne-clay-600 active:bg-bne-clay-700 shadow-bne-panel',
+  ghost:
+    'bg-transparent text-bne-muted hover:bg-bne-paper-dim hover:text-bne-ink active:bg-bne-line-soft',
+  outline:
+    'border border-bne-pine text-bne-pine bg-transparent hover:bg-bne-pine-50 active:bg-bne-pine-100'
 }
 
 const sizes = {
-  sm: 'px-3 py-1.5 text-sm',
-  md: 'px-4 py-2 text-base',
-  lg: 'px-6 py-3 text-lg'
+  sm: 'px-3 py-1.5 text-[13px]',
+  md: 'px-4 py-2 text-sm',
+  lg: 'px-6 py-2.5 text-[15px]'
 }
 
 export default function Button({
@@ -27,11 +38,11 @@ export default function Button({
   return (
     <button
       className={cn(
-        'rounded-lg font-medium transition-all duration-200',
+        'rounded-md font-medium transition-colors duration-150',
         'disabled:opacity-50 disabled:cursor-not-allowed',
-        'focus:outline-none focus:ring-2 focus:ring-bne-azure focus:ring-offset-2',
-        variants[variant],
-        sizes[size],
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-bne-pine focus-visible:ring-offset-2 focus-visible:ring-offset-bne-paper',
+        variants[variant] || variants.primary,
+        sizes[size] || sizes.md,
         className
       )}
       disabled={disabled || loading}

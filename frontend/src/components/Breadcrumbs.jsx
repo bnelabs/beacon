@@ -89,7 +89,7 @@ export default function Breadcrumbs() {
         <div key={`${crumb.page}-${index}`} className="flex items-center">
           {index > 0 && (
             <svg
-              className="w-4 h-4 mx-2 text-bne-steel/50"
+              className="w-4 h-4 mx-2 text-bne-muted/50"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -110,7 +110,7 @@ export default function Breadcrumbs() {
           ) : (
             <button
               onClick={() => navigate(crumb.page)}
-              className="text-bne-steel hover:text-bne-ink transition-colors"
+              className="text-bne-muted hover:text-bne-ink transition-colors"
               type="button"
             >
               {crumb.title}
