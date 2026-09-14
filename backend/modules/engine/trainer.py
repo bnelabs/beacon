@@ -221,6 +221,10 @@ class ModelTrainer:
         self.optimizer = None
         self.criterion = nn.MSELoss()
         self.best_val_loss = float('inf')
+        # Mixed precision is real now (the README claimed it before it
+        # existed): active only on CUDA, fp32 elsewhere and in validation.
+        self.use_amp = bool(config.get('mixed_precision', True)) and self.device.type == 'cuda'
+        self.scaler = torch.amp.GradScaler('cuda', enabled=self.use_amp)
 
     def train(self, train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame,
               output_dir: str) -> TrainingMetrics:
@@ -500,14 +504,18 @@ class ModelTrainer:
 
             # Forward pass
             self.optimizer.zero_grad()
-            outputs = self.model(sequences)
+            with torch.amp.autocast('cuda', enabled=self.use_amp):
+                outputs = self.model(sequences)
 
-            # Compute loss
-            loss = self.criterion(outputs, targets)
+                # Compute loss
+                loss = self.criterion(outputs, targets)
 
-            # Backward pass
-            loss.backward()
-            self.optimizer.step()
+            # Backward pass (GradScaler is a no-op when AMP is inactive)
+            self.scaler.scale(loss).backward()
+            self.scaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
 
             total_loss += loss.item()
 

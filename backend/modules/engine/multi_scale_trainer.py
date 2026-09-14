@@ -6,7 +6,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import numpy as np
-from typing import Dict, Tuple, List, Optional
+from typing import Any, Dict, Tuple, List, Optional
 from dataclasses import dataclass
 import logging
 from pathlib import Path
@@ -32,6 +32,7 @@ class MultiScaleTrainingMetrics:
     total_epochs: int
     model_path: str
     predictions_path: str
+    baseline_comparison: Optional[Dict[str, Any]] = None
 
 
 class MultiSourceDataset(Dataset):
@@ -316,6 +317,8 @@ class MultiScaleTrainer:
         self.optimizer = None
         self.criterion = nn.MSELoss()
         self.best_val_loss = float('inf')
+        self.use_amp = bool(config.get('mixed_precision', True)) and self.device.type == 'cuda'
+        self.scaler = torch.amp.GradScaler('cuda', enabled=self.use_amp)
 
     def train(
         self,
@@ -496,6 +499,12 @@ class MultiScaleTrainer:
         for source, metrics in per_source_metrics.items():
             logger.info(f"  {source}: MAE={metrics['mae']:.2f}, RMSE={metrics['rmse']:.2f}, R²={metrics['r2']:.4f}")
 
+        baseline_comparison = None
+        try:
+            baseline_comparison = self._baseline_comparison(test_dataset)
+        except Exception as exc:  # noqa: BLE001 - lift is a credibility report, not a result
+            logger.warning("Multi-scale baseline comparison skipped: %s", exc)
+
         # Save training history
         history_path = Path(output_dir) / 'training_history.json'
         with open(history_path, 'w') as f:
@@ -518,8 +527,92 @@ class MultiScaleTrainer:
             best_epoch=best_epoch,
             total_epochs=epochs,
             model_path=str(model_path),
-            predictions_path=str(predictions_path)
+            predictions_path=str(predictions_path),
+            baseline_comparison=baseline_comparison
         )
+
+    def _baseline_comparison(self, test_dataset: "MultiSourceDataset") -> Optional[Dict[str, Any]]:
+        """Walk-forward lift over simple baselines, per source.
+
+        The single-scale trainer has reported this since round two; the
+        multi-scale trainer did not, so its complexity went unpriced. Same
+        convention: the trained artefact is frozen while persistence and AR(1)
+        refit per fold, on each source's own denormalized series, folded
+        within the source so no fold crosses a seam.
+        """
+        from backend.modules.engine.backtesting import (
+            WalkForwardBacktester,
+            WalkForwardConfig,
+        )
+
+        class _FrozenMultiScaleAdapter:
+            def __init__(self, trainer, source_id, stats, seq_len):
+                self.trainer = trainer
+                self.source_id = source_id
+                self.stats = stats
+                self.seq_len = seq_len
+
+            def fit(self, X, y):
+                return self
+
+            def predict(self, X):
+                flat = np.asarray(X, dtype=np.float32)
+                windows = flat.reshape(-1, self.seq_len, 1)
+                model = self.trainer.model
+                model.eval()
+                with torch.no_grad():
+                    ids = torch.full((windows.shape[0], 1), self.source_id, dtype=torch.long)
+                    out = model(torch.FloatTensor(windows), ids)
+                return out.detach().cpu().numpy().ravel() * self.stats['std'] + self.stats['mean']
+
+        config = WalkForwardConfig(n_splits=3, test_size=0.2, gap=0, expanding=True, min_train_size=5)
+        seq_len = int(self.config.get('sequence_length', 30))
+        per_source: Dict[str, Any] = {}
+        lifts = []
+
+        for source, stats in test_dataset.source_stats.items():
+            source_id = test_dataset.source_to_id.get(source)
+            if source_id is None:
+                continue
+            frame = test_dataset.data[test_dataset.data['source_code'] == source].sort_values('Date')
+            value_col = 'Close' if 'Close' in frame.columns else 'Value'
+            values = pd.to_numeric(frame[value_col], errors='coerce').to_numpy(dtype=float)
+            values = values[np.isfinite(values)]
+            if values.size < seq_len + 10:
+                per_source[source] = {"skipped": "series too short for folds"}
+                continue
+            normalized = (values - stats['mean']) / stats['std']
+            windows = np.lib.stride_tricks.sliding_window_view(normalized, seq_len)
+            targets_raw = values[seq_len:]
+            if windows.shape[0] < 30 or targets_raw.size != windows.shape[0]:
+                per_source[source] = {"skipped": "not enough windows"}
+                continue
+            adapter = _FrozenMultiScaleAdapter(self, source_id, stats, seq_len)
+            features = windows.reshape(windows.shape[0], -1)
+            try:
+                comparison = WalkForwardBacktester(lambda: adapter, config).compare(
+                    features, targets_raw, baselines=("persistence", "ar1")
+                )
+            except (TypeError, ValueError) as exc:
+                per_source[source] = {"skipped": str(exc)}
+                continue
+            payload = comparison.to_dict()
+            per_source[source] = {
+                "primary_metrics": payload["primary"]["metrics"],
+                "baseline_metrics": {name: res["metrics"] for name, res in payload["baselines"].items()},
+                "lift": payload["lift"],
+            }
+            for lift in payload["lift"].values():
+                if isinstance(lift, (int, float)) and np.isfinite(lift):
+                    lifts.append(float(lift))
+
+        if not per_source:
+            return None
+        return {
+            "aggregation": "per_source",
+            "per_source": per_source,
+            "mean_lift": float(np.mean(lifts)) if lifts else None,
+        }
 
     def _train_epoch(self, dataloader: DataLoader) -> float:
         """Train for one epoch."""
@@ -533,15 +626,18 @@ class MultiScaleTrainer:
 
             # Forward pass
             self.optimizer.zero_grad()
-            outputs = self.model(sequences, source_ids)
+            with torch.amp.autocast('cuda', enabled=self.use_amp):
+                outputs = self.model(sequences, source_ids)
 
-            # Compute loss
-            loss = self.criterion(outputs, targets)
+                # Compute loss
+                loss = self.criterion(outputs, targets)
 
-            # Backward pass
-            loss.backward()
+            # Backward pass (GradScaler is a no-op when AMP is inactive)
+            self.scaler.scale(loss).backward()
+            self.scaler.unscale_(self.optimizer)
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-            self.optimizer.step()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
 
             total_loss += loss.item()
 
