@@ -12,7 +12,7 @@ schema at `/openapi.json` or the Swagger UI at `/docs`.
 
 Application: **BEACON API - Banking Network Engine** v2.0.0
 
-**122 operations across 22 tags.**
+**118 operations across 22 tags.**
 
 
 ## Pipeline (DATA-ENGINE-RESULTS)
@@ -103,12 +103,8 @@ Application: **BEACON API - Banking Network Engine** v2.0.0
 
 | Method | Path | Success model | Purpose |
 |---|---|---|---|
-| `GET` | `/api/v1/explainability/{job_id}/bank-risks` | untyped | Get per-bank liquidity risk assessments. |
-| `GET` | `/api/v1/explainability/{job_id}/contagion-analysis` | untyped | Get inter-bank contagion analysis. |
-| `GET` | `/api/v1/explainability/{job_id}/download/predictions` | untyped | Download predictions as CSV or Excel file. |
-| `GET` | `/api/v1/explainability/{job_id}/executive-summary` | untyped | Get executive summary for non-technical users (regulators, executives). |
-| `GET` | `/api/v1/explainability/{job_id}/explanation` | untyped | Get EU AI Act compliant model explanation for a prediction job. |
-| `GET` | `/api/v1/explainability/{job_id}/visualizations/{viz_name}` | untyped | Get a specific visualization image. |
+| `GET` | `/api/v1/explainability/{job_id}/bank-risks` | untyped | Per-institution profiles from a multi-bank prediction job. |
+| `GET` | `/api/v1/explainability/{job_id}/explanation` | untyped | Serve the transparency card for a training or prediction job. |
 
 
 ## Model Catalogue

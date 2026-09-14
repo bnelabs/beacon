@@ -277,11 +277,30 @@ class ResultsGenerator:
                 "message": "Systemic risk at critical levels - immediate action required"
             })
 
-        top_risk_factors = [
-            {"factor": "Market Liquidity Stress", "score": market_overall, "trend": self._safe_float(market_liq.get('trend', 0.0))},
-            {"factor": "Funding Pressure", "score": funding_overall, "trend": self._safe_float(funding_liq.get('trend', 0.0))},
-            {"factor": "Network Contagion Risk", "score": systemic_overall, "trend": self._safe_float(systemic.get('trend', 0.0))}
-        ]
+        # Only measured channels appear as factors. A channel with no
+        # measurement behind it (funding liquidity has none today; systemic
+        # needs a liability network) is listed as absent rather than rendered
+        # as a NaN or a zero score -- an unmeasured channel dressed as a
+        # factor is exactly the fabrication this report exists to avoid.
+        top_risk_factors = []
+        for name, score, channel in (
+            ("Market Liquidity Stress", market_overall, market_liq),
+            ("Funding Pressure", funding_overall, funding_liq),
+            ("Network Contagion Risk", systemic_overall, systemic),
+        ):
+            if np.isfinite(score):
+                top_risk_factors.append({
+                    "factor": name,
+                    "score": score,
+                    "trend": self._safe_float(channel.get('trend', 0.0)),
+                })
+            else:
+                top_risk_factors.append({
+                    "factor": name,
+                    "score": None,
+                    "trend": None,
+                    "status": "not_measured",
+                })
 
         key_recommendations = [
             "Increase liquidity buffers for high-risk institutions",

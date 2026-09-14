@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Cut a BEACON release: bump VERSION, date the changelog, sync the frontend.
+
+Usage:
+    python scripts/release.py patch|minor|major [--tag] [--dry-run]
+
+Moves the ``[Unreleased]`` block of CHANGELOG.md under a dated ``[X.Y.Z]``
+heading, writes the new version to VERSION, keeps
+frontend/package.json equal to it, and commits atomically. ``--tag`` creates
+the annotated git tag locally (pushing tags is a maintainer act).
+
+See docs/VERSIONING.md for the policy this script enforces.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as _dt
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+VERSION_FILE = ROOT / "VERSION"
+CHANGELOG = ROOT / "CHANGELOG.md"
+PACKAGE_JSON = ROOT / "frontend" / "package.json"
+
+SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$")
+
+
+def fail(message: str) -> "NoReturn":  # type: ignore[name-defined]
+    print(f"release: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def read_version() -> tuple[int, int, int]:
+    raw = VERSION_FILE.read_text(encoding="utf-8").strip()
+    match = SEMVER.match(raw)
+    if not match:
+        fail(f"VERSION file is not strict semver: {raw!r}")
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+def bump(current: tuple[int, int, int], part: str) -> tuple[int, int, int]:
+    major, minor, patch = current
+    if part == "major":
+        return major + 1, 0, 0
+    if part == "minor":
+        return major, minor + 1, 0
+    return major, minor, patch + 1
+
+
+def move_changelog_block(text: str, new_version: str) -> str:
+    if "[Unreleased]" not in text:
+        fail("CHANGELOG.md has no [Unreleased] block to release")
+    today = _dt.date.today().isoformat()
+    dated = f"## [{new_version}] - {today}"
+    return text.replace("## [Unreleased]", f"## [Unreleased]\n\n{dated}", 1)
+
+
+def run(cmd: list[str]) -> None:
+    subprocess.run(cmd, cwd=ROOT, check=True)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("part", choices=["patch", "minor", "major"])
+    parser.add_argument("--tag", action="store_true", help="create annotated git tag")
+    parser.add_argument("--dry-run", action="store_true", help="print, do not write")
+    args = parser.parse_args()
+
+    if subprocess.run(["git", "status", "--porcelain"], cwd=ROOT,
+                      capture_output=True, text=True).stdout.strip() and not args.dry_run:
+        fail("working tree is not clean; commit or stash first")
+
+    new = bump(read_version(), args.part)
+    new_version = f"{new[0]}.{new[1]}.{new[2]}"
+
+    changelog = move_changelog_block(CHANGELOG.read_text(encoding="utf-8"), new_version)
+    package = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
+    package["version"] = new_version
+
+    if args.dry_run:
+        print(f"would release {new_version}")
+        print(changelog[:400])
+        return
+
+    VERSION_FILE.write_text(new_version + "\n", encoding="utf-8")
+    CHANGELOG.write_text(changelog, encoding="utf-8")
+    PACKAGE_JSON.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+
+    run(["git", "add", "VERSION", "CHANGELOG.md", "frontend/package.json"])
+    run(["git", "commit", "-m", f"release: v{new_version}"])
+    if args.tag:
+        run(["git", "tag", "-a", f"v{new_version}",
+             "-m", f"BEACON v{new_version}"])
+    print(f"released v{new_version}" + (" (tagged)" if args.tag else ""))
+
+
+if __name__ == "__main__":
+    main()

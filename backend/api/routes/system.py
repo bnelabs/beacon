@@ -62,8 +62,13 @@ async def get_system_status(db: Session = Depends(get_db)):
         disk_used_gb = disk.used / (1024 ** 3)
         disk_percent = disk.percent
 
+        from backend import __version__
+        from backend.modules.engine.reproducibility import git_sha
+
         return {
             "status": "operational",
+            "version": __version__,
+            "git_revision": git_sha(),
             "cpu": {
                 "cores": cpu_count,
                 "usage_percent": round(cpu_percent, 1)

@@ -7,14 +7,25 @@ stack just to import a domain error class.
 """
 
 from importlib import import_module
+from pathlib import Path as _Path
 from typing import TYPE_CHECKING, Any
+
+# Version of record: the root VERSION file (docs/VERSIONING.md). Read eagerly
+# because it is a one-line file and provenance questions arise in exactly the
+# contexts where importing anything heavier would be wrong.
+try:
+    __version__ = (
+        _Path(__file__).resolve().parents[1] / "VERSION"
+    ).read_text(encoding="utf-8").strip()
+except OSError:  # packaged without the repository layout
+    __version__ = "0.0.0+unknown"
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .api.main import app
     from .database import close_db, get_db, init_db
     from .tasks.celery_app import celery_app
 
-__all__ = ["app", "init_db", "close_db", "get_db", "celery_app"]
+__all__ = ["__version__", "app", "init_db", "close_db", "get_db", "celery_app"]
 
 _LAZY_IMPORTS = {
     "app": (".api.main", "app"),
