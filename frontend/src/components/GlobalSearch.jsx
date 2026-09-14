@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { API_ORIGIN, asList, fetchJson } from '../utils/apiClient'
 import { useRouter } from '../store/useRouter'
 import { useQuery } from '@tanstack/react-query'
 import Card from './ui/Card'
@@ -7,29 +8,9 @@ import LoadingSpinner from './ui/LoadingSpinner'
 
 // Same-origin by default; nginx proxies /api/ to the backend. See the note in
 // hooks/useCountries.js for why localhost:3456 is the wrong default here.
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
-
 // Fetch and refuse a non-2xx response. Previously the queries returned
 // res.json() unconditionally, so a 404 yielded {"detail": "Not Found"} and the
 // category silently came back empty — which is how a wrong URL went unnoticed.
-async function fetchJson(url) {
-  const res = await fetch(url)
-  if (!res.ok) {
-    throw new Error(`${url} returned HTTP ${res.status}`)
-  }
-  return res.json()
-}
-
-// The list endpoints are inconsistent: /jobs and /models and /catalogue answer
-// with a bare array, while /countries wraps it in a `countries` key. Normalise
-// both shapes rather than assuming one, and treat anything else as no results
-// instead of throwing inside a render.
-function asList(data, key) {
-  if (Array.isArray(data)) return data
-  if (data && key && Array.isArray(data[key])) return data[key]
-  return []
-}
-
 // Fuzzy match scoring
 function fuzzyMatch(str, pattern) {
   const patternLower = pattern.toLowerCase()
@@ -70,14 +51,14 @@ export default function GlobalSearch() {
   // model catalogue (the backend mounts it at both /api/models and /api/v1/models).
   const { data: jobsData } = useQuery({
     queryKey: ['jobs'],
-    queryFn: () => fetchJson(`${API_BASE}/api/v1/jobs`),
+    queryFn: () => fetchJson(`${API_ORIGIN}/api/v1/jobs`),
     enabled: isOpen,
     staleTime: 30000
   })
 
   const { data: modelsData } = useQuery({
     queryKey: ['models'],
-    queryFn: () => fetchJson(`${API_BASE}/api/models`),
+    queryFn: () => fetchJson(`${API_ORIGIN}/api/models`),
     enabled: isOpen,
     staleTime: 60000
   })
@@ -86,14 +67,14 @@ export default function GlobalSearch() {
   // /api/v1/catalogue (see docs/api-endpoints.md).
   const { data: catalogueData } = useQuery({
     queryKey: ['catalogue'],
-    queryFn: () => fetchJson(`${API_BASE}/api/v1/catalogue`),
+    queryFn: () => fetchJson(`${API_ORIGIN}/api/v1/catalogue`),
     enabled: isOpen,
     staleTime: 60000
   })
 
   const { data: countriesData } = useQuery({
     queryKey: ['countries-search'],
-    queryFn: () => fetchJson(`${API_BASE}/api/v1/countries/`),
+    queryFn: () => fetchJson(`${API_ORIGIN}/api/v1/countries/`),
     enabled: isOpen,
     staleTime: 60000
   })

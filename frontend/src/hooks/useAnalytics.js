@@ -1,34 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
+import { fetchApi } from '../utils/apiClient'
 
-const API_BASE = '/api'
-
-async function fetchApi(endpoint, options = {}) {
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers
-    },
-    ...options
-  })
-
-  if (!response.ok) {
-    const errorPayload = await response.json().catch(() => ({ detail: 'Request failed' }))
-    const detail = errorPayload.detail
-    let message
-
-    if (typeof detail === 'string') {
-      message = detail
-    } else if (detail?.user_friendly) {
-      message = detail.user_friendly
-    } else {
-      message = `HTTP ${response.status}`
-    }
-
-    throw new Error(message)
-  }
-
-  return response.json()
-}
 
 /**
  * Hook to fetch analytics overview

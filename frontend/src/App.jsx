@@ -5,7 +5,7 @@ import LoadingSpinner from './components/ui/LoadingSpinner'
 import { useRouter } from './store/useRouter'
 
 // Lazy load heavy components to reduce initial bundle size
-const RiskMapPage = lazy(() => import('./pages/GlobeView'))
+const RiskMapPage = lazy(() => import('./pages/RiskMapPage'))
 const Models = lazy(() => import('./pages/Models'))
 const Jobs = lazy(() => import('./pages/Jobs'))
 const Results = lazy(() => import('./pages/Results'))
