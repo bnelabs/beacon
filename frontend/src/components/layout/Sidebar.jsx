@@ -209,7 +209,7 @@ export default function Sidebar() {
           ))}
         </div>
         <p className="bne-micro mt-3 px-3 text-[9px] text-bne-faint/80">
-          Systemic Liquidity Risk · v3
+          Systemic Liquidity Risk · v{__APP_VERSION__}
         </p>
       </div>
     </aside>
