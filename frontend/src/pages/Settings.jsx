@@ -1,9 +1,32 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import PageContainer from '../components/ui/PageContainer'
 import Card, { CardHeader, CardTitle, CardContent, CardFooter } from '../components/ui/Card'
 import Button from '../components/ui/Button'
+import Badge from '../components/ui/Badge'
 import { cn } from '../utils/cn'
 import { useOnboarding } from '../hooks/useOnboarding'
+import { useSystemStatus } from '../hooks/useApi'
+
+const PREFERENCES_KEY = 'beacon.preferences.v1'
+
+const DEFAULT_PREFERENCES = {
+  emailAlerts: true,
+  jobLifecycle: true,
+  weeklyDigest: false,
+  autoRefresh: true,
+  confirmBeforeStop: true,
+  experimentalFeatures: false
+}
+
+function loadPreferences() {
+  try {
+    const raw = window.localStorage.getItem(PREFERENCES_KEY)
+    if (!raw) return DEFAULT_PREFERENCES
+    return { ...DEFAULT_PREFERENCES, ...JSON.parse(raw) }
+  } catch {
+    return DEFAULT_PREFERENCES
+  }
+}
 
 function PreferenceToggle({ label, description, value, onChange }) {
   return (
@@ -35,14 +58,19 @@ function PreferenceToggle({ label, description, value, onChange }) {
 
 export default function Settings() {
   const { hasCompletedOnboarding, startOnboarding, resetOnboarding } = useOnboarding()
-  const [preferences, setPreferences] = useState({
-    emailAlerts: true,
-    jobLifecycle: true,
-    weeklyDigest: false,
-    autoRefresh: true,
-    confirmBeforeStop: true,
-    experimentalFeatures: false
-  })
+  const { data: systemStatus } = useSystemStatus()
+  const [preferences, setPreferences] = useState(loadPreferences)
+
+  // Preferences are UI-side state: persisted in this browser, and labelled as
+  // such. Nothing here pretends to be a server-side account setting while
+  // BEACON ships without authentication.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences))
+    } catch {
+      // private mode / storage disabled: settings stay session-only
+    }
+  }, [preferences])
 
   const toggles = useMemo(
     () => [
@@ -93,8 +121,30 @@ export default function Settings() {
     }))
   }
 
+  const platformVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'unknown'
+
   return (
     <PageContainer title="Settings" className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Platform</CardTitle>
+            <Badge variant="primary" size="sm">v{platformVersion}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-2 text-[13px] text-bne-muted">
+          <div className="flex justify-between"><span>Build channel</span><span className="bne-figure">{import.meta.env.MODE}</span></div>
+          <div className="flex justify-between">
+            <span>Backend</span>
+            <span className="bne-figure">
+              {systemStatus?.version ? `v${systemStatus.version} · ${String(systemStatus.git_revision || '').slice(0, 7)}` : 'not reachable'}
+            </span>
+          </div>
+          <div className="flex justify-between"><span>Preferences storage</span><span>this browser (localStorage)</span></div>
+          <div className="flex justify-between"><span>Authentication</span><span>not configured — single-operator mode</span></div>
+        </CardContent>
+      </Card>
+
       <p className="text-sm text-bne-muted">
         Personalise how Beacon keeps you informed. Settings are stored locally while role-based policies remain managed by your administrator.
       </p>
@@ -116,7 +166,7 @@ export default function Settings() {
             ))}
           </CardContent>
           <CardFooter className="justify-end">
-            <Button variant="ghost" size="sm" onClick={() => setPreferences((prev) => ({ ...prev, emailAlerts: false, jobLifecycle: false, weeklyDigest: false }))}>
+            <Button variant="ghost" size="sm" onClick={() => setPreferences({ ...DEFAULT_PREFERENCES, emailAlerts: false, jobLifecycle: false, weeklyDigest: false })}>
               Mute all
             </Button>
             <Button variant="primary" size="sm" disabled>

@@ -57,6 +57,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Typecheck TypeScript modules
+        # The ratchet: .ts modules are strict-checked; .js legacy is not (yet).
+        run: npm run typecheck
+
       - name: Build production bundle
         run: npm run build
 
