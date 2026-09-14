@@ -335,3 +335,19 @@ export function normalizeNetworkGraph(payload) {
       payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}
   }
 }
+
+/**
+ * Live system status from GET /api/v1/system/status (cpu/memory/gpu/disk).
+ * The dashboard used to render hardcoded "Operational/Connected/Active"
+ * badges — invented states. It now renders what the backend measured, and
+ * an unreachable backend renders as unknown, not as green.
+ */
+export function useSystemStatus(options = {}) {
+  return useQuery({
+    queryKey: ['systemStatus'],
+    queryFn: () => fetchApi('/v1/system/status'),
+    refetchInterval: options.refetchInterval ?? 30_000,
+    retry: 1,
+    ...options
+  })
+}

@@ -58,7 +58,7 @@ test('navigates the application and exercises primary interactions', async ({ pa
   const maybeLaterButton = page.getByRole('button', { name: 'Maybe Later' })
   if (await maybeLaterButton.isVisible()) {
     await maybeLaterButton.click()
-    await expect(page.getByRole('heading', { name: 'Welcome to BEACON! 👋' })).not.toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Welcome to BEACON' })).not.toBeVisible()
   }
   await page.getByRole('button', { name: 'View All' }).click()
   const searchButton = page.getByRole('button', { name: 'Search' })

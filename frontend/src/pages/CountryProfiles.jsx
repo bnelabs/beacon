@@ -2,23 +2,13 @@ import { useState, useMemo } from 'react'
 import PageContainer from '../components/ui/PageContainer'
 import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import Button from '../components/ui/Button'
-import Badge from '../components/ui/Badge'
+import Badge, { riskVariant } from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import { useCountries, useCountrySync } from '../hooks/useCountries'
 import { downloadCSV, downloadJSON, formatCountriesForExport } from '../utils/export'
 
 function CountryCard({ country }) {
-  const getRiskBadgeVariant = (level) => {
-    const variants = {
-      low: 'success',
-      medium: 'default',
-      high: 'warning',
-      critical: 'danger'
-    }
-    return variants[level] || 'default'
-  }
-
   const formatNumber = (num) => {
     if (!num) return 'N/A'
     return new Intl.NumberFormat('en-US', {
@@ -40,15 +30,15 @@ function CountryCard({ country }) {
   }
 
   return (
-    <Card className="hover:shadow-bne-hover transition-shadow cursor-pointer">
+    <Card className="hover:shadow-bne-card transition-shadow cursor-pointer">
       <CardHeader>
         <div className="flex items-start justify-between">
           <div className="flex-1">
             <CardTitle className="text-lg">{country.country_name}</CardTitle>
-            <p className="text-xs text-bne-steel mt-0.5">{country.country_code} • {country.region}</p>
+            <p className="text-xs text-bne-muted mt-0.5">{country.country_code} • {country.region}</p>
           </div>
           {country.risk_level && (
-            <Badge variant={getRiskBadgeVariant(country.risk_level)} size="sm">
+            <Badge variant={riskVariant(country.risk_level)} size="sm">
               {country.risk_level.toUpperCase()}
             </Badge>
           )}
@@ -57,19 +47,19 @@ function CountryCard({ country }) {
       <CardContent>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
-            <span className="text-bne-steel">GDP</span>
+            <span className="text-bne-muted">GDP</span>
             <p className="font-semibold text-bne-ink mt-0.5">{formatCurrency(country.gdp_usd)}</p>
           </div>
           <div>
-            <span className="text-bne-steel">Population</span>
+            <span className="text-bne-muted">Population</span>
             <p className="font-semibold text-bne-ink mt-0.5">{formatNumber(country.population)}</p>
           </div>
           <div>
-            <span className="text-bne-steel">Banks</span>
+            <span className="text-bne-muted">Banks</span>
             <p className="font-semibold text-bne-ink mt-0.5">{country.bank_count || 'N/A'}</p>
           </div>
           <div>
-            <span className="text-bne-steel">Risk Score</span>
+            <span className="text-bne-muted">Risk Score</span>
             <p className="font-semibold text-bne-ink mt-0.5">
               {country.risk_score ? `${parseFloat(country.risk_score).toFixed(1)}/100` : 'N/A'}
             </p>
@@ -77,11 +67,11 @@ function CountryCard({ country }) {
         </div>
 
         {(country.inflation_rate || country.unemployment_rate) && (
-          <div className="mt-4 pt-4 border-t border-bne-frost">
+          <div className="mt-4 pt-4 border-t border-bne-line">
             <div className="flex gap-4 text-xs">
               {country.inflation_rate && (
                 <div className="flex-1">
-                  <span className="text-bne-steel">Inflation</span>
+                  <span className="text-bne-muted">Inflation</span>
                   <p className="font-medium text-bne-ink mt-0.5">
                     {parseFloat(country.inflation_rate).toFixed(1)}%
                   </p>
@@ -89,7 +79,7 @@ function CountryCard({ country }) {
               )}
               {country.unemployment_rate && (
                 <div className="flex-1">
-                  <span className="text-bne-steel">Unemployment</span>
+                  <span className="text-bne-muted">Unemployment</span>
                   <p className="font-medium text-bne-ink mt-0.5">
                     {parseFloat(country.unemployment_rate).toFixed(1)}%
                   </p>
@@ -124,7 +114,7 @@ function SearchFilters({ filters, onFiltersChange }) {
             placeholder="Search by name or code..."
             value={filters.search || ''}
             onChange={(e) => onFiltersChange({ ...filters, search: e.target.value })}
-            className="w-full px-3 py-2 border border-bne-frost rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-azure"
+            className="w-full px-3 py-2 border border-bne-line rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-pine"
           />
         </div>
 
@@ -133,7 +123,7 @@ function SearchFilters({ filters, onFiltersChange }) {
           <select
             value={filters.region || ''}
             onChange={(e) => onFiltersChange({ ...filters, region: e.target.value || null })}
-            className="w-full px-3 py-2 border border-bne-frost rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-azure"
+            className="w-full px-3 py-2 border border-bne-line rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-pine"
           >
             <option value="">All Regions</option>
             {regions.map(region => (
@@ -147,7 +137,7 @@ function SearchFilters({ filters, onFiltersChange }) {
           <select
             value={filters.risk_level || ''}
             onChange={(e) => onFiltersChange({ ...filters, risk_level: e.target.value || null })}
-            className="w-full px-3 py-2 border border-bne-frost rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-azure"
+            className="w-full px-3 py-2 border border-bne-line rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-pine"
           >
             <option value="">All Levels</option>
             {riskLevels.map(level => (
@@ -245,10 +235,10 @@ export default function CountryProfiles() {
             </Button>
 
             {showExportMenu && (
-              <div className="absolute right-0 mt-2 w-48 rounded-lg bg-white shadow-bne-card border border-bne-frost py-2 z-10">
+              <div className="absolute right-0 mt-2 w-48 rounded-lg bg-bne-card shadow-bne-card border border-bne-line py-2 z-10">
                 <button
                   onClick={() => handleExport('csv')}
-                  className="w-full text-left px-4 py-2 text-sm text-bne-ink hover:bg-bne-frost transition-colors flex items-center gap-2"
+                  className="w-full text-left px-4 py-2 text-sm text-bne-ink hover:bg-bne-paper-dim transition-colors flex items-center gap-2"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -257,7 +247,7 @@ export default function CountryProfiles() {
                 </button>
                 <button
                   onClick={() => handleExport('json')}
-                  className="w-full text-left px-4 py-2 text-sm text-bne-ink hover:bg-bne-frost transition-colors flex items-center gap-2"
+                  className="w-full text-left px-4 py-2 text-sm text-bne-ink hover:bg-bne-paper-dim transition-colors flex items-center gap-2"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
@@ -309,11 +299,11 @@ export default function CountryProfiles() {
           ) : countriesData?.countries?.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center">
-                <svg className="w-16 h-16 mx-auto text-bne-steel/30 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <svg className="w-16 h-16 mx-auto text-bne-muted/30 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <h3 className="text-lg font-semibold text-bne-ink mb-2">No Countries Found</h3>
-                <p className="text-sm text-bne-steel mb-6">
+                <p className="text-sm text-bne-muted mb-6">
                   {Object.keys(filters).length > 0
                     ? 'No countries match your filters. Try adjusting your search criteria.'
                     : 'No country data available yet. Click "Sync from World Bank" to import data.'}
@@ -326,7 +316,7 @@ export default function CountryProfiles() {
           ) : (
             <>
               <div className="mb-4 flex items-center justify-between">
-                <p className="text-sm text-bne-steel">
+                <p className="text-sm text-bne-muted">
                   Found <span className="font-semibold text-bne-ink">{countriesData.total}</span> countries
                 </p>
               </div>

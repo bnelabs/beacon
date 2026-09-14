@@ -1,20 +1,101 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;0,8..60,700;1,8..60,400&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/**
+ * BEACON global styles — "field report" identity.
+ *
+ * Warm paper, ink type, hairline rules. Depth comes from borders, not
+ * shadows; emphasis comes from typography (serif display, tracked micro
+ * labels, tabular figures), not from gradients or glass. No blue, no dark
+ * chrome, no pill-everything.
+ */
+
 :root {
   color-scheme: light;
-  font-family: 'Inter Variable', Inter, system-ui, sans-serif;
-  background-color: theme('colors.bne-ice');
+  font-family: theme('fontFamily.sans');
+  background-color: theme('colors.bne.paper.DEFAULT');
+  --bne-focus: theme('colors.bne.pine.DEFAULT');
 }
 
 body {
-  @apply m-0 bg-bne-ice text-bne-ink antialiased;
+  @apply m-0 bg-bne-paper text-bne-ink antialiased;
+  font-feature-settings: 'cv11', 'ss01';
+  text-rendering: optimizeLegibility;
 }
 
 #root {
   @apply min-h-screen w-full;
   max-width: 100%;
+}
+
+::selection {
+  background: theme('colors.bne.pine.100');
+  color: theme('colors.bne.pine.700');
+}
+
+/* Consistent, unobtrusive focus treatment */
+:focus-visible {
+  outline: 2px solid var(--bne-focus);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+/* Warm, thin scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: theme('colors.bne.line.strong') transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: theme('colors.bne.line.strong');
+  border: 3px solid theme('colors.bne.paper.DEFAULT');
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer components {
+  /* Tracked small-caps label used for section eyebrows, table headers and
+     metadata lines — the signature typographic device of the identity. */
+  .bne-micro {
+    @apply font-sans text-micro font-semibold uppercase tracking-micro text-bne-faint;
+  }
+
+  /* Figures of record: tabular, monospaced digits so columns align. */
+  .bne-figure {
+    @apply font-mono tabular-nums text-bne-ink;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Serif display heading (page titles, hero figures). */
+  .bne-display {
+    @apply font-display text-bne-ink;
+  }
+
+  /* Hairline-ruled panel — the default container. */
+  .bne-panel {
+    @apply bg-bne-card border border-bne-line rounded-md shadow-bne-panel;
+  }
+
+  /* Table head cell treatment shared across data pages. */
+  .bne-th {
+    @apply bne-micro px-3 py-2 text-left border-b border-bne-line bg-bne-paper-dim/60;
+  }
+
+  .bne-td {
+    @apply px-3 py-2 text-sm text-bne-ink-soft border-b border-bne-line-soft align-middle;
+  }
+}
+
+@layer utilities {
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
 }

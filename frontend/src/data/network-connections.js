@@ -221,13 +221,31 @@ export function getConnectionsForRegion(regionId) {
 }
 
 /**
- * Get risk color based on risk score
+ * The risk scale of the identity: moss → ochre → rust → clay. Warm, printed-
+ * map colours that stay legible on the light basemap and in print exports;
+ * they mirror the bne-moss/ochre/rust/clay Tailwind tokens and the map
+ * legend's heat ramp.
+ */
+export const RISK_COLORS = {
+  low: '#67854F',
+  medium: '#C29A33',
+  high: '#C05F2C',
+  critical: '#8A3320',
+  uncalibrated: '#8A8168'
+}
+
+/**
+ * Get risk color based on risk score.
+ * Bands match the backend thresholds in backend/modules/risk/constants.py
+ * (0.3 / 0.6 / 0.85 on the 0-1 scale, kept here at the historical 0.8 cut
+ * the legend documents).
  */
 export function getRiskColor(riskScore) {
-  if (riskScore < 0.3) return '#10B981' // green (low risk)
-  if (riskScore < 0.6) return '#F59E0B' // amber (medium risk)
-  if (riskScore < 0.8) return '#EF4444' // red (high risk)
-  return '#DC2626' // dark red (critical risk)
+  if (riskScore == null || Number.isNaN(Number(riskScore))) return RISK_COLORS.uncalibrated
+  if (riskScore < 0.3) return RISK_COLORS.low
+  if (riskScore < 0.6) return RISK_COLORS.medium
+  if (riskScore < 0.8) return RISK_COLORS.high
+  return RISK_COLORS.critical
 }
 
 /**

@@ -9,7 +9,7 @@ import { useModels } from '../hooks/useApi'
 import { useRouter } from '../store/useRouter'
 
 function MetricCard({ title, value, change, trend, subtitle }) {
-  const trendColor = trend === 'up' ? 'text-bne-emerald' : trend === 'down' ? 'text-bne-crimson' : 'text-bne-steel'
+  const trendColor = trend === 'up' ? 'text-bne-moss' : trend === 'down' ? 'text-bne-clay' : 'text-bne-muted'
   const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'
 
   return (
@@ -17,9 +17,9 @@ function MetricCard({ title, value, change, trend, subtitle }) {
       <CardContent className="py-6">
         <div className="flex items-start justify-between">
           <div className="flex-1">
-            <p className="text-sm text-bne-steel mb-1">{title}</p>
-            <p className="text-3xl font-bold text-bne-ink">{value}</p>
-            {subtitle && <p className="text-xs text-bne-steel mt-1">{subtitle}</p>}
+            <p className="text-sm text-bne-muted mb-1">{title}</p>
+            <p className="font-display text-3xl font-semibold tnum text-bne-ink">{value}</p>
+            {subtitle && <p className="text-xs text-bne-muted mt-1">{subtitle}</p>}
           </div>
           {change && (
             <div className={`flex items-center gap-1 text-sm font-medium ${trendColor}`}>
@@ -99,29 +99,29 @@ function ModelComparisonTable({ models }) {
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-bne-frost bg-bne-ice/40">
+          <tr className="border-b border-bne-line bg-bne-paper/40">
             <th className="text-left py-3 px-4 font-semibold text-bne-ink">Model</th>
             <th className="text-left py-3 px-4 font-semibold text-bne-ink">Status</th>
             <th
-              className="text-left py-3 px-4 font-semibold text-bne-ink cursor-pointer hover:text-bne-azure"
+              className="text-left py-3 px-4 font-semibold text-bne-ink cursor-pointer hover:text-bne-pine"
               onClick={() => handleSort('accuracy')}
             >
               R² Score {sortBy === 'accuracy' && (sortOrder === 'desc' ? '↓' : '↑')}
             </th>
             <th
-              className="text-left py-3 px-4 font-semibold text-bne-ink cursor-pointer hover:text-bne-azure"
+              className="text-left py-3 px-4 font-semibold text-bne-ink cursor-pointer hover:text-bne-pine"
               onClick={() => handleSort('rmse')}
             >
               RMSE {sortBy === 'rmse' && (sortOrder === 'desc' ? '↓' : '↑')}
             </th>
             <th
-              className="text-left py-3 px-4 font-semibold text-bne-ink cursor-pointer hover:text-bne-azure"
+              className="text-left py-3 px-4 font-semibold text-bne-ink cursor-pointer hover:text-bne-pine"
               onClick={() => handleSort('mae')}
             >
               MAE {sortBy === 'mae' && (sortOrder === 'desc' ? '↓' : '↑')}
             </th>
             <th
-              className="text-left py-3 px-4 font-semibold text-bne-ink cursor-pointer hover:text-bne-azure"
+              className="text-left py-3 px-4 font-semibold text-bne-ink cursor-pointer hover:text-bne-pine"
               onClick={() => handleSort('trained')}
             >
               Last Trained {sortBy === 'trained' && (sortOrder === 'desc' ? '↓' : '↑')}
@@ -133,12 +133,12 @@ function ModelComparisonTable({ models }) {
           {sortedModels.map((model) => (
             <tr
               key={model.model_id}
-              className="border-b border-bne-frost last:border-0 hover:bg-bne-ice/30 transition-colors"
+              className="border-b border-bne-line last:border-0 hover:bg-bne-paper/30 transition-colors"
             >
               <td className="py-3 px-4">
                 <div>
                   <p className="font-medium text-bne-ink">{model.name}</p>
-                  <p className="text-xs text-bne-steel">{model.architecture || 'LSTM'}</p>
+                  <p className="text-xs text-bne-muted">{model.architecture || 'LSTM'}</p>
                 </div>
               </td>
               <td className="py-3 px-4">{getStatusBadge(model.status)}</td>
@@ -151,7 +151,7 @@ function ModelComparisonTable({ models }) {
               <td className="py-3 px-4 font-mono text-bne-ink">
                 {formatMetric(model.result?.test_mae || model.result?.mae)}
               </td>
-              <td className="py-3 px-4 text-bne-steel">
+              <td className="py-3 px-4 text-bne-muted">
                 {model.last_trained ? new Date(model.last_trained).toLocaleDateString() : 'Never'}
               </td>
               <td className="py-3 px-4">
@@ -181,7 +181,7 @@ function PerformanceChart({ models }) {
   }, [models])
 
   if (chartData.length === 0) {
-    return <p className="text-sm text-bne-steel">No performance data available</p>
+    return <p className="text-sm text-bne-muted">No performance data available</p>
   }
 
   const maxR2 = Math.max(...chartData.map(d => d.r2))
@@ -195,13 +195,13 @@ function PerformanceChart({ models }) {
               {data.name}
             </span>
             <div className="flex items-center gap-4">
-              <span className="text-bne-steel text-xs">R²: {data.r2.toFixed(4)}</span>
-              <span className="text-bne-steel text-xs">RMSE: {data.rmse.toFixed(4)}</span>
+              <span className="text-bne-muted text-xs">R²: {data.r2.toFixed(4)}</span>
+              <span className="text-bne-muted text-xs">RMSE: {data.rmse.toFixed(4)}</span>
             </div>
           </div>
-          <div className="w-full h-3 bg-bne-frost rounded-full overflow-hidden">
+          <div className="w-full h-3 bg-bne-paper-dim rounded-full overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-bne-azure to-bne-indigo transition-all duration-300"
+              className="h-full bg-bne-pine transition-all duration-300"
               style={{ width: `${(data.r2 / maxR2) * 100}%` }}
             />
           </div>
@@ -228,9 +228,9 @@ function ModelHealthIndicators({ models }) {
   }, [models])
 
   const getHealthColor = (score) => {
-    if (score >= 80) return 'text-bne-emerald'
-    if (score >= 50) return 'text-bne-amber'
-    return 'text-bne-crimson'
+    if (score >= 80) return 'text-bne-moss'
+    if (score >= 50) return 'text-bne-ochre'
+    return 'text-bne-clay'
   }
 
   return (
@@ -239,71 +239,71 @@ function ModelHealthIndicators({ models }) {
         <div className={`text-5xl font-bold ${getHealthColor(health.totalHealth)}`}>
           {health.totalHealth}%
         </div>
-        <p className="text-sm text-bne-steel mt-2">Overall Model Health</p>
-        <p className="text-xs text-bne-steel mt-1">
+        <p className="text-sm text-bne-muted mt-2">Overall Model Health</p>
+        <p className="text-xs text-bne-muted mt-1">
           {health.ready} of {models.length} models production-ready
         </p>
       </div>
 
       <div className="space-y-3">
-        <div className="flex items-center justify-between p-3 rounded-lg bg-bne-emerald/10 border border-bne-emerald/20">
+        <div className="flex items-center justify-between p-3 rounded-lg bg-bne-moss/10 border border-bne-moss/20">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-bne-emerald/20 flex items-center justify-center">
-              <svg className="w-5 h-5 text-bne-emerald" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="w-10 h-10 rounded-full bg-bne-moss/20 flex items-center justify-center">
+              <svg className="w-5 h-5 text-bne-moss" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </div>
             <div>
               <p className="text-sm font-medium text-bne-ink">Ready Models</p>
-              <p className="text-xs text-bne-steel">Production-ready and validated</p>
+              <p className="text-xs text-bne-muted">Production-ready and validated</p>
             </div>
           </div>
-          <span className="text-2xl font-bold text-bne-emerald">{health.ready}</span>
+          <span className="font-display text-2xl font-semibold tnum text-bne-moss">{health.ready}</span>
         </div>
 
-        <div className="flex items-center justify-between p-3 rounded-lg bg-bne-azure/10 border border-bne-azure/20">
+        <div className="flex items-center justify-between p-3 rounded-lg bg-bne-pine/10 border border-bne-pine/20">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-bne-azure/20 flex items-center justify-center">
-              <svg className="w-5 h-5 text-bne-azure" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="w-10 h-10 rounded-full bg-bne-pine/20 flex items-center justify-center">
+              <svg className="w-5 h-5 text-bne-pine" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             </div>
             <div>
               <p className="text-sm font-medium text-bne-ink">Training</p>
-              <p className="text-xs text-bne-steel">Currently in progress</p>
+              <p className="text-xs text-bne-muted">Currently in progress</p>
             </div>
           </div>
-          <span className="text-2xl font-bold text-bne-azure">{health.training}</span>
+          <span className="font-display text-2xl font-semibold tnum text-bne-pine">{health.training}</span>
         </div>
 
-        <div className="flex items-center justify-between p-3 rounded-lg bg-bne-amber/10 border border-bne-amber/20">
+        <div className="flex items-center justify-between p-3 rounded-lg bg-bne-ochre/10 border border-bne-ochre/20">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-bne-amber/20 flex items-center justify-center">
-              <svg className="w-5 h-5 text-bne-amber" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="w-10 h-10 rounded-full bg-bne-ochre/20 flex items-center justify-center">
+              <svg className="w-5 h-5 text-bne-ochre" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
             <div>
               <p className="text-sm font-medium text-bne-ink">Stale Models</p>
-              <p className="text-xs text-bne-steel">Not trained in 30+ days</p>
+              <p className="text-xs text-bne-muted">Not trained in 30+ days</p>
             </div>
           </div>
-          <span className="text-2xl font-bold text-bne-amber">{health.stale}</span>
+          <span className="font-display text-2xl font-semibold tnum text-bne-ochre">{health.stale}</span>
         </div>
 
-        <div className="flex items-center justify-between p-3 rounded-lg bg-bne-crimson/10 border border-bne-crimson/20">
+        <div className="flex items-center justify-between p-3 rounded-lg bg-bne-clay/10 border border-bne-clay/20">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-bne-crimson/20 flex items-center justify-center">
-              <svg className="w-5 h-5 text-bne-crimson" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="w-10 h-10 rounded-full bg-bne-clay/20 flex items-center justify-center">
+              <svg className="w-5 h-5 text-bne-clay" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </div>
             <div>
               <p className="text-sm font-medium text-bne-ink">Failed</p>
-              <p className="text-xs text-bne-steel">Training or validation failed</p>
+              <p className="text-xs text-bne-muted">Training or validation failed</p>
             </div>
           </div>
-          <span className="text-2xl font-bold text-bne-crimson">{health.failed}</span>
+          <span className="font-display text-2xl font-semibold tnum text-bne-clay">{health.failed}</span>
         </div>
       </div>
     </div>
@@ -450,7 +450,7 @@ export default function ModelPerformance() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>All Models</CardTitle>
-              <p className="text-sm text-bne-steel">
+              <p className="text-sm text-bne-muted">
                 Click column headers to sort
               </p>
             </div>
@@ -461,7 +461,7 @@ export default function ModelPerformance() {
             ) : (
               <div className="text-center py-12">
                 <svg
-                  className="w-16 h-16 mx-auto text-bne-steel/30 mb-4"
+                  className="w-16 h-16 mx-auto text-bne-muted/30 mb-4"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -474,7 +474,7 @@ export default function ModelPerformance() {
                   />
                 </svg>
                 <h3 className="text-lg font-semibold text-bne-ink mb-2">No Models Found</h3>
-                <p className="text-sm text-bne-steel mb-6">
+                <p className="text-sm text-bne-muted mb-6">
                   Create your first model to start tracking performance metrics
                 </p>
                 <Button variant="primary" onClick={() => navigate('models')}>

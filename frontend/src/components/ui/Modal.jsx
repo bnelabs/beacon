@@ -43,23 +43,23 @@ export default function Modal({
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div
-        className="absolute inset-0 bg-bne-ink/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-bne-ink/60"
         onClick={() => onClose?.()}
         role="presentation"
       />
       <div
         className={cn(
-          'relative z-10 w-full rounded-2xl bg-white shadow-2xl',
-          'border border-bne-frost',
+          'relative z-10 w-full rounded-md bg-bne-card shadow-bne-lift',
+          'border border-bne-line',
           widthClass
         )}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-bne-frost">
-          <h2 className="text-xl font-semibold text-bne-ink">{title}</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-bne-line">
+          <h2 className="font-display text-xl font-semibold text-bne-ink">{title}</h2>
           <button
             type="button"
             onClick={() => onClose?.()}
-            className="rounded-full p-2 text-bne-steel hover:bg-bne-ice focus:outline-none focus:ring-2 focus:ring-bne-azure"
+            className="rounded-full p-2 text-bne-muted hover:bg-bne-paper focus:outline-none focus:ring-2 focus:ring-bne-pine"
             aria-label="Close modal"
           >
             <svg className="h-5 w-5" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} fill="none">
@@ -71,7 +71,7 @@ export default function Modal({
         <div className="px-6 py-5 max-h-[70vh] overflow-y-auto">{children}</div>
 
         {footer && (
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-bne-frost bg-bne-ice/50 rounded-b-2xl">
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-bne-line bg-bne-paper/50 rounded-b-2xl">
             {footer}
           </div>
         )}

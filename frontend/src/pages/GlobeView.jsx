@@ -214,8 +214,8 @@ export default function RiskMapPage() {
                   className={cn(
                     'w-full text-left px-4 py-3 rounded-lg border-2 transition-all',
                     selectedDataSource === source
-                      ? 'border-bne-azure bg-bne-azure/5'
-                      : 'border-bne-frost hover:border-bne-azure/50'
+                      ? 'border-bne-pine bg-bne-pine/5'
+                      : 'border-bne-line hover:border-bne-pine/50'
                   )}
                 >
                   <div className="flex items-center justify-between">
@@ -239,8 +239,8 @@ export default function RiskMapPage() {
                   className={cn(
                     'px-3 py-1.5 rounded-full border text-xs font-medium transition-colors',
                     selectedRegion?.id === region.id
-                      ? 'border-bne-azure bg-bne-azure text-white'
-                      : 'border-bne-frost text-bne-steel hover:border-bne-azure/50 hover:text-bne-ink'
+                      ? 'border-bne-pine bg-bne-pine text-bne-chalk'
+                      : 'border-bne-line text-bne-muted hover:border-bne-pine/50 hover:text-bne-ink'
                   )}
                 >
                   {region.name}
@@ -255,7 +255,7 @@ export default function RiskMapPage() {
                 <h3 className="font-semibold text-bne-ink">Network Connection</h3>
                 <button
                   onClick={() => setSelectedConnection(null)}
-                  className="text-bne-steel hover:text-bne-ink"
+                  className="text-bne-muted hover:text-bne-ink"
                   aria-label="Close connection details"
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -265,20 +265,20 @@ export default function RiskMapPage() {
               </div>
               <div className="space-y-3">
                 <div>
-                  <p className="text-xs text-bne-steel mb-1">Source → Target</p>
+                  <p className="text-xs text-bne-muted mb-1">Source → Target</p>
                   <p className="font-medium text-bne-ink">
                     {getRegionName(selectedConnection.source)} → {getRegionName(selectedConnection.target)}
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <p className="text-xs text-bne-steel mb-1">Exposure</p>
+                    <p className="text-xs text-bne-muted mb-1">Exposure</p>
                     <p className="font-semibold text-bne-ink text-lg">
                       {formatExposure(Number(selectedConnection.exposure) || 0)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-bne-steel mb-1">Risk Level</p>
+                    <p className="text-xs text-bne-muted mb-1">Risk Level</p>
                     {typeof selectedConnection.riskScore === 'number' ? (
                       <Badge
                         variant={
@@ -299,10 +299,10 @@ export default function RiskMapPage() {
                   </div>
                 </div>
                 <div>
-                  <p className="text-xs text-bne-steel mb-1">Risk Score</p>
+                  <p className="text-xs text-bne-muted mb-1">Risk Score</p>
                   {typeof selectedConnection.riskScore === 'number' ? (
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 bg-bne-frost rounded-full h-2 overflow-hidden">
+                      <div className="flex-1 bg-bne-paper-dim rounded-full h-2 overflow-hidden">
                         <div
                           className="h-full rounded-full transition-all"
                           style={{
@@ -316,14 +316,14 @@ export default function RiskMapPage() {
                       </span>
                     </div>
                   ) : (
-                    <p className="text-sm text-bne-steel">
+                    <p className="text-sm text-bne-muted">
                       Not reported for this exposure. A risk score is never inferred
                       from an exposure amount.
                     </p>
                   )}
                 </div>
                 <div>
-                  <p className="text-xs text-bne-steel mb-1">Transaction Volume</p>
+                  <p className="text-xs text-bne-muted mb-1">Transaction Volume</p>
                   <p className="font-medium text-bne-ink">
                     {typeof selectedConnection.transactionVolume === 'number'
                       ? `${selectedConnection.transactionVolume.toLocaleString()} transactions`
@@ -332,7 +332,7 @@ export default function RiskMapPage() {
                 </div>
                 {selectedConnection.layer && (
                   <div>
-                    <p className="text-xs text-bne-steel mb-1">Layer</p>
+                    <p className="text-xs text-bne-muted mb-1">Layer</p>
                     <p className="font-medium text-bne-ink">
                       {selectedConnection.layer}
                       {selectedConnection.kind ? ` (${selectedConnection.kind})` : ''}
@@ -340,7 +340,7 @@ export default function RiskMapPage() {
                   </div>
                 )}
               </div>
-              <div className="mt-4 pt-4 border-t border-bne-frost">
+              <div className="mt-4 pt-4 border-t border-bne-line">
                 <Button variant="outline" size="sm" className="w-full">
                   View Detailed Analysis
                 </Button>
@@ -353,27 +353,27 @@ export default function RiskMapPage() {
               <h3 className="font-semibold text-bne-ink mb-4">Region Details</h3>
               <div className="space-y-3">
                 <div>
-                  <p className="text-sm text-bne-steel mb-1">Region</p>
+                  <p className="text-sm text-bne-muted mb-1">Region</p>
                   <p className="font-medium text-bne-ink">{selectedRegion.name}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-bne-steel mb-1">Country</p>
+                  <p className="text-sm text-bne-muted mb-1">Country</p>
                   <p className="font-medium text-bne-ink">{selectedRegion.country}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-bne-steel mb-1">Banks</p>
+                  <p className="text-sm text-bne-muted mb-1">Banks</p>
                   <p className="font-medium text-bne-ink">{selectedRegion.bankCount}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-bne-steel mb-1">Coordinates</p>
+                  <p className="text-sm text-bne-muted mb-1">Coordinates</p>
                   <p className="font-medium text-bne-ink font-mono text-xs">
                     {selectedRegion.lat.toFixed(4)}, {selectedRegion.lon.toFixed(4)}
                   </p>
                 </div>
               </div>
-              <div className="mt-4 pt-4 border-t border-bne-frost space-y-3">
+              <div className="mt-4 pt-4 border-t border-bne-line space-y-3">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-bne-steel">Datasets</span>
+                  <span className="text-bne-muted">Datasets</span>
                   <Badge variant="info" size="sm">{totalAssets}</Badge>
                 </div>
                 {banksLoading ? (
@@ -388,9 +388,9 @@ export default function RiskMapPage() {
                   />
                 ) : totalAssets > 0 ? (
                   <div className="space-y-2">
-                    <div className="max-h-60 overflow-y-auto rounded-lg border border-bne-frost">
+                    <div className="max-h-60 overflow-y-auto rounded-lg border border-bne-line">
                       <table className="min-w-full text-sm">
-                        <thead className="bg-bne-ice/60 text-xs uppercase text-bne-steel">
+                        <thead className="bg-bne-paper/60 text-xs uppercase text-bne-muted">
                           <tr>
                             <th className="px-3 py-2 text-left">Code</th>
                             <th className="px-3 py-2 text-left">Name</th>
@@ -399,10 +399,10 @@ export default function RiskMapPage() {
                         </thead>
                         <tbody>
                           {banks.map((bank) => (
-                            <tr key={bank.id} className="border-t border-bne-frost">
+                            <tr key={bank.id} className="border-t border-bne-line">
                               <td className="px-3 py-2 font-mono text-xs text-bne-ink">{bank.code}</td>
                               <td className="px-3 py-2 text-bne-ink">{bank.name}</td>
-                              <td className="px-3 py-2 text-xs font-mono text-bne-steel">
+                              <td className="px-3 py-2 text-xs font-mono text-bne-muted">
                                 {typeof bank.risk_score === 'number' ? bank.risk_score.toFixed(2) : '—'}
                               </td>
                             </tr>
@@ -411,13 +411,13 @@ export default function RiskMapPage() {
                       </table>
                     </div>
                     {criticalAssets.length > 0 && (
-                      <p className="text-xs text-bne-crimson">
+                      <p className="text-xs text-bne-clay">
                         {criticalAssets.length} dataset{criticalAssets.length === 1 ? '' : 's'} flagged with elevated risk (score ≥ 0.7)
                       </p>
                     )}
                   </div>
                 ) : (
-                  <p className="text-xs text-bne-steel">
+                  <p className="text-xs text-bne-muted">
                     No datasets found for this region. Try syncing the data source.
                   </p>
                 )}
@@ -426,10 +426,10 @@ export default function RiskMapPage() {
           )}
 
           {!selectedRegion && !selectedConnection && (
-            <Card className="border-2 border-dashed border-bne-frost bg-bne-ice/50">
+            <Card className="border-2 border-dashed border-bne-line bg-bne-paper/50">
               <div className="text-center py-8">
                 <svg
-                  className="w-12 h-12 mx-auto text-bne-steel/50 mb-3"
+                  className="w-12 h-12 mx-auto text-bne-muted/50 mb-3"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -441,11 +441,11 @@ export default function RiskMapPage() {
                     d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
                   />
                 </svg>
-                <p className="text-sm text-bne-steel mb-2">
+                <p className="text-sm text-bne-muted mb-2">
                   Select a region from the map or the region list to view details
                 </p>
                 {showNetwork && (
-                  <p className="text-xs text-bne-steel">
+                  <p className="text-xs text-bne-muted">
                     Or click on an exposure arc to see connection info
                   </p>
                 )}
@@ -463,13 +463,13 @@ export default function RiskMapPage() {
             )}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-bne-steel">Total Network Exposure</span>
+                <span className="text-sm text-bne-muted">Total Network Exposure</span>
                 <span className="text-sm font-semibold text-bne-ink">
                   {networkSummary.count > 0 ? formatExposure(networkSummary.totalExposure) : 'Unavailable'}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-bne-steel">Average Corridor Risk</span>
+                <span className="text-sm text-bne-muted">Average Corridor Risk</span>
                 {networkSummary.averageRisk != null ? (
                   <Badge
                     variant={
@@ -488,7 +488,7 @@ export default function RiskMapPage() {
                 )}
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-bne-steel">Highest Risk Corridor</span>
+                <span className="text-sm text-bne-muted">Highest Risk Corridor</span>
                 <span className="text-xs font-medium text-bne-ink">
                   {networkSummary.riskiest
                     ? `${getRegionName(networkSummary.riskiest.source)} → ${getRegionName(networkSummary.riskiest.target)}`
@@ -496,7 +496,7 @@ export default function RiskMapPage() {
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-bne-steel">Largest Exposure Corridor</span>
+                <span className="text-sm text-bne-muted">Largest Exposure Corridor</span>
                 <span className="text-xs font-medium text-bne-ink">
                   {networkSummary.largest
                     ? `${getRegionName(networkSummary.largest.source)} → ${getRegionName(networkSummary.largest.target)}`
@@ -510,17 +510,17 @@ export default function RiskMapPage() {
             <h3 className="font-semibold text-bne-ink mb-4">Quick Stats</h3>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-bne-steel">Total Regions</span>
+                <span className="text-sm text-bne-muted">Total Regions</span>
                 <Badge variant="info" size="sm">{regions.length}</Badge>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-bne-steel">Total Banks</span>
+                <span className="text-sm text-bne-muted">Total Banks</span>
                 <Badge variant="primary" size="sm">
                   {regions.reduce((sum, region) => sum + region.bankCount, 0).toLocaleString()}
                 </Badge>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-bne-steel">Interbank Corridors</span>
+                <span className="text-sm text-bne-muted">Interbank Corridors</span>
                 <Badge variant="success" size="sm">{networkSummary.count}</Badge>
               </div>
             </div>

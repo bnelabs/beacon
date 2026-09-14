@@ -25,7 +25,7 @@ export function useOnboarding() {
         {
           element: 'body',
           popover: {
-            title: 'Welcome to BEACON 👋',
+            title: 'Welcome to BEACON',
             description: `
               <div class="space-y-3">
                 <p><strong>Banking Early Alert Comprehensive Observation Network</strong></p>
@@ -73,7 +73,7 @@ export function useOnboarding() {
                   <li><strong>Temporal GNN</strong> - Time-series graph analysis</li>
                   <li><strong>Multi-scale</strong> - Multi-resolution networks</li>
                 </ul>
-                <p class="text-sm text-gray-600">Models are EU AI Act compliant with SHAP explainability.</p>
+                <p class="text-sm text-bne-muted">Models are EU AI Act compliant with SHAP explainability.</p>
               </div>
             `,
             side: 'right',
@@ -134,7 +134,7 @@ export function useOnboarding() {
             title: '🔍 Pro Tip: Global Search',
             description: `
               <div class="space-y-2">
-                <p>Press <kbd class="px-2 py-1 bg-gray-100 rounded border text-sm font-mono">⌘K</kbd> (or <kbd class="px-2 py-1 bg-gray-100 rounded border text-sm font-mono">Ctrl+K</kbd>) to quickly search across:</p>
+                <p>Press <kbd class="px-2 py-1 bg-bne-paper-dim rounded border text-sm font-mono">⌘K</kbd> (or <kbd class="px-2 py-1 bg-bne-paper-dim rounded border text-sm font-mono">Ctrl+K</kbd>) to quickly search across:</p>
                 <ul class="list-disc pl-5 space-y-1">
                   <li>All pages and navigation</li>
                   <li>Jobs and their statuses</li>
@@ -142,7 +142,7 @@ export function useOnboarding() {
                   <li>Country profiles</li>
                   <li>Data catalogue items</li>
                 </ul>
-                <p class="mt-2 text-sm text-gray-600">Use arrow keys to navigate results, Enter to select.</p>
+                <p class="mt-2 text-sm text-bne-muted">Use arrow keys to navigate results, Enter to select.</p>
               </div>
             `,
             side: 'bottom',
@@ -162,7 +162,7 @@ export function useOnboarding() {
                   <li><strong>Explore Country Profiles</strong> - Pre-evaluate economic metrics</li>
                   <li><strong>Check Help Center</strong> - For detailed documentation</li>
                 </ol>
-                <p class="mt-3 text-sm text-gray-600">You can restart this tour anytime from Settings → Onboarding.</p>
+                <p class="mt-3 text-sm text-bne-muted">You can restart this tour anytime from Settings → Onboarding.</p>
               </div>
             `,
             side: 'center',

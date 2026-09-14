@@ -1,5 +1,5 @@
 import { cn } from '../../utils/cn'
-import { getRiskColor } from '../../data/network-connections'
+import { getRiskColor, RISK_COLORS } from '../../data/network-connections'
 
 const RISK_BANDS = [
   { label: 'Low', range: '< 0.30', sample: 0.15 },
@@ -13,47 +13,59 @@ export default function MapLegend({ showNetwork = false, className }) {
     <div
       data-testid="map-legend"
       className={cn(
-        'w-48 rounded-xl border border-bne-frost bg-white/95 p-3 text-xs shadow-bne-panel backdrop-blur-sm',
+        'w-52 rounded-md border border-bne-line bg-bne-card/95 p-3 text-xs shadow-bne-panel',
         className
       )}
     >
-      <p className="mb-2 font-semibold text-bne-ink">Risk Score</p>
+      <p className="bne-micro mb-2">Risk Score</p>
       <ul className="space-y-1.5">
         {RISK_BANDS.map((band) => (
           <li key={band.label} className="flex items-center justify-between gap-3">
-            <span className="flex items-center gap-2 text-bne-steel">
+            <span className="flex items-center gap-2 text-bne-ink-soft">
               <span
-                className="h-2.5 w-2.5 rounded-full"
+                className="h-2.5 w-2.5 rounded-[2px]"
                 style={{ backgroundColor: getRiskColor(band.sample) }}
               />
               {band.label}
             </span>
-            <span className="font-mono text-[10px] text-bne-steel">{band.range}</span>
+            <span className="font-mono text-[10px] tnum text-bne-faint">{band.range}</span>
           </li>
         ))}
+        <li className="flex items-center justify-between gap-3 pt-0.5">
+          <span className="flex items-center gap-2 text-bne-faint">
+            <span
+              className="h-2.5 w-2.5 rounded-[2px] border border-dashed border-bne-line-strong"
+              style={{ backgroundColor: 'transparent' }}
+            />
+            Uncalibrated
+          </span>
+          <span className="font-mono text-[10px] text-bne-faint">no level</span>
+        </li>
       </ul>
 
-      <div className="mt-3 border-t border-bne-frost pt-3">
-        <p className="mb-1.5 font-semibold text-bne-ink">Liquidity Heat</p>
+      <div className="mt-3 border-t border-bne-line-soft pt-3">
+        <p className="bne-micro mb-1.5">Liquidity Heat</p>
         <div
-          className="h-2 rounded-full"
-          style={{ background: 'linear-gradient(90deg, #1D4ED8 0%, #10B981 40%, #F59E0B 70%, #DC2626 100%)' }}
+          className="h-2 rounded-[2px]"
+          style={{
+            background: `linear-gradient(90deg, ${RISK_COLORS.low} 0%, ${RISK_COLORS.medium} 45%, ${RISK_COLORS.high} 75%, ${RISK_COLORS.critical} 100%)`
+          }}
         />
-        <div className="mt-1 flex justify-between text-[10px] text-bne-steel">
+        <div className="mt-1 flex justify-between text-[10px] text-bne-faint">
           <span>Low</span>
           <span>High</span>
         </div>
       </div>
 
       {showNetwork && (
-        <div className="mt-3 border-t border-bne-frost pt-3 text-[11px] text-bne-steel">
-          <p className="mb-1 font-semibold text-bne-ink">Interbank Exposures</p>
+        <div className="mt-3 border-t border-bne-line-soft pt-3 text-[11px] text-bne-muted">
+          <p className="bne-micro mb-1">Interbank Exposures</p>
           <p>Arc width scales with exposure</p>
           <p>Arc colour reflects counterparty risk</p>
         </div>
       )}
 
-      <p className="mt-3 text-[10px] leading-snug text-bne-steel/80">
+      <p className="mt-3 text-[10px] leading-snug text-bne-faint">
         Marker radius scales with risk score and institution count.
       </p>
     </div>

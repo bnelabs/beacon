@@ -10,21 +10,21 @@ function PreferenceToggle({ label, description, value, onChange }) {
     <button
       type="button"
       onClick={onChange}
-      className="w-full flex items-center justify-between gap-6 rounded-xl border border-bne-frost px-4 py-3 text-left transition-colors hover:border-bne-azure hover:bg-bne-azure/5 focus:outline-none focus:ring-2 focus:ring-bne-azure"
+      className="w-full flex items-center justify-between gap-6 rounded-md border border-bne-line px-4 py-3 text-left transition-colors hover:border-bne-pine hover:bg-bne-pine/5 focus:outline-none focus:ring-2 focus:ring-bne-pine"
     >
       <span>
         <span className="block text-sm font-semibold text-bne-ink">{label}</span>
-        {description && <span className="mt-1 block text-xs text-bne-steel">{description}</span>}
+        {description && <span className="mt-1 block text-xs text-bne-muted">{description}</span>}
       </span>
       <span
         className={cn(
           'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
-          value ? 'bg-bne-azure' : 'bg-bne-frost'
+          value ? 'bg-bne-pine' : 'bg-bne-paper-dim'
         )}
       >
         <span
           className={cn(
-            'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+            'inline-block h-4 w-4 transform rounded-full bg-bne-card shadow transition-transform',
             value ? 'translate-x-5' : 'translate-x-1'
           )}
         />
@@ -95,7 +95,7 @@ export default function Settings() {
 
   return (
     <PageContainer title="Settings" className="space-y-6">
-      <p className="text-sm text-bne-steel">
+      <p className="text-sm text-bne-muted">
         Personalise how Beacon keeps you informed. Settings are stored locally while role-based policies remain managed by your administrator.
       </p>
 
@@ -153,25 +153,25 @@ export default function Settings() {
           <CardHeader>
             <CardTitle>Linked data credentials</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4 text-sm text-bne-steel">
-            <div className="flex items-center justify-between rounded-xl border border-bne-frost px-4 py-3">
+          <CardContent className="space-y-4 text-sm text-bne-muted">
+            <div className="flex items-center justify-between rounded-md border border-bne-line px-4 py-3">
               <div>
                 <p className="font-semibold text-bne-ink">FRED</p>
-                <p className="text-xs text-bne-steel">Federal Reserve Economic Data API</p>
+                <p className="text-xs text-bne-muted">Federal Reserve Economic Data API</p>
               </div>
-              <span className="rounded-full bg-bne-emerald/10 px-3 py-1 text-xs font-semibold text-bne-emerald">Connected</span>
+              <span className="rounded-full bg-bne-moss/10 px-3 py-1 text-xs font-semibold text-bne-moss">Connected</span>
             </div>
-            <div className="flex items-center justify-between rounded-xl border border-bne-frost px-4 py-3">
+            <div className="flex items-center justify-between rounded-md border border-bne-line px-4 py-3">
               <div>
                 <p className="font-semibold text-bne-ink">Alpha Vantage</p>
-                <p className="text-xs text-bne-steel">Equities and FX tick-level signals</p>
+                <p className="text-xs text-bne-muted">Equities and FX tick-level signals</p>
               </div>
               <Button variant="outline" size="sm">Connect</Button>
             </div>
-            <div className="flex items-center justify-between rounded-xl border border-bne-frost px-4 py-3">
+            <div className="flex items-center justify-between rounded-md border border-bne-line px-4 py-3">
               <div>
                 <p className="font-semibold text-bne-ink">SEC Filings</p>
-                <p className="text-xs text-bne-steel">EDGAR corporate disclosure feed</p>
+                <p className="text-xs text-bne-muted">EDGAR corporate disclosure feed</p>
               </div>
               <Button variant="outline" size="sm">Connect</Button>
             </div>
@@ -182,23 +182,23 @@ export default function Settings() {
           <CardHeader>
             <CardTitle>Team access</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 text-sm text-bne-steel">
+          <CardContent className="space-y-3 text-sm text-bne-muted">
             <p>Beacon is currently configured with a single workspace role (<span className="font-medium text-bne-ink">Administrator</span>). Role-based access control will arrive in the next release.</p>
-            <div className="rounded-xl border border-bne-frost px-4 py-3 space-y-2">
+            <div className="rounded-md border border-bne-line px-4 py-3 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-medium text-bne-ink">You</span>
-                <span className="text-xs font-semibold rounded-full bg-bne-azure/10 text-bne-azure px-2 py-1">Owner</span>
+                <span className="text-xs font-semibold rounded-full bg-bne-pine/10 text-bne-pine px-2 py-1">Owner</span>
               </div>
-              <p className="text-xs text-bne-steel">Invite teammates once directory sync is enabled for your organisation.</p>
+              <p className="text-xs text-bne-muted">Invite teammates once directory sync is enabled for your organisation.</p>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      <Card className="border-bne-azure/30 bg-gradient-to-br from-bne-azure/5 to-bne-indigo/5">
+      <Card className="border-bne-pine/30 bg-bne-paper-dim">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <svg className="w-5 h-5 text-bne-azure" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-5 h-5 text-bne-pine" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
             </svg>
             Getting Started
@@ -206,14 +206,14 @@ export default function Settings() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-start gap-3">
-            <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-bne-azure to-bne-indigo flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-bne-pine flex items-center justify-center">
+              <svg className="w-5 h-5 text-bne-chalk" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
             <div className="flex-1">
               <h4 className="text-sm font-semibold text-bne-ink mb-1">Interactive Tour</h4>
-              <p className="text-sm text-bne-steel mb-3">
+              <p className="text-sm text-bne-muted mb-3">
                 {hasCompletedOnboarding
                   ? "Want to review the basics? Restart the guided tour to explore BEACON's key features again."
                   : "New to BEACON? Take a quick tour to learn about the platform's key features and capabilities."}
@@ -232,14 +232,14 @@ export default function Settings() {
             </div>
           </div>
 
-          <div className="pt-4 border-t border-bne-frost/50">
+          <div className="pt-4 border-t border-bne-line/50">
             <div className="flex items-start gap-3 text-sm">
-              <svg className="w-5 h-5 text-bne-steel flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-5 h-5 text-bne-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <div>
-                <p className="text-bne-steel">
-                  Press <kbd className="px-2 py-1 mx-1 text-xs font-mono bg-white rounded border border-bne-frost">⌘K</kbd> anytime to open global search.
+                <p className="text-bne-muted">
+                  Press <kbd className="px-2 py-1 mx-1 text-xs font-mono bg-bne-card rounded border border-bne-line">⌘K</kbd> anytime to open global search.
                   Navigate to the <span className="font-medium text-bne-ink">Help Center</span> for detailed documentation.
                 </p>
               </div>

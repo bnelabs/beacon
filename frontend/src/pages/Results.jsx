@@ -30,7 +30,7 @@ function MetricCard({ title, value, subtitle }) {
       </CardHeader>
       <CardContent>
         <p className="text-2xl font-semibold text-bne-ink">{value}</p>
-        {subtitle && <p className="text-sm text-bne-steel mt-1">{subtitle}</p>}
+        {subtitle && <p className="text-sm text-bne-muted mt-1">{subtitle}</p>}
       </CardContent>
     </Card>
   )
@@ -45,7 +45,7 @@ function ScenarioSummary({ scenario }) {
         <div className="flex items-start justify-between gap-3">
           <div>
             <CardTitle>{scenario.name}</CardTitle>
-            <p className="text-sm text-bne-steel">
+            <p className="text-sm text-bne-muted">
               Horizon {scenario.horizon_days} days · Created {formatDate(scenario.created_at)}
             </p>
           </div>
@@ -55,27 +55,27 @@ function ScenarioSummary({ scenario }) {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-bne-steel">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-bne-muted">
           <div>
-            <p className="uppercase tracking-wide text-xs text-bne-steel/80 mb-1">Horizon</p>
+            <p className="uppercase tracking-wide text-xs text-bne-muted/80 mb-1">Horizon</p>
             <p className="font-medium text-bne-ink">{scenario.horizon_days} days</p>
           </div>
           <div>
-            <p className="uppercase tracking-wide text-xs text-bne-steel/80 mb-1">Series Simulated</p>
+            <p className="uppercase tracking-wide text-xs text-bne-muted/80 mb-1">Series Simulated</p>
             <p className="font-medium text-bne-ink">
               {scenario.summary?.num_series ?? scenario.predictions?.length ?? '—'}
             </p>
           </div>
           <div>
-            <p className="uppercase tracking-wide text-xs text-bne-steel/80 mb-1">Storage Path</p>
+            <p className="uppercase tracking-wide text-xs text-bne-muted/80 mb-1">Storage Path</p>
             <p className="font-medium text-bne-ink truncate">{scenario.storage_path || '—'}</p>
           </div>
         </div>
 
         {Array.isArray(scenario.adjustments) && scenario.adjustments.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border border-bne-frost">
+          <div className="overflow-x-auto rounded-lg border border-bne-line">
             <table className="min-w-full text-sm">
-              <thead className="bg-bne-ice/60 text-bne-steel uppercase text-xs">
+              <thead className="bg-bne-paper/60 text-bne-muted uppercase text-xs">
                 <tr>
                   <th className="text-left px-3 py-2">Source</th>
                   <th className="text-left px-3 py-2">Type</th>
@@ -84,9 +84,9 @@ function ScenarioSummary({ scenario }) {
               </thead>
               <tbody>
                 {scenario.adjustments.map((adjustment, index) => (
-                  <tr key={`${adjustment.source}-${adjustment.type}-${index}`} className="border-t border-bne-frost">
+                  <tr key={`${adjustment.source}-${adjustment.type}-${index}`} className="border-t border-bne-line">
                     <td className="px-3 py-2 font-medium text-bne-ink">{adjustment.source}</td>
-                    <td className="px-3 py-2 text-bne-steel uppercase text-xs">{adjustment.type}</td>
+                    <td className="px-3 py-2 text-bne-muted uppercase text-xs">{adjustment.type}</td>
                     <td className="px-3 py-2 font-mono text-bne-ink">
                       {formatNumber(adjustment.value, adjustment.type === 'pct' ? 2 : 4)}
                       {adjustment.type === 'pct' ? '%' : ''}
@@ -104,14 +104,14 @@ function ScenarioSummary({ scenario }) {
 
 function PredictionsTable({ rows }) {
   if (!rows.length) {
-    return <p className="text-sm text-bne-steel">No prediction outputs available yet.</p>
+    return <p className="text-sm text-bne-muted">No prediction outputs available yet.</p>
   }
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-bne-frost bg-bne-ice/40">
+          <tr className="border-b border-bne-line bg-bne-paper/40">
             <th className="text-left py-3 px-4 font-semibold text-bne-ink">Series</th>
             <th className="text-left py-3 px-4 font-semibold text-bne-ink">Prediction</th>
             <th className="text-left py-3 px-4 font-semibold text-bne-ink">Risk Score</th>
@@ -121,16 +121,16 @@ function PredictionsTable({ rows }) {
         </thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={row.key ?? index} className="border-b border-bne-frost last:border-0 hover:bg-bne-ice/30 transition-colors">
+            <tr key={row.key ?? index} className="border-b border-bne-line last:border-0 hover:bg-bne-paper/30 transition-colors">
               <td className="py-3 px-4 font-medium text-bne-ink">{row.label}</td>
               <td className="py-3 px-4 font-mono text-bne-ink">{formatNumber(row.prediction)}</td>
               <td className="py-3 px-4 font-mono text-bne-ink">{formatNumber(row.risk)}</td>
-              <td className="py-3 px-4 font-mono text-bne-steel">
+              <td className="py-3 px-4 font-mono text-bne-muted">
                 {row.confidence
                   ? `${formatNumber(row.confidence.lower)} – ${formatNumber(row.confidence.upper)}`
                   : '—'}
               </td>
-              <td className="py-3 px-4 text-sm text-bne-steel">{row.explanation || '—'}</td>
+              <td className="py-3 px-4 text-sm text-bne-muted">{row.explanation || '—'}</td>
             </tr>
           ))}
         </tbody>
@@ -500,7 +500,7 @@ export default function Results({ params = {} }) {
           </CardHeader>
           <CardContent className="space-y-6">
             {!availableSources.length ? (
-              <p className="text-sm text-bne-steel">
+              <p className="text-sm text-bne-muted">
                 This model does not expose per-source metrics yet. Run a multi-source training job to unlock scenario simulations.
               </p>
             ) : (
@@ -512,7 +512,7 @@ export default function Results({ params = {} }) {
                       type="text"
                       value={builderName}
                       onChange={(event) => setBuilderName(event.target.value)}
-                      className="w-full px-3 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                      className="w-full px-3 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
                       placeholder="e.g., Volatility +20%"
                     />
                   </div>
@@ -521,7 +521,7 @@ export default function Results({ params = {} }) {
                     <select
                       value={builderHorizon}
                       onChange={(event) => setBuilderHorizon(Number(event.target.value))}
-                      className="w-full px-3 py-2 border border-bne-frost rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-azure"
+                      className="w-full px-3 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
                     >
                       {[7, 14, 30, 60, 90].map((value) => (
                         <option key={value} value={value}>
@@ -530,7 +530,7 @@ export default function Results({ params = {} }) {
                       ))}
                     </select>
                   </div>
-                  <div className="rounded-lg border border-bne-frost bg-bne-ice/60 p-3 text-xs text-bne-steel">
+                  <div className="rounded-lg border border-bne-line bg-bne-paper/60 p-3 text-xs text-bne-muted">
                     Positive values simulate growth; negative values stress-test declines.
                   </div>
                 </div>
@@ -543,7 +543,7 @@ export default function Results({ params = {} }) {
                       <div key={source}>
                         <div className="flex items-center justify-between text-xs font-medium text-bne-ink mb-1">
                           <span>{source}</span>
-                          <span className="text-bne-steel">{formatted}%</span>
+                          <span className="text-bne-muted">{formatted}%</span>
                         </div>
                         <input
                           type="range"
@@ -565,7 +565,7 @@ export default function Results({ params = {} }) {
                 </div>
 
                 {builderError && (
-                  <div className="rounded-lg border border-bne-crimson/30 bg-bne-crimson/10 px-3 py-2 text-xs text-bne-crimson">
+                  <div className="rounded-lg border border-bne-clay/30 bg-bne-clay/10 px-3 py-2 text-xs text-bne-clay">
                     {builderError}
                   </div>
                 )}
@@ -607,19 +607,19 @@ export default function Results({ params = {} }) {
                 {featureDrivers.map((item) => (
                   <div key={item.name} className="space-y-1">
                     <div className="flex items-center justify-between text-sm">
-                      <span className="text-bne-steel">{item.name}</span>
+                      <span className="text-bne-muted">{item.name}</span>
                       <span className="font-medium text-bne-ink">{formatNumber(item.value)}</span>
                     </div>
-                    <div className="w-full h-2 bg-bne-frost rounded-full overflow-hidden">
+                    <div className="w-full h-2 bg-bne-paper-dim rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-bne-azure to-bne-indigo transition-all duration-300"
+                        className="h-full bg-bne-pine transition-all duration-300"
                         style={{ width: `${Math.min(Math.abs(item.value) * 100, 100)}%` }}
                       />
                     </div>
                   </div>
                 ))}
                 {!featureDrivers.length && (
-                  <p className="text-sm text-bne-steel">No drivers available.</p>
+                  <p className="text-sm text-bne-muted">No drivers available.</p>
                 )}
               </div>
             </CardContent>
@@ -634,7 +634,7 @@ export default function Results({ params = {} }) {
             <div className="space-y-3 text-sm">
               {modelInfoRows.map((row) => (
                 <div key={row.label}>
-                  <p className="text-bne-steel">{row.label}</p>
+                  <p className="text-bne-muted">{row.label}</p>
                   <p className="font-medium text-bne-ink break-words">{row.value}</p>
                 </div>
               ))}

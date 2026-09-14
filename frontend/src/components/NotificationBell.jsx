@@ -12,31 +12,31 @@ function NotificationItem({ notification, onRead, onDismiss }) {
     switch (type) {
       case 'success':
         return (
-          <svg className="w-5 h-5 text-bne-emerald" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-5 h-5 text-bne-moss" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         )
       case 'error':
         return (
-          <svg className="w-5 h-5 text-bne-crimson" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-5 h-5 text-bne-clay" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         )
       case 'warning':
         return (
-          <svg className="w-5 h-5 text-bne-amber" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-5 h-5 text-bne-ochre" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
         )
       case 'alert':
         return (
-          <svg className="w-5 h-5 text-bne-crimson animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-5 h-5 text-bne-clay animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
           </svg>
         )
       default:
         return (
-          <svg className="w-5 h-5 text-bne-azure" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-5 h-5 text-bne-pine" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         )
@@ -72,8 +72,8 @@ function NotificationItem({ notification, onRead, onDismiss }) {
 
   return (
     <div
-      className={`px-4 py-3 border-b border-bne-frost hover:bg-bne-ice/50 transition-colors cursor-pointer ${
-        !notification.is_read ? 'bg-bne-azure/5' : ''
+      className={`px-4 py-3 border-b border-bne-line hover:bg-bne-paper/50 transition-colors cursor-pointer ${
+        !notification.is_read ? 'bg-bne-pine/5' : ''
       }`}
       onClick={handleClick}
     >
@@ -90,16 +90,16 @@ function NotificationItem({ notification, onRead, onDismiss }) {
               </Badge>
             )}
           </div>
-          <p className="text-xs text-bne-steel mt-1 line-clamp-2">{notification.message}</p>
+          <p className="text-xs text-bne-muted mt-1 line-clamp-2">{notification.message}</p>
           <div className="flex items-center gap-3 mt-2">
-            <span className="text-xs text-bne-steel">{formatTime(notification.created_at)}</span>
+            <span className="text-xs text-bne-muted">{formatTime(notification.created_at)}</span>
             {notification.category && (
               <Badge variant="default" size="sm">
                 {notification.category}
               </Badge>
             )}
             {notification.action_label && (
-              <span className="text-xs text-bne-azure font-medium">{notification.action_label} →</span>
+              <span className="text-xs text-bne-pine font-medium">{notification.action_label} →</span>
             )}
           </div>
         </div>
@@ -109,9 +109,9 @@ function NotificationItem({ notification, onRead, onDismiss }) {
               e.stopPropagation()
               onDismiss(notification.id)
             }}
-            className="flex-shrink-0 p-1 hover:bg-bne-frost rounded transition-colors"
+            className="flex-shrink-0 p-1 hover:bg-bne-paper-dim rounded transition-colors"
           >
-            <svg className="w-4 h-4 text-bne-steel" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-4 h-4 text-bne-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -155,9 +155,9 @@ export default function NotificationBell() {
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 hover:bg-bne-frost rounded-lg transition-colors"
+        className="relative p-2 hover:bg-bne-paper-dim rounded-lg transition-colors"
       >
-        <svg className="w-6 h-6 text-bne-steel" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg className="w-6 h-6 text-bne-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -166,7 +166,7 @@ export default function NotificationBell() {
           />
         </svg>
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 w-5 h-5 bg-bne-crimson text-white text-xs font-bold rounded-full flex items-center justify-center">
+          <span className="absolute -top-1 -right-1 w-5 h-5 bg-bne-clay text-bne-chalk text-xs font-bold rounded-full flex items-center justify-center">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
@@ -175,8 +175,8 @@ export default function NotificationBell() {
       {isOpen && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setIsOpen(false)} />
-          <div className="absolute right-0 mt-2 w-96 max-h-[600px] rounded-xl bg-white shadow-bne-card border border-bne-frost z-40 overflow-hidden flex flex-col">
-            <div className="px-4 py-3 border-b border-bne-frost bg-bne-ice/30">
+          <div className="absolute right-0 mt-2 w-96 max-h-[600px] rounded-md bg-bne-card shadow-bne-card border border-bne-line z-40 overflow-hidden flex flex-col">
+            <div className="px-4 py-3 border-b border-bne-line bg-bne-paper/30">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold text-bne-ink">Notifications</h3>
                 {unreadCount > 0 && (
@@ -191,7 +191,7 @@ export default function NotificationBell() {
               {notifications.length === 0 ? (
                 <div className="text-center py-12">
                   <svg
-                    className="w-16 h-16 mx-auto text-bne-steel/30 mb-4"
+                    className="w-16 h-16 mx-auto text-bne-muted/30 mb-4"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -203,7 +203,7 @@ export default function NotificationBell() {
                       d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
                     />
                   </svg>
-                  <p className="text-sm text-bne-steel">No notifications</p>
+                  <p className="text-sm text-bne-muted">No notifications</p>
                 </div>
               ) : (
                 notifications.map((notification) => (

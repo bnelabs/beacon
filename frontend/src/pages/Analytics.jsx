@@ -8,7 +8,7 @@ import {
   useAnomalyInsights
 } from '../hooks/useAnalytics'
 
-function MetricCard({ title, value, subtitle, trend, icon, color = 'bne-azure' }) {
+function MetricCard({ title, value, subtitle, trend, icon, color = 'bne-pine' }) {
   return (
     <Card>
       <CardContent className="p-6">
@@ -17,7 +17,7 @@ function MetricCard({ title, value, subtitle, trend, icon, color = 'bne-azure' }
             {icon}
           </div>
           {trend && (
-            <div className={`flex items-center gap-1 text-sm font-medium ${trend > 0 ? 'text-bne-emerald' : 'text-bne-crimson'}`}>
+            <div className={`flex items-center gap-1 text-sm font-medium ${trend > 0 ? 'text-bne-moss' : 'text-bne-clay'}`}>
               {trend > 0 ? (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
@@ -32,9 +32,9 @@ function MetricCard({ title, value, subtitle, trend, icon, color = 'bne-azure' }
           )}
         </div>
         <div>
-          <h3 className="text-sm font-medium text-bne-steel mb-1">{title}</h3>
-          <div className="text-3xl font-bold text-bne-ink mb-1">{value}</div>
-          {subtitle && <p className="text-sm text-bne-steel">{subtitle}</p>}
+          <h3 className="text-sm font-medium text-bne-muted mb-1">{title}</h3>
+          <div className="font-display text-3xl font-semibold tnum text-bne-ink mb-1">{value}</div>
+          {subtitle && <p className="text-sm text-bne-muted">{subtitle}</p>}
         </div>
       </CardContent>
     </Card>
@@ -43,18 +43,18 @@ function MetricCard({ title, value, subtitle, trend, icon, color = 'bne-azure' }
 
 function TimeSeriesChart({ data, metric }) {
   const maxValue = useMemo(() => {
-    if (!data || data.length === 0) return 1
+    if (!Array.isArray(data) || data.length === 0) return 1
     return Math.max(...data.map(d => d.value || 0), 1)
   }, [data])
 
   const minValue = useMemo(() => {
-    if (!data || data.length === 0) return 0
+    if (!Array.isArray(data) || data.length === 0) return 0
     return Math.min(...data.map(d => d.value || 0))
   }, [data])
 
-  if (!data || data.length === 0) {
+  if (!Array.isArray(data) || data.length === 0) {
     return (
-      <div className="text-center py-12 text-bne-steel">
+      <div className="text-center py-12 text-bne-muted">
         <p>No data available for the selected period</p>
       </div>
     )
@@ -75,7 +75,7 @@ function TimeSeriesChart({ data, metric }) {
               y1={200 - (percent / 100) * 200}
               x2="800"
               y2={200 - (percent / 100) * 200}
-              stroke="#e5e7eb"
+              stroke="#E2DAC8"
               strokeWidth="1"
             />
           ))}
@@ -89,7 +89,7 @@ function TimeSeriesChart({ data, metric }) {
               return `${x},${y}`
             }).join(' ')}
             fill="none"
-            stroke="#2563eb"
+            stroke="#2C5545"
             strokeWidth="3"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -106,7 +106,7 @@ function TimeSeriesChart({ data, metric }) {
                 cx={x}
                 cy={y}
                 r="4"
-                fill="#2563eb"
+                fill="#2C5545"
                 className="hover:r-6 transition-all cursor-pointer"
               >
                 <title>{`${point.date}: ${point.value?.toFixed(4) || 'N/A'}`}</title>
@@ -116,7 +116,7 @@ function TimeSeriesChart({ data, metric }) {
         </svg>
 
         {/* Y-axis labels */}
-        <div className="absolute left-0 top-0 h-full flex flex-col justify-between text-xs text-bne-steel pr-2">
+        <div className="absolute left-0 top-0 h-full flex flex-col justify-between text-xs text-bne-muted pr-2">
           <span>{maxValue.toFixed(2)}</span>
           <span>{(minValue + (maxValue - minValue) / 2).toFixed(2)}</span>
           <span>{minValue.toFixed(2)}</span>
@@ -124,7 +124,7 @@ function TimeSeriesChart({ data, metric }) {
       </div>
 
       {/* X-axis labels */}
-      <div className="flex justify-between text-xs text-bne-steel">
+      <div className="flex justify-between text-xs text-bne-muted">
         {displayData.filter((_, i) => i % Math.ceil(displayData.length / 5) === 0).map((point) => (
           <span key={point.date}>
             {new Date(point.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -133,24 +133,24 @@ function TimeSeriesChart({ data, metric }) {
       </div>
 
       {/* Statistics */}
-      <div className="grid grid-cols-4 gap-4 pt-4 border-t border-bne-frost">
+      <div className="grid grid-cols-4 gap-4 pt-4 border-t border-bne-line">
         <div>
-          <div className="text-xs text-bne-steel">Latest</div>
+          <div className="text-xs text-bne-muted">Latest</div>
           <div className="text-lg font-semibold text-bne-ink">{data[data.length - 1]?.value?.toFixed(4) || 'N/A'}</div>
         </div>
         <div>
-          <div className="text-xs text-bne-steel">Average</div>
+          <div className="text-xs text-bne-muted">Average</div>
           <div className="text-lg font-semibold text-bne-ink">
             {(data.reduce((sum, d) => sum + (d.value || 0), 0) / data.length).toFixed(4)}
           </div>
         </div>
         <div>
-          <div className="text-xs text-bne-steel">Maximum</div>
-          <div className="text-lg font-semibold text-bne-emerald">{maxValue.toFixed(4)}</div>
+          <div className="text-xs text-bne-muted">Maximum</div>
+          <div className="text-lg font-semibold text-bne-moss">{maxValue.toFixed(4)}</div>
         </div>
         <div>
-          <div className="text-xs text-bne-steel">Minimum</div>
-          <div className="text-lg font-semibold text-bne-crimson">{minValue.toFixed(4)}</div>
+          <div className="text-xs text-bne-muted">Minimum</div>
+          <div className="text-lg font-semibold text-bne-clay">{minValue.toFixed(4)}</div>
         </div>
       </div>
     </div>
@@ -160,9 +160,9 @@ function TimeSeriesChart({ data, metric }) {
 function AnomalyAlerts({ anomalies }) {
   const getSeverityColor = (severity) => {
     switch (severity) {
-      case 'high': return 'bg-bne-crimson/10 border-bne-crimson/20 text-bne-crimson'
-      case 'medium': return 'bg-bne-amber/10 border-bne-amber/20 text-bne-amber'
-      default: return 'bg-bne-azure/10 border-bne-azure/20 text-bne-azure'
+      case 'high': return 'bg-bne-clay/10 border-bne-clay/20 text-bne-clay'
+      case 'medium': return 'bg-bne-ochre/10 border-bne-ochre/20 text-bne-ochre'
+      default: return 'bg-bne-pine/10 border-bne-pine/20 text-bne-pine'
     }
   }
 
@@ -183,13 +183,13 @@ function AnomalyAlerts({ anomalies }) {
 
   if (!anomalies || anomalies.length === 0) {
     return (
-      <div className="flex items-center justify-center py-8 text-bne-emerald">
+      <div className="flex items-center justify-center py-8 text-bne-moss">
         <svg className="w-12 h-12 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         <div>
           <p className="font-semibold text-bne-ink">All Systems Normal</p>
-          <p className="text-sm text-bne-steel">No anomalies detected</p>
+          <p className="text-sm text-bne-muted">No anomalies detected</p>
         </div>
       </div>
     )
@@ -227,7 +227,7 @@ function JobDistributionChart({ distribution }) {
   const total = Object.values(distribution).reduce((sum, count) => sum + count, 0)
 
   if (total === 0) {
-    return <div className="text-center py-8 text-bne-steel">No job data available</div>
+    return <div className="text-center py-8 text-bne-muted">No job data available</div>
   }
 
   return (
@@ -239,11 +239,11 @@ function JobDistributionChart({ distribution }) {
           <div key={jobType} className="space-y-1">
             <div className="flex items-center justify-between text-sm">
               <span className="font-medium text-bne-ink">{jobType.replace(/_/g, ' ')}</span>
-              <span className="text-bne-steel">{count} ({percentage.toFixed(1)}%)</span>
+              <span className="text-bne-muted">{count} ({percentage.toFixed(1)}%)</span>
             </div>
-            <div className="w-full h-3 bg-bne-frost rounded-full overflow-hidden">
+            <div className="w-full h-3 bg-bne-paper-dim rounded-full overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-bne-azure to-bne-indigo rounded-full transition-all"
+                className="h-full bg-bne-pine rounded-full transition-all"
                 style={{ width: `${percentage}%` }}
               />
             </div>
@@ -275,9 +275,9 @@ export default function Analytics() {
       <div className="p-6">
         <Card>
           <CardContent className="p-6">
-            <div className="text-center text-bne-crimson">
+            <div className="text-center text-bne-clay">
               <p className="font-semibold">Error loading analytics</p>
-              <p className="text-sm text-bne-steel mt-2">{overviewError.message}</p>
+              <p className="text-sm text-bne-muted mt-2">{overviewError.message}</p>
             </div>
           </CardContent>
         </Card>
@@ -292,8 +292,8 @@ export default function Analytics() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-bne-ink mb-2">Advanced Analytics</h1>
-          <p className="text-bne-steel">Comprehensive insights and trends across the platform</p>
+          <h1 className="font-display text-2xl font-semibold tnum text-bne-ink mb-2">Advanced Analytics</h1>
+          <p className="text-bne-muted">Comprehensive insights and trends across the platform</p>
         </div>
         <div className="flex items-center gap-2">
           {[7, 14, 30, 60].map((days) => (
@@ -302,8 +302,8 @@ export default function Analytics() {
               onClick={() => setTimePeriod(days)}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 timePeriod === days
-                  ? 'bg-bne-azure text-white'
-                  : 'bg-bne-ice text-bne-steel hover:bg-bne-frost'
+                  ? 'bg-bne-pine text-bne-chalk'
+                  : 'bg-bne-paper text-bne-muted hover:bg-bne-paper-dim'
               }`}
             >
               {days}d
@@ -319,44 +319,44 @@ export default function Analytics() {
           value={jobs.total || 0}
           subtitle={`${jobs.completed || 0} completed`}
           icon={
-            <svg className="w-6 h-6 text-bne-azure" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-6 h-6 text-bne-pine" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
           }
-          color="bne-azure"
+          color="bne-pine"
         />
         <MetricCard
           title="Success Rate"
           value={`${jobs.success_rate || 0}%`}
           subtitle={`${jobs.failed || 0} failed jobs`}
           icon={
-            <svg className="w-6 h-6 text-bne-emerald" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-6 h-6 text-bne-moss" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           }
-          color="bne-emerald"
+          color="bne-moss"
         />
         <MetricCard
           title="Model Health"
           value={`${models.health_percentage || 0}%`}
           subtitle={`${models.ready || 0}/${models.total || 0} models ready`}
           icon={
-            <svg className="w-6 h-6 text-bne-indigo" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-6 h-6 text-bne-pine" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
           }
-          color="bne-indigo"
+          color="bne-pine"
         />
         <MetricCard
           title="Avg Execution Time"
           value={`${jobs.avg_execution_time || 0}s`}
           subtitle="Per completed job"
           icon={
-            <svg className="w-6 h-6 text-bne-amber" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-6 h-6 text-bne-ochre" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           }
-          color="bne-amber"
+          color="bne-ochre"
         />
       </div>
 
@@ -391,8 +391,8 @@ export default function Analytics() {
                   onClick={() => setSelectedMetric(value)}
                   className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
                     selectedMetric === value
-                      ? 'bg-bne-azure text-white'
-                      : 'bg-bne-ice text-bne-steel hover:bg-bne-frost'
+                      ? 'bg-bne-pine text-bne-chalk'
+                      : 'bg-bne-paper text-bne-muted hover:bg-bne-paper-dim'
                   }`}
                 >
                   {label}
@@ -423,36 +423,36 @@ export default function Analytics() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div className="p-4 bg-bne-ice rounded-lg">
-                <div className="text-sm text-bne-steel mb-1">Average Quality Score</div>
-                <div className="text-3xl font-bold text-bne-ink">{data_quality.avg_quality_score?.toFixed(4) || 'N/A'}</div>
-                <div className="mt-2 w-full h-2 bg-bne-frost rounded-full overflow-hidden">
+              <div className="p-4 bg-bne-paper rounded-lg">
+                <div className="text-sm text-bne-muted mb-1">Average Quality Score</div>
+                <div className="font-display text-3xl font-semibold tnum text-bne-ink">{data_quality.avg_quality_score?.toFixed(4) || 'N/A'}</div>
+                <div className="mt-2 w-full h-2 bg-bne-paper-dim rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-bne-azure to-bne-emerald rounded-full"
+                    className="h-full bg-bne-moss rounded-full"
                     style={{ width: `${(data_quality.avg_quality_score || 0) * 100}%` }}
                   />
                 </div>
               </div>
 
-              <div className="p-4 bg-bne-ice rounded-lg">
-                <div className="text-sm text-bne-steel mb-1">Average Completeness</div>
-                <div className="text-3xl font-bold text-bne-ink">{((data_quality.avg_completeness || 0) * 100).toFixed(1)}%</div>
-                <div className="mt-2 w-full h-2 bg-bne-frost rounded-full overflow-hidden">
+              <div className="p-4 bg-bne-paper rounded-lg">
+                <div className="text-sm text-bne-muted mb-1">Average Completeness</div>
+                <div className="font-display text-3xl font-semibold tnum text-bne-ink">{((data_quality.avg_completeness || 0) * 100).toFixed(1)}%</div>
+                <div className="mt-2 w-full h-2 bg-bne-paper-dim rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-bne-indigo to-bne-azure rounded-full"
+                    className="h-full bg-bne-pine-600 rounded-full"
                     style={{ width: `${(data_quality.avg_completeness || 0) * 100}%` }}
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div className="p-3 bg-white rounded-lg border border-bne-frost">
-                  <div className="text-xs text-bne-steel">Jobs Analyzed</div>
-                  <div className="text-2xl font-bold text-bne-ink">{data_quality.jobs_analyzed || 0}</div>
+                <div className="p-3 bg-bne-card rounded-lg border border-bne-line">
+                  <div className="text-xs text-bne-muted">Jobs Analyzed</div>
+                  <div className="font-display text-2xl font-semibold tnum text-bne-ink">{data_quality.jobs_analyzed || 0}</div>
                 </div>
-                <div className="p-3 bg-white rounded-lg border border-bne-frost">
-                  <div className="text-xs text-bne-steel">Period</div>
-                  <div className="text-2xl font-bold text-bne-ink">{timePeriod}d</div>
+                <div className="p-3 bg-bne-card rounded-lg border border-bne-line">
+                  <div className="text-xs text-bne-muted">Period</div>
+                  <div className="font-display text-2xl font-semibold tnum text-bne-ink">{timePeriod}d</div>
                 </div>
               </div>
             </div>

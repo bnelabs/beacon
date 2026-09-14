@@ -670,6 +670,18 @@ export async function registerApiMocks(page) {
         return respond(dataSourcesList)
       }
 
+      if (normalizedPath === '/api/v1/system/status') {
+        // The dashboard renders measured host status; the mock answers with a
+        // fixed, plausible payload so e2e assertions are deterministic.
+        return respond({
+          status: 'operational',
+          cpu: { cores: 8, usage_percent: 12.5 },
+          memory: { total_gb: 32.0, used_gb: 11.2, usage_percent: 35.0 },
+          gpu: { available: false },
+          disk: { total_gb: 512.0, used_gb: 201.4, usage_percent: 39.3 }
+        })
+      }
+
       if (normalizedPath === '/api/v1/catalogue') {
         return respond(bankCatalogue)
       }
