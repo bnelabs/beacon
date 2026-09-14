@@ -15,6 +15,7 @@ they stayed stale for ten months without anyone noticing.
 | [`frontend.md`](frontend.md) | UI stack, pages and navigation model, data fetching, ⌘K search, onboarding, risk map, jobs/WebSocket status |
 | [`deployment.md`](deployment.md) | Deploying on this host: Docker Compose, GPU, model weights, secrets, verification |
 | [`../.github/workflows/README.md`](../.github/workflows/README.md) | CI/CD workflows and how to reproduce each locally |
+| [`FIFTH_ROUND_RESPONSE.md`](FIFTH_ROUND_RESPONSE.md) | Fifth-round (last-mile) review: claim audit, wiring executed, rejections with reasons |
 
 ## Historical records
 

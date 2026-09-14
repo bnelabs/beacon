@@ -724,17 +724,34 @@ class RealPredictionEngine:
             normalized_prediction = self._score_sequence(sequence, source_id)
             denorm_prediction = self._denormalize_prediction(normalized_prediction, stats)
 
+            regime, regime_method = self._regime_label(values, stats)
+            lower, upper, interval_method = self._conformal_interval(
+                values, stats, source_id, normalized_prediction
+            )
+            if lower is not None:
+                conf = (
+                    self._denormalize_prediction(lower, stats),
+                    self._denormalize_prediction(upper, stats),
+                )
+            else:
+                conf = (None, None)
+
             predictions_list.append({
                 'source': source_code,
                 'prediction': denorm_prediction,
                 'risk_score': normalized_prediction,
-                # No calibrated interval exists yet. Reported as None rather
-                # than as an MC-dropout interval, which described a different
-                # network from the one that produced this score.
-                'confidence_lower': None,
-                'confidence_upper': None,
+                # Split-conformal interval over held-out rolling residuals of
+                # this source, in the model's standardized space, denormalized
+                # with the same statistics as the point score. None when the
+                # payload cannot support a calibration window -- reported as
+                # absent, never as a zero-width or invented interval.
+                'confidence_lower': conf[0],
+                'confidence_upper': conf[1],
+                'confidence_method': interval_method,
+                'regime': regime,
+                'regime_method': regime_method,
             })
-            confidence_intervals[source_code] = (None, None)
+            confidence_intervals[source_code] = conf
 
         predictions_df = pd.DataFrame(predictions_list)
 
@@ -938,6 +955,89 @@ reported here rather than approximated.
         mean = stats.get('mean', 0.0)
         std = stats.get('std', 1.0)
         return float(normalized_value * std + mean)
+
+    def _regime_label(
+        self, values: np.ndarray, stats: Dict[str, float]
+    ) -> tuple:
+        """Nowcast the volatility regime of one source with the Student-t HMM.
+
+        The regime label is what ``mixture_of_experts`` was missing and what
+        the census queued: a live, per-source state from a fitted model rather
+        than a declared one. The stress state is identified as the
+        higher-variance state -- a naming convention over fitted parameters,
+        not a supervised label. Too little history returns None: an unnamed
+        regime, never a guessed one.
+        """
+        finite = values[np.isfinite(values)]
+        if finite.size < 40:
+            return None, "insufficient_history_for_regime"
+        mean = float(stats.get('mean', finite.mean()))
+        std = float(stats.get('std', finite.std())) or 1.0
+        standardized = ((values - mean) / std)[np.isfinite(values)].reshape(-1, 1)
+        try:
+            from backend.modules.engine.hidden_markov import StudentTHMM
+
+            hmm = StudentTHMM(n_states=2, seed=0)
+            hmm.fit(standardized)
+            states = hmm.viterbi(standardized)
+            variances = np.array(
+                [standardized[states == k, 0].var() if (states == k).any() else 0.0
+                 for k in range(2)]
+            )
+            stress_state = int(np.argmax(variances))
+            label = "stress" if int(states[-1]) == stress_state else "calm"
+            return label, "student_t_hmm_higher_variance_state"
+        except Exception as exc:  # noqa: BLE001 - regime is advisory, absence is honest
+            logger.warning("Regime labelling unavailable: %s", exc)
+            return None, f"regime_unavailable:{type(exc).__name__}"
+
+    def _conformal_interval(
+        self,
+        values: np.ndarray,
+        stats: Dict[str, float],
+        source_id: int,
+        final_score: float,
+        calibration_window: int = 120,
+        minimum_window: int = 30,
+        alpha: float = 0.1,
+    ) -> tuple:
+        """Split-conformal interval for the point score, per source.
+
+        Residuals come from rolling the frozen model over a held-out tail of
+        this source's own standardized series and comparing each window's
+        score with the observed next value -- the calibration set is disjoint
+        from the window the point score uses. Returns bounds in standardized
+        space and the method string, or (None, None, reason) when the payload
+        cannot support a calibration window.
+        """
+        finite = values[np.isfinite(values)]
+        mean = float(stats.get('mean', finite.mean() if finite.size else 0.0))
+        std = float(stats.get('std', finite.std() if finite.size else 1.0)) or 1.0
+        normalized = (values - mean) / std
+        normalized = np.where(np.isfinite(normalized), normalized, 0.0)
+
+        sequence_length = int(self.sequence_length)
+        n_windows = normalized.size - sequence_length
+        if n_windows < minimum_window + 1:
+            return None, None, "insufficient_history_for_calibration"
+
+        holdout = min(calibration_window, n_windows - 1)
+        windows = np.lib.stride_tricks.sliding_window_view(normalized, sequence_length)
+        first = n_windows - holdout
+        cal_windows = windows[first:n_windows]
+        scores = self._score_windows(cal_windows, source_id, 256)
+        # target for window i (ending at i+L-1) is normalized[i+L]
+        idx = np.arange(first, first + scores.size)
+        residual_targets = normalized[idx + sequence_length]
+        if residual_targets.size < minimum_window:
+            return None, None, "insufficient_history_for_calibration"
+
+        from backend.modules.engine.conformal import SplitConformalCalibrator
+
+        calibrator = SplitConformalCalibrator(alpha=alpha)
+        calibrator.fit(residual_targets, scores[: residual_targets.size])
+        interval = calibrator.interval(float(final_score))
+        return interval.lower, interval.upper, f"split_conformal_alpha_{alpha}"
 
     def _generate_key_findings(self, predictions_df: pd.DataFrame) -> str:
         """Summarise the scored sources without inventing drivers.

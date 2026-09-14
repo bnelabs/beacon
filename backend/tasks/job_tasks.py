@@ -37,6 +37,68 @@ def convert_numpy_types(obj):
     return obj
 
 
+def persist_risk_scores(db, job_id: int, predictions_df, model_version: str, horizon_days: int) -> int:
+    """Write prediction outputs to the risk-score hypertable.
+
+    The risk_scores and model_metrics hypertables existed since the
+    TimescaleDB migration but nothing ever wrote to them -- the fifth-round
+    review named this explicitly. Scores are persisted with their provenance
+    (job, model version, horizon); an uncalibrated score is stored with
+    ``risk_level`` null rather than a fabricated band.
+    """
+    from backend.modules.results.timeseries_store import TimeSeriesStore
+
+    now = datetime.now(timezone.utc)
+    rows = []
+    has_score = 'risk_score' in predictions_df.columns
+    has_source = 'source' in predictions_df.columns
+    has_bank = 'bank_id' in predictions_df.columns
+    has_level = 'risk_level' in predictions_df.columns
+    for _, record in predictions_df.iterrows():
+        if not has_score:
+            continue
+        score = record['risk_score']
+        entity = record['source'] if has_source else (record['bank_id'] if has_bank else None)
+        if score is None or entity is None or np.isnan(float(score)):
+            continue
+        rows.append({
+            "time": now,
+            "entity_type": "source" if has_source else "bank",
+            "entity_id": str(entity),
+            "model_version": str(model_version)[:50],
+            "horizon_days": int(horizon_days),
+            "risk_score": float(score),
+            "risk_level": (str(record['risk_level']) if has_level and record['risk_level'] else None),
+            "prediction_job_id": int(job_id),
+        })
+    if not rows:
+        return 0
+    return TimeSeriesStore(db).record_risk_scores(rows)
+
+
+def persist_model_metrics(db, job_id: int, metrics: dict, model_version: str) -> int:
+    """Write scalar backtest/evaluation metrics to the metrics hypertable."""
+    from backend.modules.results.timeseries_store import TimeSeriesStore
+
+    now = datetime.now(timezone.utc)
+    rows = []
+    for name, value in metrics.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if not np.isfinite(float(value)):
+            continue
+        rows.append({
+            "time": now,
+            "job_id": int(job_id),
+            "metric_name": str(name)[:64],
+            "metric_value": float(value),
+            "model_version": str(model_version)[:50],
+        })
+    if not rows:
+        return 0
+    return TimeSeriesStore(db).record_model_metrics(rows)
+
+
 def error_details_to_json(error_details) -> str:
     """Convert ErrorDetails (dict or dataclass) to JSON string for database storage."""
     try:
@@ -630,6 +692,20 @@ def run_prediction(self, job_id: int, parameters: dict):
 
         prediction_result.predictions_df.to_parquet(output_path)
 
+        # Persist to the risk-score hypertable: it existed since the
+        # TimescaleDB migration with no writer anywhere (fifth-round finding).
+        try:
+            persisted = persist_risk_scores(
+                db,
+                job_id,
+                prediction_result.predictions_df,
+                model_version=str(trained_job.result.get('model_type', 'unknown')),
+                horizon_days=int(forecast_horizon),
+            )
+            logger.info("Persisted %d risk-score row(s) for job %s", persisted, job_id)
+        except Exception as persist_exc:  # noqa: BLE001 - storage outage must not void the prediction
+            logger.warning("Risk-score persistence skipped for job %s: %s", job_id, persist_exc)
+
         # Convert NaN to None for JSON serialization
         import math
         def clean_nan(obj):
@@ -1014,6 +1090,69 @@ def run_backtest(self, job_id: int, parameters: dict):
             elif isinstance(obj, float) and math.isnan(obj):
                 return None
             return obj
+
+        # Event-based validation (fifth-round wiring): when the job declares
+        # an EventDefinition, label stress episodes on each source's indicator
+        # series over the declared test window and score the risk series
+        # against them -- ROC AUC, average precision and conservative
+        # earliest-alarm lead time. Labels use future observations by
+        # construction (that is what a label is); they never touch features.
+        event_definition_raw = parameters.get("event_definition")
+        if series_usable and isinstance(event_definition_raw, dict):
+            from backend.modules.data.event_labeller import EventDefinition, label_events
+            from backend.modules.engine.event_metrics import (
+                average_precision,
+                lead_time_stats,
+                roc_auc,
+            )
+
+            try:
+                definition = EventDefinition(**event_definition_raw)
+            except TypeError as def_exc:
+                raise ValueError(f"invalid event_definition: {def_exc}") from def_exc
+
+            value_col = 'Close' if 'Close' in test_data.columns else 'Value'
+            frame = risk_series.frame if risk_series is not None else None
+            event_metrics_payload = {"definition": definition.to_dict(), "by_source": {}}
+            for source_name in (risk_series.sources if risk_series is not None else []):
+                block = frame[frame["source"] == source_name]
+                scores_block = np.asarray(block["risk_score"], dtype=float)
+                source_rows = test_data[test_data['source_code'] == source_name].sort_values('Date')
+                series_values = pd.to_numeric(source_rows[value_col], errors='coerce').to_numpy(dtype=float)
+                if series_values.size < definition.horizon + definition.min_duration:
+                    event_metrics_payload["by_source"][source_name] = {"skipped": "series_too_short"}
+                    continue
+                labelling = label_events(series_values, definition)
+                events_aligned = labelling.events[: scores_block.size]
+                if events_aligned.size == 0 or not events_aligned.any():
+                    event_metrics_payload["by_source"][source_name] = {"skipped": "no_events_in_window"}
+                    continue
+                alarms = scores_block >= np.quantile(scores_block, definition.quantile)
+                event_metrics_payload["by_source"][source_name] = {
+                    "n_events": int(labelling.n_events),
+                    "roc_auc": roc_auc(events_aligned, scores_block[: events_aligned.size]),
+                    "average_precision": average_precision(events_aligned, scores_block[: events_aligned.size]),
+                    "lead_time": lead_time_stats(
+                        events_aligned, alarms[: events_aligned.size], max_lead=2 * definition.horizon
+                    ),
+                }
+            backtest_metrics["event_metrics"] = event_metrics_payload
+        elif isinstance(event_definition_raw, dict):
+            backtest_metrics["event_metrics"] = {
+                "skipped": "no usable per-timestep risk series to score against the labelled events"
+            }
+
+        # Persist scalar metrics to the metrics hypertable (fifth-round wiring).
+        try:
+            persisted = persist_model_metrics(
+                db,
+                job_id,
+                backtest_metrics,
+                model_version=str(trained_job.result.get('model_type', 'unknown')),
+            )
+            logger.info("Persisted %d metric row(s) for backtest job %s", persisted, job_id)
+        except Exception as persist_exc:  # noqa: BLE001 - storage outage must not void the backtest
+            logger.warning("Metric persistence skipped for job %s: %s", job_id, persist_exc)
 
         # Persist the aligned series when an output directory is configured, so a
         # risk curve can be inspected without re-running the backtest.
