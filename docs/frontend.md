@@ -94,6 +94,9 @@ shipped ~170 dead classes (`bne-frost`, `bne-indigo`, `bne-sky`,
   destructive clay. No gradient or glow states.
 - `ui/PageContainer` — breadcrumb, micro eyebrow, serif title over a hairline
   rule; the masthead of every page.
+- The sidebar footer renders the build version from `__APP_VERSION__`
+  (stamped by Vite from `package.json`, which `scripts/release.py` keeps in
+  step with the repository `VERSION` file) — no more hard-coded "v3".
 - `Brand.jsx` — the beacon mark (signal tower, ochre lamp, pine broadcast
   arcs) drawn on the same 24-unit grid and 1.6 stroke as the navigation
   icons; `Wordmark` sets BEACON over *Banking Early-Alert Network*. The mark
@@ -131,7 +134,7 @@ on `dashboard`.
 | `currentPage` | Component | Notes |
 |---|---|---|
 | `dashboard` | `pages/Dashboard.jsx` | Eagerly loaded; welcome banner, live system-status meters, serif stat cards |
-| `globe` | `pages/GlobeView.jsx` | Route key is still `globe`; the page is the **Risk Map** |
+| `globe` | `pages/RiskMapPage.jsx` | Route key is still `globe`; the page is the **Risk Map** |
 | `models` | `pages/Models.jsx` | |
 | `jobs` | `pages/Jobs.jsx` | Batch mode, WebSocket hook |
 | `results` | `pages/Results.jsx` | Breadcrumb child of `jobs` |
@@ -204,7 +207,7 @@ nav items), so adding a step means adding the attribute as well as the step.
 
 ## Risk map
 
-The former 3D globe is gone. `pages/GlobeView.jsx` renders a 2D Deck.gl map via
+The former 3D globe is gone. `pages/RiskMapPage.jsx` renders a 2D Deck.gl map via
 `components/map/RiskMap.jsx` and `MapLegend.jsx` (the legend documents the
 bands, the heat ramp and the *uncalibrated* state):
 
@@ -219,7 +222,8 @@ bands, the heat ramp and the *uncalibrated* state):
 
 `three`, `@react-three/fiber`, `@react-three/drei` and the entire
 `src/components/globe/` directory were removed. The route key stays `globe` so
-existing navigation keeps working, but all user-facing copy says "Risk Map".
+existing navigation keeps working, but all user-facing copy says "Risk Map"
+and the component file is now `RiskMapPage.jsx`.
 `src/data/network-connections.js` still holds the static connection set.
 
 ## Jobs: real-time updates and batch operations
