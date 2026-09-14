@@ -44,12 +44,21 @@ class MultiSourceDataset(Dataset):
     - Creates sequences per source
     """
 
-    def __init__(self, data: pd.DataFrame, sequence_length: int = 30, source_to_id: dict = None):
+    def __init__(self, data: pd.DataFrame, sequence_length: int = 30, source_to_id: dict = None,
+                 source_stats: dict = None):
         """
         Args:
             data: DataFrame with columns: Date, Value, source_code
             sequence_length: Number of time steps
             source_to_id: Optional pre-defined source to ID mapping (for test/val sets)
+            source_stats: Optional pre-computed per-source normalization stats
+                ``{source: {'mean': float, 'std': float}}`` from the TRAINING
+                split. Val/test datasets must be built with the training stats:
+                the model was trained in the training split's standardized
+                space, so normalizing an evaluation split with its own stats
+                both leaks that split into the reported metric and evaluates
+                the model in a space it never saw. When omitted (training
+                split), stats are computed per source from observed values.
         """
         self.sequence_length = sequence_length
         self.data = data.copy()
@@ -63,8 +72,17 @@ class MultiSourceDataset(Dataset):
         else:
             self.source_to_id = {src: i for i, src in enumerate(self.sources)}
 
-        # Per-source normalization stats
-        self.source_stats = {}
+        # Per-source normalization stats. `external_stats` marks a dataset that
+        # must not invent its own: a source with no training-split stats was
+        # never trained on and is skipped rather than standardized ad hoc.
+        self.external_stats = source_stats is not None
+        if self.external_stats:
+            self.source_stats = {
+                src: {'mean': float(st['mean']), 'std': float(st['std'])}
+                for src, st in source_stats.items()
+            }
+        else:
+            self.source_stats = {}
 
         # Store sequences per source
         self.sequences = []
@@ -94,10 +112,24 @@ class MultiSourceDataset(Dataset):
                 logger.warning("Skipping source '%s' – no observed values", source)
                 continue
 
-            # Store normalization stats PER SOURCE, from observed values only.
-            mean = float(observed_values.mean())
-            std = float(observed_values.std() + 1e-8)
-            self.source_stats[source] = {'mean': mean, 'std': std}
+            # Normalization stats: from the training split when provided, else
+            # computed PER SOURCE from observed values only.
+            if self.external_stats:
+                if source not in self.source_stats:
+                    logger.warning(
+                        "Skipping source '%s' – no training-split statistics for it; "
+                        "refusing to standardize an evaluation split with its own stats",
+                        source,
+                    )
+                    continue
+                mean = self.source_stats[source]['mean']
+                std = self.source_stats[source]['std']
+                if not np.isfinite(std) or std <= 0.0:
+                    std = 1.0
+            else:
+                mean = float(observed_values.mean())
+                std = float(observed_values.std() + 1e-8)
+                self.source_stats[source] = {'mean': mean, 'std': std}
 
             # Normalize, then impute unobserved entries at the standardised mean.
             normalized = (values - mean) / std
@@ -124,7 +156,12 @@ class MultiSourceDataset(Dataset):
                 seq = normalized[i:i + window]
                 if len(seq) < sequence_length:
                     pad_width = sequence_length - len(seq)
-                    seq = np.pad(seq, (pad_width, 0), mode='edge')
+                    # Zero-pad at the standardised mean, matching the inference
+                    # path (`RealPredictionEngine._prepare_sequence`). Edge
+                    # padding replicated the oldest observation instead, so a
+                    # short-window source was trained on a different padding
+                    # law than the one applied to it at prediction time.
+                    seq = np.pad(seq, (pad_width, 0), mode='constant', constant_values=0.0)
                 self.sequences.append(seq)
                 self.targets.append(normalized[i + window])
                 self.source_ids.append(self.source_to_id[source])
@@ -302,20 +339,48 @@ class MultiScaleTrainer:
         # Create datasets with per-source normalization
         sequence_length = self.config.get('sequence_length', 30)
 
-        # Create train dataset first to get source mapping
+        # Create train dataset first to get source mapping AND normalization
+        # stats. Val/test are built with the training stats and the training
+        # source map: each split standardizing itself is a leak (the split's
+        # own data informs the reported metric) and a space mismatch (the
+        # model's outputs live in the training split's standardized space).
         train_dataset = MultiSourceDataset(train_df, sequence_length=sequence_length)
 
-        # Use same source_to_id mapping for val and test to ensure consistent indexing
-        val_dataset = MultiSourceDataset(val_df, sequence_length=sequence_length, source_to_id=train_dataset.source_to_id)
-        test_dataset = MultiSourceDataset(test_df, sequence_length=sequence_length, source_to_id=train_dataset.source_to_id)
+        val_dataset = MultiSourceDataset(
+            val_df,
+            sequence_length=sequence_length,
+            source_to_id=train_dataset.source_to_id,
+            source_stats=train_dataset.source_stats,
+        )
+        test_dataset = MultiSourceDataset(
+            test_df,
+            sequence_length=sequence_length,
+            source_to_id=train_dataset.source_to_id,
+            source_stats=train_dataset.source_stats,
+        )
 
-        # Check for empty datasets
+        # Empty splits are a loud failure, not a warning. An empty validation
+        # loader used to make `_validate` report 0.0 forever, which froze model
+        # selection at the epoch-0 checkpoint while the job "completed
+        # successfully" -- the production defect reproduced in
+        # docs/QUANT_REVIEW_2026-09.md finding F2.
         if len(train_dataset) == 0:
             raise ValueError("Training dataset is empty - no valid sequences created")
         if len(val_dataset) == 0:
-            logger.warning("Validation dataset is empty - skipping validation during training")
+            raise ValueError(
+                "Validation dataset is empty: no validation source has enough "
+                "rows to form a window under the training source map. Refusing "
+                "to train, because model selection against an empty split is "
+                "meaningless (it silently ships the epoch-0 checkpoint). Check "
+                "the train/val split: it must be chronological within sources, "
+                "not a positional cut across a source-major frame."
+            )
         if len(test_dataset) == 0:
-            logger.warning("Test dataset is empty - skipping final evaluation")
+            raise ValueError(
+                "Test dataset is empty: no test source has enough rows to form "
+                "a window under the training source map. Refusing to report "
+                "evaluation metrics for data that does not exist."
+            )
 
         # Get number of sources
         num_sources = len(train_dataset.sources)
@@ -363,7 +428,7 @@ class MultiScaleTrainer:
 
         # Learning rate scheduler
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=5, verbose=True
+            self.optimizer, mode='min', factor=0.5, patience=5
         )
 
         # Training loop
@@ -483,10 +548,17 @@ class MultiScaleTrainer:
         return total_loss / len(dataloader)
 
     def _validate(self, dataloader: DataLoader) -> float:
-        """Validate model."""
+        """Validate model.
+
+        An empty loader is a hard error, never a 0.0 loss: 0.0 is the best
+        loss the selector can ever see, so returning it silently froze model
+        selection at whichever checkpoint existed first.
+        """
         if len(dataloader) == 0:
-            logger.warning("Validation dataloader is empty, returning 0.0 loss")
-            return 0.0
+            raise ValueError(
+                "Validation dataloader is empty; refusing to report a 0.0 loss "
+                "that would freeze model selection at the first checkpoint"
+            )
 
         self.model.eval()
         total_loss = 0.0
