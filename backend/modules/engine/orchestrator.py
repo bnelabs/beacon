@@ -16,6 +16,17 @@ from backend.modules.engine.model_io import safe_torch_load
 
 logger = logging.getLogger(__name__)
 
+#: Opt-in for scoring with randomly initialized weights. Mirrors the
+#: ``BEACON_ALLOW_UNSAFE_CHECKPOINT_LOAD`` pattern in ``model_io``: the default
+#: is fail-closed, and the override exists for smoke tests, not production.
+UNTRAINED_FALLBACK_ENV_VAR = "BEACON_ALLOW_UNTRAINED_FALLBACK"
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _untrained_fallback_allowed() -> bool:
+    """Whether the environment explicitly permits the untrained fallback model."""
+    return os.getenv(UNTRAINED_FALLBACK_ENV_VAR, "").strip().lower() in _TRUTHY
+
 
 class SimpleRiskPredictor(nn.Module):
     """Fallback LSTM-based predictor for offline or test execution."""
@@ -90,6 +101,13 @@ class RiskScores:
 
     systemic_risk: Dict[str, float] = field(default_factory=dict)
     operational_risk: Dict[str, float] = field(default_factory=dict)
+
+    #: What ``overall_score`` actually measures, stated explicitly. The model
+    #: emits standardized one-step-ahead indicator predictions, which are not
+    #: a calibrated risk scale; until calibration exists, ``risk_level`` is
+    #: ``"uncalibrated"`` and this field carries the units and provenance so
+    #: no consumer has to guess. See docs/QUANT_REVIEW_2026-09.md (finding F6).
+    score_semantics: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def market_liquidity(self) -> Dict[str, float]:
@@ -345,10 +363,29 @@ class EngineOrchestrator:
             logger.info(f"[{self.job_id}] Model loaded successfully")
             return model
 
+        if not _untrained_fallback_allowed():
+            # Fail closed. A randomly initialized network does not produce a
+            # "lightweight fallback" risk score; it produces noise, and the
+            # reporting layer downstream cannot tell the two apart. This is the
+            # same category as the synthetic data the DATA stage refuses to
+            # fabricate: an invented number presented as a measurement.
+            raise PredictionBlockedError(
+                "No trained checkpoint found; refusing to score with randomly "
+                "initialized weights. Train a model first (run_training) and "
+                "point the pipeline at its output directory, or -- for smoke "
+                f"tests only -- set {UNTRAINED_FALLBACK_ENV_VAR}=1 to accept "
+                "that the resulting scores are noise.",
+                context={
+                    "job_id": self.job_id,
+                    "searched_paths": candidate_paths,
+                },
+            )
+
         logger.warning(
-            "[%s] Trained model not found in %s; using lightweight fallback model.",
-            self.job_id,
-            base_path,
+            "[%s] SECURITY: trained model not found in %s and %s is set, so "
+            "scoring proceeds with an UNTRAINED fallback model. Its outputs are "
+            "noise, not measurements, and must not be used for decisions.",
+            self.job_id, base_path, UNTRAINED_FALLBACK_ENV_VAR,
         )
         hidden_dim = int(self.config.get('hidden_dim', 64))
         num_layers = int(self.config.get('num_layers', 1))
@@ -364,19 +401,34 @@ class EngineOrchestrator:
         return fallback
     
     def _predict(self, model, data: Dict[str, Any]):
-        """Score every rolling window with the loaded model.
+        """Score per-source rolling windows with the loaded model.
 
-        Returns the raw model scores. It deliberately does not manufacture
-        companion channels: the previous version returned ``market_liquidity``,
-        ``funding_liquidity`` and ``systemic_risk`` as one array multiplied by
-        1.0, 0.95 and 1.05, presenting a single measurement as three.
+        Three properties the previous implementation lacked, each of which
+        decides whether the scores mean anything:
+
+        * **Windows never straddle sources.** The payload is a long-format
+          concatenation; treating it as one series gave every source boundary
+          a window mixing two unrelated indicators -- the exact artefact
+          ``backtesting.py``'s seam logic exists to prevent.
+        * **Per-source normalization with the checkpoint's training stats.**
+          The model was trained on standardized windows; feeding raw-scale
+          values (Nikkei at ~38,000 next to a basis at ~0.01) produced outputs
+          divorced from anything the model learned. When a source has no
+          checkpoint stats, the payload's own observed stats are used and the
+          substitution is recorded, because that normalization sees the
+          evaluated window and makes the scores optimistic.
+        * **Real source IDs.** The source embedding the model was trained with
+          is passed per window instead of a constant 0.
+
+        Returns raw model scores in the training-standardized space, plus the
+        per-score source and window-end position so downstream alignment is
+        explicit. No companion channels are manufactured.
         """
         import numpy as np
         import pandas as pd
 
         df = data["timeseries"]
 
-        value_col = None
         if 'value' in df.columns:
             value_col = 'value'
         elif 'Value' in df.columns:
@@ -384,77 +436,162 @@ class EngineOrchestrator:
         else:
             raise ValueError("Timeseries data must contain 'value' or 'Value' column")
 
-        # Gaps are imputed at the observed mean, never carried forward. Forward
-        # filling would write a pre-gap level into the post-gap period, so the
-        # model would read a value that had not been published at that timestamp.
-        raw = pd.to_numeric(df[value_col], errors='coerce').to_numpy(dtype=float)
-        finite = raw[np.isfinite(raw)]
-        if finite.size == 0:
-            raise ValueError("Timeseries contains no numeric data")
-        values = np.where(np.isfinite(raw), raw, float(finite.mean()))
+        group_col = None
+        for candidate in ('source_code', 'source'):
+            if candidate in df.columns:
+                group_col = candidate
+                break
 
-        requested_sequence = int(self.config.get('sequence_length', self.sequence_length))
-        sequence_length = max(2, min(requested_sequence, len(values) - 1))
-        sequences = []
-        timestamps = []
+        date_col = None
+        for candidate in ('date', 'Date'):
+            if candidate in df.columns:
+                date_col = candidate
+                break
 
-        date_col = 'date' if 'date' in df.columns else 'Date' if 'Date' in df.columns else None
+        sequence_length = max(2, int(self.sequence_length))
 
-        for i in range(len(values) - sequence_length):
-            sequences.append(values[i:i + sequence_length])
-            if date_col:
-                timestamps.append(df.iloc[i + sequence_length][date_col])
+        if group_col is None:
+            groups = [("__single__", df)]
+        else:
+            groups = list(df.groupby(group_col, sort=True))
+
+        scores_parts = []
+        timestamp_parts = []
+        source_parts = []
+        endpos_parts = []
+        stats_provenance: Dict[str, str] = {}
+        dropped_for_history = 0
+
+        for raw_source, group in groups:
+            source = str(raw_source)
+            ordered = (
+                group.sort_values(date_col)
+                if date_col is not None and date_col in group.columns
+                else group
+            )
+            raw = pd.to_numeric(ordered[value_col], errors='coerce').to_numpy(dtype=float)
+            finite = raw[np.isfinite(raw)]
+            if finite.size == 0:
+                logger.warning("[%s] Source %s has no numeric values; skipped", self.job_id, source)
+                continue
+
+            checkpoint_stats = (self.source_stats or {}).get(source)
+            if checkpoint_stats:
+                stats_provenance[source] = "checkpoint"
+                mean = float(checkpoint_stats.get('mean', 0.0))
+                std = float(checkpoint_stats.get('std', 1.0))
             else:
-                timestamps.append(i + sequence_length)
+                stats_provenance[source] = "payload"
+                mean = float(finite.mean())
+                std = float(finite.std())
+            if not np.isfinite(std) or std == 0.0:
+                std = 1.0
 
-        if len(sequences) == 0:
-            # Too short to form a single window. Report the observed series
-            # rather than a rescaled copy of it.
-            fallback_timestamps = list(df[date_col]) if date_col else list(range(len(values)))
+            # Gaps are imputed at the standardised mean, never carried forward.
+            normalized = (raw - mean) / std
+            normalized = np.where(np.isfinite(normalized), normalized, 0.0)
+
+            if normalized.size <= sequence_length:
+                dropped_for_history += int(normalized.size)
+                logger.warning(
+                    "[%s] Source %s has %d row(s), too few for a %d-step window; skipped",
+                    self.job_id, source, normalized.size, sequence_length,
+                )
+                continue
+
+            windows = np.lib.stride_tricks.sliding_window_view(normalized, sequence_length)
+
+            if self.source_to_id and source in self.source_to_id:
+                source_id = int(self.source_to_id[source])
+            else:
+                if self.source_to_id:
+                    logger.warning(
+                        "[%s] Source %r was not seen during training - defaulting to source id 0",
+                        self.job_id, source,
+                    )
+                source_id = 0
+
+            batch_size = max(1, int(self.config.get('batch_size', 32)))
+            chunk_scores = []
+            model.eval()
+            with torch.no_grad():
+                for start in range(0, windows.shape[0], batch_size):
+                    chunk = np.asarray(windows[start:start + batch_size], dtype=np.float32)
+                    inputs = torch.FloatTensor(chunk).to(self.device)
+                    source_ids = torch.full(
+                        (chunk.shape[0], 1), source_id, dtype=torch.long, device=self.device
+                    )
+                    # Two calling conventions exist: the multi-scale encoder
+                    # takes (x, source_ids); the fallback predictor takes
+                    # (batch, seq, dim).
+                    try:
+                        output = model(inputs, source_ids)
+                    except TypeError:
+                        output = model(inputs.unsqueeze(-1))
+                    flat = output.detach().cpu().numpy().astype(float).reshape(chunk.shape[0], -1)
+                    chunk_scores.append(flat[:, 0])
+
+            scores = np.concatenate(chunk_scores)
+            ends = np.arange(sequence_length - 1, normalized.size)
+            if date_col is not None and date_col in ordered.columns:
+                window_timestamps = np.asarray(ordered[date_col])[ends]
+            else:
+                window_timestamps = ends
+
+            scores_parts.append(scores)
+            timestamp_parts.append(window_timestamps)
+            source_parts.append(np.full(scores.size, source, dtype=object))
+            endpos_parts.append(ends)
+
+        if not scores_parts:
+            # Too little history anywhere in the payload. Return no scores;
+            # `_compute_risk_scores` refuses to aggregate an empty array
+            # rather than rescaling the raw series into a fake score vector.
             return {
-                "timestamps": fallback_timestamps,
-                "scores": np.asarray(values, dtype=float),
+                "timestamps": [],
+                "scores": np.asarray([], dtype=float),
+                "sources": np.asarray([], dtype=object),
+                "score_end_positions": np.asarray([], dtype=int),
                 "insufficient_history": True,
+                "stats_provenance": stats_provenance,
+                "n_dropped_for_history": int(dropped_for_history),
             }
 
-        window_batch = np.asarray(sequences, dtype=np.float32)
-        batch_size = int(self.config.get('batch_size', 32))
-        scores = []
-
-        model.eval()
-        with torch.no_grad():
-            for start in range(0, len(window_batch), batch_size):
-                chunk = window_batch[start:start + batch_size]
-                inputs = torch.FloatTensor(chunk).to(self.device)
-                source_ids = torch.zeros(
-                    (chunk.shape[0], 1), dtype=torch.long, device=self.device
-                )
-                # Two calling conventions exist: the multi-scale encoder takes
-                # (x, source_ids); the fallback predictor takes (batch, seq, dim).
-                try:
-                    output = model(inputs, source_ids)
-                except TypeError:
-                    output = model(inputs.unsqueeze(-1))
-                flat = output.detach().cpu().numpy().astype(float).reshape(chunk.shape[0], -1)
-                scores.append(flat[:, 0])
+        optimistic = sorted(s for s, origin in stats_provenance.items() if origin == "payload")
+        if optimistic:
+            logger.warning(
+                "[%s] Normalisation for %s came from the evaluated payload rather "
+                "than the checkpoint, so scores for those sources are optimistic: "
+                "the normalisation saw the window being scored",
+                self.job_id, optimistic,
+            )
 
         return {
-            "timestamps": timestamps,
-            "scores": np.concatenate(scores),
+            "timestamps": np.concatenate(timestamp_parts),
+            "scores": np.concatenate(scores_parts),
+            "sources": np.concatenate(source_parts),
+            "score_end_positions": np.concatenate(endpos_parts),
             "insufficient_history": False,
+            "stats_provenance": stats_provenance,
+            "n_dropped_for_history": int(dropped_for_history),
         }
-    
+
     def _compute_risk_scores(self, predictions, data) -> RiskScores:
         """Aggregate the model's scores and attach real measurements.
 
-        No risk channel is synthesised here. See :class:`RiskScores` for what the
-        previous 0.95/1.05 rescaling and 0.35/0.35/0.25/0.05 blend were doing.
+        No risk channel is synthesised here, and no risk LEVEL is invented.
+        The model's output is a one-step-ahead prediction of each indicator's
+        *standardized next value*: it is unbounded, can be negative, and its
+        sign meaning depends on the indicator. It is not a probability and not
+        a 0-100 quantity, so the previous version -- which thresholded the raw
+        mean at 30/60/80 and banded it low/medium/high/critical -- compared a
+        standardized regression output against a percentage scale. Until a
+        calibrated mapping from model output to risk exists (see
+        docs/QUANT_REVIEW_2026-09.md, Phase 2), the honest risk level is
+        "uncalibrated" and the score is reported in the model's own units with
+        its semantics attached.
         """
         import numpy as np
-
-        RISK_LEVEL_LOW = 30
-        RISK_LEVEL_MEDIUM = 60
-        RISK_LEVEL_HIGH = 80
 
         scores = np.asarray(predictions["scores"], dtype=float).reshape(-1)
         if scores.size == 0:
@@ -475,15 +612,6 @@ class EngineOrchestrator:
                 context={"job_id": self.job_id, "metadata_keys": sorted((data.get("metadata") or {}))},
             )
 
-        if overall < RISK_LEVEL_LOW:
-            risk_level = "low"
-        elif overall < RISK_LEVEL_MEDIUM:
-            risk_level = "medium"
-        elif overall < RISK_LEVEL_HIGH:
-            risk_level = "high"
-        else:
-            risk_level = "critical"
-
         return RiskScores(
             model_score={
                 "overall": overall,
@@ -491,7 +619,7 @@ class EngineOrchestrator:
                 "n_windows": int(scores.size),
             },
             overall_score=overall,
-            risk_level=risk_level,
+            risk_level="uncalibrated",
             # Empty: no interbank liability network reaches the engine, and a
             # network property cannot be inferred from one institution's series.
             systemic_risk={},
@@ -499,69 +627,154 @@ class EngineOrchestrator:
                 "process_risk": float(100 - data_quality),
                 "data_quality_score": float(data_quality),
             },
+            score_semantics={
+                "units": (
+                    "standardized one-step-ahead indicator prediction "
+                    "(train-split normalisation); unbounded, signed, not a probability"
+                ),
+                "calibrated": False,
+                "risk_level_note": (
+                    "no calibrated mapping from model output to a risk level exists; "
+                    "risk_level is reported as 'uncalibrated' rather than banded "
+                    "(docs/QUANT_REVIEW_2026-09.md, findings F4/F6)"
+                ),
+                "stats_provenance": dict(predictions.get("stats_provenance") or {}),
+            },
         )
-    
+
     def _evaluate(self, predictions, data) -> Dict[str, float]:
-        """Evaluate model performance against available ground truth."""
+        """Evaluate model performance against available ground truth.
+
+        A score produced by the window ending at within-source position ``t``
+        predicts position ``t + 1`` (that is the training target convention),
+        so alignment against a ground-truth column shifts by one row *within
+        the same source*. The previous version compared the flat score array
+        against the flat target column with no shift and no source awareness,
+        which paired every prediction with the wrong row and differenced
+        across source seams.
+
+        Without a ground-truth column, only distributional statistics of the
+        scores are reported. The former ``stability_score`` (``1/(1+std(diff))``)
+        was removed: smoothness of an uncalibrated score is not evidence of
+        prediction quality, and presenting it as a metric manufactured one.
+        """
         import numpy as np
+        import pandas as pd
 
-        metrics = {}
-
-        # If we have actual risk labels or validation data, compute real metrics
+        metrics: Dict[str, float] = {}
         df = data["timeseries"]
 
-        if 'actual_risk' in df.columns or 'target' in df.columns:
-            # Real evaluation with ground truth
-            target_col = 'actual_risk' if 'actual_risk' in df.columns else 'target'
-            actual = df[target_col].values
+        pred_array = np.asarray(predictions.get("scores", []), dtype=float)
+        source_array = np.asarray(predictions.get("sources", []), dtype=object)
+        endpos_array = np.asarray(predictions.get("score_end_positions", []), dtype=int)
 
-            pred_array = np.asarray(predictions.get("scores", []), dtype=float)
+        target_col = None
+        for candidate in ('actual_risk', 'target'):
+            if candidate in df.columns:
+                target_col = candidate
+                break
 
-            # Align lengths
-            min_len = min(len(actual), len(pred_array))
-            actual = actual[-min_len:]
-            pred_array = pred_array[:min_len]
+        if target_col is not None and pred_array.size and source_array.size == pred_array.size:
+            group_col = None
+            for candidate in ('source_code', 'source'):
+                if candidate in df.columns:
+                    group_col = candidate
+                    break
+            date_col = None
+            for candidate in ('date', 'Date'):
+                if candidate in df.columns:
+                    date_col = candidate
+                    break
 
-            # Calculate metrics
-            mse = np.mean((actual - pred_array) ** 2)
-            mae = np.mean(np.abs(actual - pred_array))
-            rmse = np.sqrt(mse)
+            score_frame = pd.DataFrame({
+                "source": source_array.astype(str),
+                "end_pos": endpos_array,
+                "score": pred_array,
+            })
+            # The prediction for the window ending at position t targets row
+            # t+1 of the same source's date-ordered series.
+            score_frame["target_pos"] = score_frame["end_pos"] + 1
 
-            # R-squared
-            ss_res = np.sum((actual - pred_array) ** 2)
-            ss_tot = np.sum((actual - np.mean(actual)) ** 2)
-            r2 = 1 - (ss_res / (ss_tot + 1e-8))
+            target_frames = []
+            groups = (
+                [("__single__", df)] if group_col is None
+                else list(df.groupby(group_col, sort=True))
+            )
+            for raw_source, group in groups:
+                ordered = (
+                    group.sort_values(date_col)
+                    if date_col is not None and date_col in group.columns
+                    else group
+                )
+                values = pd.to_numeric(ordered[target_col], errors='coerce').to_numpy(dtype=float)
+                if values.size < 2:
+                    continue
+                target_frames.append(pd.DataFrame({
+                    "source": str(raw_source),
+                    "target_pos": np.arange(1, values.size),
+                    "actual": values[1:],
+                }))
+
+            if target_frames:
+                merged = score_frame.merge(
+                    pd.concat(target_frames, ignore_index=True),
+                    on=["source", "target_pos"],
+                    how="inner",
+                )
+                merged = merged[np.isfinite(merged["actual"]) & np.isfinite(merged["score"])]
+
+                if not merged.empty:
+                    actual = merged["actual"].to_numpy(dtype=float)
+                    predicted = merged["score"].to_numpy(dtype=float)
+                    mse = float(np.mean((actual - predicted) ** 2))
+                    ss_res = float(np.sum((actual - predicted) ** 2))
+                    ss_tot = float(np.sum((actual - np.mean(actual)) ** 2))
+                    metrics = {
+                        "mse": mse,
+                        "mae": float(np.mean(np.abs(actual - predicted))),
+                        "rmse": float(np.sqrt(mse)),
+                        "r2": float(1 - (ss_res / (ss_tot + 1e-8))),
+                        "n_aligned": int(actual.size),
+                    }
+                    return metrics
 
             metrics = {
-                "mse": float(mse),
-                "mae": float(mae),
-                "rmse": float(rmse),
-                "r2": float(r2)
+                "note": (
+                    "Ground-truth column present but no prediction aligned to a "
+                    "finite target row within its source"
+                ),
             }
-        else:
-            # No ground truth available - compute prediction quality metrics
-            pred_array = np.asarray(predictions.get("scores", []), dtype=float)
+            return metrics
 
+        # No ground truth available - report score distribution only.
+        if pred_array.size:
             metrics = {
                 "prediction_mean": float(np.mean(pred_array)),
                 "prediction_std": float(np.std(pred_array)),
-                "prediction_range": float(np.ptp(pred_array)),
-                "stability_score": float(1.0 / (1.0 + np.std(np.diff(pred_array)))),
-                "note": "No ground truth available - showing prediction statistics"
+                "prediction_min": float(np.min(pred_array)),
+                "prediction_max": float(np.max(pred_array)),
+                "note": "No ground truth available - showing prediction statistics",
             }
-
         return metrics
-    
+
     def _save_predictions(self, predictions) -> str:
-        """Save predictions to file."""
+        """Save the per-window scores (with source and window-end) to parquet."""
+        import numpy as np
         import pandas as pd
 
         path = f"{self.output_dir}/{self.job_id}/predictions.parquet"
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        df = pd.DataFrame(predictions)
+
+        array_keys = ("timestamps", "scores", "sources", "score_end_positions")
+        columns = {key: np.asarray(predictions.get(key, [])) for key in array_keys}
+        lengths = {key: value.size for key, value in columns.items()}
+        if len(set(lengths.values())) > 1:
+            raise ValueError(f"Prediction arrays disagree in length: {lengths}")
+        df = pd.DataFrame(columns)
+        df["insufficient_history"] = bool(predictions.get("insufficient_history", False))
         df.to_parquet(path)
         return path
-    
+
     def _save_explanations(self, model, predictions) -> Optional[str]:
         """Save score statistics.
 

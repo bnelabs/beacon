@@ -76,6 +76,31 @@ ML (PyTorch)
   └── Temporal-attention and LSTM sequence models, per-source normalization
   └── Walk-forward and CPCV validation with lift over persistence/AR/linear
       baselines; seam-aware metrics that never difference across sources
+  └── TimescaleDB: PostgreSQL with hypertables, compression, and continuous
+      aggregates. The schema covers indicator observations, risk scores and model
+      metrics, but only observations have a writer — nothing calls the risk-score
+      or metric writer, so those hypertables stay empty *(not wired)*
+  └── Redis: Celery broker and result backend
+
+ML Stack (PyTorch)
+  └── Toto 2.0 foundation-model node encoder: loadable from a local model folder,
+      and constructed only by `backend/scripts/compare_encoder_sizes.py` — the
+      engine's inference path does not use it *(not wired)*
+  └── Temporal Attention Networks and continuous-time temporal graph memory
+  └── Neural SDE latent dynamics, NOTEARS causal discovery with
+      declared-structure validation
+  └── Gaussian and Student-t HMM regime detection *(not wired)*
+  └── Systemic risk: Basel III LCR/NSFR/leverage translation, coupled fire-sale
+      equilibrium, crowded-trade overlap, persistence-vector topology
+  └── Metrics: MSE, MAE, RMSE, R², directional accuracy
+  └── Walk-forward backtesting with seam-aware metrics; return-based portfolio
+      statistics (Sharpe, drawdown, VaR) are deliberately NOT computed -- a risk
+      score is a latent state, not a priced return
+  └── No attribution is reported. The routine that presented gradient*input as
+      SHAP values was removed rather than re-tuned, and SubgraphX, which replaced
+      it, is implemented but not wired. Prediction results carry an empty
+      `feature_importances` and no attention weights
+  └── CUDA + mixed precision training
 ```
 
 ### Reachability is a tested property
@@ -199,6 +224,21 @@ Training writes checkpoints through `safe_torch_save`, which verifies at save
 time that the artefact will load under the restricted unpickler. Scoring
 without any trained checkpoint fails closed rather than falling back to
 untrained weights.
+Backtest jobs run a walk-forward evaluation (expanding or rolling windows with
+an optional embargo), folded *within each source's own contiguous span* so no
+fold trains on one indicator and tests on another, and report the supervised
+metrics that are meaningful for a risk-state series:
+
+`mse`, `mae`, `rmse`, `r2`, `directional_accuracy`, `hit_rate`, plus per-fold
+results and per-source skips.
+
+Return-based portfolio statistics (Sharpe, Sortino, Calmar, drawdown,
+volatility, VaR/CVaR) are deliberately not computed: they characterise the
+return of a priced asset, and a liquidity-risk score is a latent state, not a
+price. Ground truth, when a target column exists, is joined on
+`predicted_row_offset` -- the score for the window ending at row `t` predicts
+row `t+1` of the same source. Available via
+`GET /api/v2/reports/backtest/{job_id}`.
 
 ---
 
