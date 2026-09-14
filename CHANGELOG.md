@@ -1,0 +1,75 @@
+# Changelog
+
+All notable changes to the BEACON platform. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as
+specified in [`docs/VERSIONING.md`](docs/VERSIONING.md). The version of
+record is the root `VERSION` file; `scripts/release.py` moves the
+`[Unreleased]` block here when cutting a release.
+
+## [Unreleased]
+
+### Added
+- Frontend design system ("field report"): warm-paper surfaces, pine brand,
+  moss→ochre→rust→clay risk scale, serif display type, monogram chips, new
+  beacon mark and favicon; reference screenshots under `docs/images/`.
+- `ErrorBoundary` around the routed page: a failing view degrades to a quiet
+  panel instead of blanking the shell.
+- Dashboard System Status card backed by `GET /api/v1/system/status`
+  (measured CPU/memory/disk/GPU; unreachable backend renders *Unreachable*).
+- Unified API client `frontend/src/utils/apiClient.ts` — the first TypeScript
+  module, strict-checked by `npm run typecheck` and a CI step.
+- Build-version stamp (`__APP_VERSION__`) in the sidebar footer; version and
+  git revision exposed by `/api/v1/system/status`.
+- Versioning system: root `VERSION`, this changelog, `docs/VERSIONING.md`,
+  `scripts/release.py`, `scripts/check_versioning.py` and a CI guard.
+- `scripts/bench_systemic.py` and `docs/LANGUAGE_STRATEGY.md`: measured
+  hot-path benchmarks and the decision rule for language changes.
+- Split-conformal calibration design and event-labeller plan (Phase 2) in
+  `docs/QUANT_REVIEW_2026-09.md`.
+
+### Changed
+- Training path correctness: scheduler crash under pinned torch 2.14 fixed;
+  empty validation splits now fail loudly instead of freezing model selection
+  at epoch 0; validation/test splits reuse the training split's normalization
+  statistics; chronological, data-derived train/val/test windows replace the
+  hardcoded 2023–2024 defaults and the positional `iloc` cut.
+- Pipeline scoring fails closed without a trained checkpoint; `_predict`
+  normalizes per source with checkpoint statistics and never strides source
+  seams; risk levels are reported as `uncalibrated` with explicit semantics
+  instead of thresholding standardized output on a 0–100 scale.
+- Backtest ground truth joins on `predicted_row_offset` (the row a score
+  predicts), never on the window-end row.
+- Explainability endpoints serve an honest transparency card: no compliance
+  claims, explicit not-computed/not-calibrated statuses, no percentage
+  conversions, absent measurements stay null.
+- Results reports list unmeasured risk channels as `not_measured` instead of
+  rendering NaN factors.
+- Risk map moved to a light basemap with the warm palette; legend documents
+  the bands and the *uncalibrated* state.
+- README rewritten as the professional project description;
+  `docs/frontend.md` gained the design-system specification.
+
+### Removed
+- Toto 2.0 encoder wrapper, its weights-resolution machinery, the
+  `compare_encoder_sizes.py` benchmark and the `toto-2` dependency train
+  (implemented and tested but never constructed by a production path, while
+  every image paid gigabytes). Decision record: REMOVED register in
+  `backend/tests/test_reachability.py`.
+- Committed prediction artefacts (`data/predictions/*.parquet`).
+- Five duplicate fetch helpers in the frontend (one lacked the 204 fix).
+- Emoji iconography; hardcoded "v3" footer; fabricated dashboard deltas and
+  static system-status badges; the `stability_score` pseudo-metric.
+
+### Fixed
+- Header profile button referenced an undefined state setter (crash on click).
+- `useNotifications` fetch helper lacked the 204/no-body guard.
+- Data Quality completeness card rendered `undefined%` for absent payloads.
+
+## [3.0.0] — baseline (untagged)
+
+State of the platform before the versioning system existed: six-stage data
+pipeline with fail-closed quality gate, Eisenberg–Noe multiplex clearing,
+coupled fire-sale and liquidity-spiral solvers, Basel III translation,
+walk-forward/CPCV backtesting, reachability census, 2D risk map. Recorded as
+the baseline from which SemVer counts; no tag was cut for it.
