@@ -576,6 +576,117 @@ const TRANSPARENT_PNG = Buffer.from(
   'base64'
 )
 
+/**
+ * Provenance disclosure, as served by `GET /api/v1/data-sources/disclosure`.
+ *
+ * Shape copied from the real `backend/modules/data/provenance.build_disclosure`
+ * output rather than invented: the top-level keys, the six provenance classes,
+ * the two policy keys, and the per-source `access` / `deployment` nesting. Only
+ * `sources` is shortened -- the real payload lists all 17 registered plugins and
+ * four are enough to exercise the page, one per provenance class the UI renders
+ * plus `fdic`, which the spec selects in the create-source form.
+ *
+ * This was missing entirely, which is worth recording because of how it failed.
+ * The route fell through to the deliberate "unknown GET path: answer 404, as the
+ * real API does" branch at the bottom of the handler. `DataSources.jsx` calls
+ * this through `useDataDisclosure`, and TanStack Query *retries* a failed query,
+ * so the 404 was re-requested during the create-source mutation's
+ * `invalidateQueries(['dataSources'])`. The spec fails the test on any console
+ * error, so the retry's 404 threw mid-submit: the POST had already returned 201,
+ * but the test died at `expect(dataSourceForm).not.toBeVisible()` with the submit
+ * button still `disabled`, because `onClose()` never ran. The trace's network
+ * log is what named it -- one `404 GET /api/v1/data-sources/disclosure` among
+ * 113 successful requests.
+ *
+ * The guard that keeps this from recurring is
+ * `backend/tests/test_e2e_api_coverage.py`: every `fetchApi` endpoint in
+ * `frontend/src` must be answered by this file, so a new backend endpoint the
+ * frontend adopts fails a backend test rather than a confusing e2e run.
+ */
+const dataDisclosure = {
+  generated_at: '2026-09-15T00:00:00+00:00',
+  policy: {
+    synthetic_data:
+      'forbidden: the platform does not generate, impute or fabricate observations. A quantity that cannot be computed from real inputs is served as an explicit unavailable state with a reason, never as a plausible-looking placeholder.',
+    estimated_inputs:
+      'labelled at every surface they appear on (see inferred_inputs) and excluded from the observed-data stores'
+  },
+  provenance_classes: {
+    supervisory_published: 'published by a banking supervisor about the institutions it supervises',
+    official_statistics:
+      'published by a central bank, statistical agency or intergovernmental body as official statistics',
+    regulatory_filings: 'filings made by issuers to a regulator and published by that regulator',
+    market_observed:
+      'prices and fundamentals observed in markets, typically via a commercial or unofficial aggregator',
+    research_dataset:
+      "a fixed dataset published for research; provenance and vintage are the dataset's, not a live feed's",
+    operator_declared:
+      "content supplied or configured by the deploying operator; the platform cannot vouch for its provenance beyond the operator's word"
+  },
+  sources: [
+    {
+      plugin_type: 'fdic',
+      name: 'FDIC BankFind Suite',
+      description:
+        'Quarterly US bank supervisory financials (assets, deposits, equity, profitability) from the FDIC -- keyless',
+      publisher: 'U.S. Federal Deposit Insurance Corporation',
+      provenance_class: 'supervisory_published',
+      provides:
+        'quarterly bank-level supervisory financials (assets, deposits, equity, profitability) per FDIC CERT via the BankFind Suite API',
+      notes: 'served fields verified against the live API on 2026-09-15',
+      access: { free: true, key_required: false, registration_url: null },
+      deployment: { configured_sources: 1, enabled_sources: 1, catalogue_items: 3 }
+    },
+    {
+      plugin_type: 'ecb',
+      name: 'ECB Statistical Data Warehouse',
+      description: 'Euro area monetary, banking and financial statistics',
+      publisher: 'European Central Bank',
+      provenance_class: 'official_statistics',
+      provides: 'euro area banking and monetary statistics',
+      notes: null,
+      access: { free: true, key_required: false, registration_url: null },
+      deployment: { configured_sources: 1, enabled_sources: 1, catalogue_items: 2 }
+    },
+    {
+      plugin_type: 'sec_edgar',
+      name: 'SEC EDGAR',
+      description: 'US issuer filings and XBRL financial statements',
+      publisher: 'U.S. Securities and Exchange Commission',
+      provenance_class: 'regulatory_filings',
+      provides: 'issuer filings and company facts',
+      notes: null,
+      access: { free: true, key_required: false, registration_url: null },
+      deployment: { configured_sources: 0, enabled_sources: 0, catalogue_items: 0 }
+    },
+    {
+      plugin_type: 'yfinance',
+      name: 'Yahoo Finance',
+      description: 'Equities, FX, crypto and index prices',
+      publisher: 'Yahoo Finance (unofficial aggregator)',
+      provenance_class: 'market_observed',
+      provides: 'market prices used as liquidity proxies',
+      notes: null,
+      access: { free: true, key_required: false, registration_url: null },
+      deployment: { configured_sources: 0, enabled_sources: 0, catalogue_items: 0 }
+    }
+  ],
+  inferred_inputs: [
+    {
+      name: 'bilateral_exposure_network',
+      produced_by: 'POST /api/v1/network/estimate',
+      method:
+        'maximum-entropy and minimum-support completions of declared aggregate interbank marginals, with Eisenberg-Noe clearing propagated over marginal-preserving structural draws',
+      status:
+        'estimated: responses carry status=estimated and persistence=not_stored; estimates are never written to the bilateral exposure store and never served as observations',
+      caveat:
+        'a prior over bilateral structure given the declared aggregates, not a measurement of bilateral exposures; every clearing result computed from it inherits the caveat'
+    }
+  ],
+  undocumented_plugins: [],
+  orphaned_configurations: []
+}
+
 async function registerBasemapTileMocks(page) {
   await page.route(/basemaps\.cartocdn\.com/, (route) =>
     route.fulfill({
@@ -692,6 +803,10 @@ export async function registerApiMocks(page) {
       if (scenarioMatch) {
         const key = `${scenarioMatch[1]}:${scenarioMatch[2]}`
         return respond(scenarioDetailMap[key] ?? null)
+      }
+
+      if (normalizedPath === '/api/v1/data-sources/disclosure') {
+        return respond(dataDisclosure)
       }
 
       if (normalizedPath === '/api/v1/data-sources') {

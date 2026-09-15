@@ -10,6 +10,15 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- `scripts/check_e2e_api_coverage.mjs`: runs `apiMocks.js`'s real `**/api/**`
+  route handler against every `fetchApi` endpoint in `frontend/src`, by method,
+  and names the ones that fall through to the 404 default. It evaluates the
+  actual handler rather than grepping for strings, so a path in a comment or a
+  mock registered for the wrong method cannot satisfy it. Wired into Frontend CI
+  ahead of Playwright and into the backend suite via
+  `backend/tests/test_e2e_api_coverage.py`, which also runs it against a copy of
+  the frontend containing an invented endpoint to prove it can fail.
+
 - `backend/tests/test_migrations_live.py`: the Alembic chain applied to a real
   PostgreSQL from each of the three histories a deployed database can have --
   empty, `Base.metadata.create_all()` with no `alembic_version` row, and a
@@ -79,15 +88,49 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   `docker-compose.simple.yml`) with the precondition each waits on.
 
 ### Fixed
-- **Frontend CI has been red on every run since `46ea089`**, on `main` and on every
-  branch cut from it — including #53, #54, #55 and #56, which all merged with the
-  check failing. That commit rewrote `Help.jsx` and left three assertions in
-  `full-frontend.spec.js` describing the page it replaced: the title changed from
-  "Help Center" to "Help", and "Popular walkthroughs" and "Ask Beacon Support"
-  were deleted with the marketing content they belonged to. The spec now asserts
-  what the page actually says — including "Known limitations" and its pointer at
-  `docs/QUANT_REVIEW_2026-09.md`, which is the point of the rewrite — and asserts
-  the removed content stays removed.
+- **Frontend CI has been red on every run since #53**, on `main` and on every
+  branch cut from it -- so #54, #55, #56 and #57 all merged with the check
+  failing. `GET /api/v1/data-sources/disclosure`, added by #53 and called by
+  `DataSources.jsx` through `useDataDisclosure`, was never added to
+  `frontend/tests/apiMocks.js`. It fell through to the mock's deliberate
+  "unknown GET path: answer 404, as the real API does" branch; the spec fails the
+  test on any console error; and TanStack Query *retried* the failed query during
+  the create-source mutation's `invalidateQueries(['dataSources'])`. So the POST
+  had already returned 201 when the console handler threw, and the run reported
+  `expect(dataSourceForm).not.toBeVisible()` with the submit button still
+  `disabled` -- an assertion describing a form that had in fact submitted.
+  Diagnosed from the Playwright trace's network log, where one 404 sat among 113
+  successful requests; not from reading the spec, which pointed at three
+  different places first. The endpoint is now mocked, with its payload shape
+  copied from the real `build_disclosure` output rather than invented.
+- **`46ea089` separately left three stale assertions in the spec**, which is what
+  the run would have failed on next: the Help page title changed from "Help
+  Center" to "Help", and "Popular walkthroughs" and "Ask Beacon Support" were
+  deleted with the marketing content they belonged to. The spec now asserts what
+  the page says -- including "Known limitations" and its pointer at
+  `docs/QUANT_REVIEW_2026-09.md`, which is why the page was rewritten -- and
+  asserts the removed content stays removed.
+- **The e2e suite fetched live webfonts.** `index.html` links a Google Fonts
+  stylesheet and `src/styles/index.css` `@import`s the same URL, so every page
+  load made third-party requests that `apiMocks.js` did not cover. This was *not*
+  the cause of the failure above -- the trace shows the fonts resolving, and the
+  only 404 is `/disclosure` -- but a suite whose result depends on a third party
+  being reachable from a runner is a suite that will produce a red herring
+  eventually, and the spec's fail-on-any-console-error handler is exactly how it
+  would surface. Both hosts are now served locally: an empty stylesheet and a 204
+  for the font files. No assertion measures typography, so glyph fallback costs
+  nothing.
+- **The same omission is now a named failure instead of a confusing one.**
+  `scripts/check_e2e_api_coverage.mjs` runs the mock's real route handler against
+  every `fetchApi` endpoint in `frontend/src` and reports the ones that fall
+  through, with the file that calls them. Frontend CI runs it *before* Playwright,
+  and `backend/tests/test_e2e_api_coverage.py` runs it in the backend suite
+  (skipping if node is absent). It found three further endpoints the suite does
+  not reach, which are declared in the script with the reason, in the disposition
+  style of the reachability census -- a declaration that stops being true fails
+  the check. This class of defect had already happened once before: the
+  unmocked-notifications comment in `apiMocks.js` records it.
+
 - **"Help Center" survived the Help rewrite in four places** -- the Header menu,
   `Breadcrumbs`, the onboarding tour and the Settings pointer -- while the
   Sidebar and the page itself said "Help". Aligned on "Help", the page's actual

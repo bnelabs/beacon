@@ -61,6 +61,18 @@ jobs:
         # The ratchet: .ts modules are strict-checked; .js legacy is not (yet).
         run: npm run typecheck
 
+      - name: Every frontend endpoint is answered by the e2e mock
+        # Runs before Playwright on purpose. An endpoint the frontend calls and
+        # frontend/tests/apiMocks.js does not cover falls through to the mock's
+        # deliberate "unknown GET path: answer 404, as the real API does" branch,
+        # and because the spec fails on any console error the test dies at
+        # whatever assertion was executing when the query retried -- not at the
+        # thing that is actually missing. That is how an unmocked
+        # /api/v1/data-sources/disclosure presented as a create-source form that
+        # would not close, with the button still disabled after a 201.
+        # This names the endpoint instead. No browser, no daemon, ~0.2s.
+        run: node scripts/check_e2e_api_coverage.mjs
+
       - name: Build production bundle
         run: npm run build
 

@@ -72,12 +72,25 @@ Every workflow uses a per-ref `concurrency` group, but cancellation is
   forced onto a newer runtime and the Node 20 deprecation warning does not appear.
   When bumping an action, check its `action.yml` for `using: node24` rather than
   assuming the highest tag is current.
-- **Steps:** `npm ci` → `npm run build` → `npx playwright install --with-deps chromium`
-  → `npm test` → upload Playwright traces/results only on failure.
+- **Steps:** `npm ci` → `npm run typecheck` → `node scripts/check_e2e_api_coverage.mjs`
+  → `npm run build` → `npx playwright install --with-deps chromium` → `npm test` →
+  upload Playwright traces/results only on failure.
 - **No live backend is started.** The Playwright suite is fully mocked:
   `frontend/tests/full-frontend.spec.js` installs `frontend/tests/apiMocks.js`, which
   intercepts every `**/api/**` request via `page.route(...)`. Playwright's `webServer`
   block only starts the Vite dev server on `127.0.0.1:8173`.
+- **The mock's coverage is itself checked, before the browser starts.** The mock
+  answers an unknown GET with a deliberate 404 ("as the real API does" — answering
+  200 with an empty object once let a wrong URL pass as a successful empty result),
+  and the spec fails the test on *any* console error. So an endpoint the frontend
+  adopts and the mock does not cover fails the suite at whatever assertion was
+  executing when TanStack Query retried the request, not at the thing that is
+  missing. `scripts/check_e2e_api_coverage.mjs` runs the mock's real route handler
+  against every `fetchApi` endpoint in `frontend/src` and names the ones that fall
+  through, which is the difference between "the create-source form would not close"
+  and "`GET /api/v1/data-sources/disclosure` is not mocked". `backend/tests/
+  test_e2e_api_coverage.py` runs the same check in the backend suite, skipping if
+  node is absent.
 
 ## Docker image builds (`docker-backend.yml`, `docker-frontend.yml`)
 
@@ -97,10 +110,24 @@ not theoretical — both halves of it have already bitten this repository:
   absent and the image build failed with *"Rollup failed to resolve import
   '@deck.gl/widgets'"* while Frontend CI stayed green. Now fixed with `npm ci`.
 
-**What manual-only gives up.** Nothing validates a Dockerfile, base image or
-compose change automatically any more. Two things cover most of that gap without
-a build:
+**What manual-only gives up, and what now covers it.** This used to say that
+nothing validates a Dockerfile, base image or compose change automatically. That
+was true, and it cost a release: `c03f4af` added `COPY backend/entrypoint.sh` to
+both Dockerfiles while compose built them with `context: ./backend`, so the source
+path resolved to `backend/backend/entrypoint.sh` and **the backend image could not
+be built at all**. It shipped, and was found by someone trying to deploy.
 
+Three things now cover most of that gap without a build:
+
+- **Backend CI runs `python scripts/validate_compose.py`** — 112 invariants over
+  the merged compose YAML for the base file and both overlays (one shared backend
+  image, exactly one build, a one-shot `migrate` that everything waits on,
+  healthcheck-driven ordering, no fixed `container_name`, `CUDA_VISIBLE_DEVICES`
+  never `all`), **plus every Dockerfile `COPY` source resolved against the
+  declared build context**, which is the check that would have caught `c03f4af`.
+  No daemon, ~0.1s. `backend/tests/test_compose_stack.py` runs it in the suite
+  too, and also runs it against a deliberately broken copy of the stack to prove
+  it can fail.
 - Backend CI installs the *same* `backend/requirements*.txt` on the *same* Python
   3.12 interpreter, so an uninstallable pin still fails there in ~2 minutes, and
   a Python-version bump that cannot resolve is caught the same way.
@@ -108,8 +135,8 @@ a build:
   dependency graph — but **not** a peer-dependency gap in the image, because that
   only appears when the image resolves its own tree.
 
-Everything else — a broken base-image tag, a Dockerfile instruction error, a
-compose edit — is found when someone runs the workflow. Two changes make that
+What is still only found by running the workflow: a broken base-image tag, and
+anything about the image that only exists once built. Two changes make that
 cheap enough to do on demand:
 
 - `docker-backend.yml` runs `docker compose config` over the base file and both
