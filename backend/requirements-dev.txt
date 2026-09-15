@@ -18,6 +18,12 @@
 pytest==8.3.4
 pytest-cov==6.0.0
 
+# Property-based tests (backend/tests/test_property_based.py): the numerical
+# invariants of fractional.py, clearing.py and hidden_markov.py checked across
+# generated input domains instead of hand-picked examples only. Deterministic
+# in CI: every property test runs with derandomize=True.
+hypothesis==6.168.0
+
 # HTTP client used by starlette's TestClient (mirrors backend/requirements.txt)
 httpx==0.28.1
 

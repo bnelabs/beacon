@@ -49,6 +49,7 @@ notebooks/.ipynb_checkpoints/
 
 # Testing
 .pytest_cache/
+.hypothesis/
 .coverage
 .coverage.*
 htmlcov/

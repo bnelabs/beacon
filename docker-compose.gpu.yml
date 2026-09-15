@@ -1,11 +1,18 @@
 # GPU-specific configuration for Linux with NVIDIA GPU
 # Usage: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+#
+# This overlay reserves *all* GPUs, so the CUDA_VISIBLE_DEVICES build arg
+# defaults to `all` here (the base image defaults to `0` for single-GPU
+# hosts). Pin a subset from .env, e.g. CUDA_VISIBLE_DEVICES=0,1 — it is
+# documented in .env.example.
 
 services:
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile  # Use GPU Dockerfile
+      args:
+        CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-all}
     deploy:
       resources:
         reservations:
@@ -18,6 +25,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile  # Use GPU Dockerfile
+      args:
+        CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-all}
     deploy:
       resources:
         reservations:

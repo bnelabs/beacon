@@ -42,6 +42,21 @@ archived narratives:
 - **Deferred with reasons:** copula dependence (the clearing engine already
   propagates joint stress), generalized-hyperbolic tails (the Student-t HMM
   covers the regime-variance channel first).
+- **Deferred data sources, with the precondition each is waiting on:**
+  Bank of England (its statistics are served through an interactive database;
+  a plugin lands only after a stable keyless endpoint and its field names are
+  probe-verified live, the discipline the FDIC rewrite set), OpenFIGI (an
+  identifier-mapping service, and no BEACON input is security-level — it
+  becomes relevant with the EBA/security granularity, not before), and the EBA
+  risk dashboard (bank-by-bank bundles published per reporting period with no
+  bulk API; the census already ties EBA transparency ingest to LEI
+  resolution). Proposing a source is cheap; declaring one the UI shows as
+  enabled but that cannot fetch is the exact failure `test_keyless_feeds.py`
+  guards against.
+- **Deferred: a minimal `docker-compose.simple.yml`.** The CPU overlay already
+  is the no-GPU topology and the base file is the product; a third variant
+  multiplies the compose configurations CI must keep valid without a
+  deployment scenario the two existing files do not cover.
 - **Rejected on evidence: Stooq as a keyless price feed.** Its CSV download
   endpoint answers an anti-bot challenge page (HTTP 200 carrying HTML) rather
   than data as of 2026-09-15, so a plugin against it would be dead on arrival.

@@ -9,6 +9,51 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Added
+- Property-based tests (`backend/tests/test_property_based.py`, new
+  `hypothesis` dev dependency): the numerical invariants of the three
+  load-bearing modules swept over generated input domains instead of
+  hand-picked examples. Fractional differencing: the exact causal prefix
+  identity, weights as analytic binomial coefficients, the level residual of
+  a truncated window shrinking monotonically with the threshold, and
+  linearity. Eisenberg–Noe clearing: payments bounded by nominals with the
+  default mask exactly matching the final shortfall, endowment monotonicity
+  (more capital never reduces any payment), degree-one homogeneity, and the
+  solvency/empty-network limits. Gaussian HMM: log-space forward–backward
+  checked against brute-force enumeration of every hidden path with an
+  independent density formula, inference invariance under state
+  relabelling, EM likelihood monotonicity, and Student-t fit sanity. Runs
+  are deterministic (`derandomize=True`).
+
+### Changed
+- `backend/Dockerfile`: `CUDA_VISIBLE_DEVICES` is a build `ARG` (image
+  default unchanged: `0`) instead of a baked-in `ENV`. The hard-coded value
+  silently overrode the `count: all` device reservation of
+  `docker-compose.gpu.yml`, so the overlay now passes the arg through
+  (defaulting to `all` to match its reservation) and `.env.example`
+  documents the variable.
+
+### Fixed
+- `foundation_encoders.__all__` still exported `resolve_model_dir` and
+  `local_model_path` after the 2026-09 hygiene round deleted them, so a
+  star-import of the module raised `AttributeError` (the advisory ruff CI
+  step had been reporting the F822 all along; `continue-on-error` kept it
+  off the merge gate). The orphaned model-tree constants that described the
+  deleted weight-loading machinery went with them.
+
+### Removed
+- The dead Toto-2.0 weights mount from `docker-compose.yml`
+  (`BEACON_MODEL_HOST_DIR` with a one-developer machine as its default,
+  `BEACON_MODEL_DIR`, and the read-only `/models` bind). The encoder stack
+  it fed was deleted in the 2026-09 hygiene round (census `REMOVED`
+  register) and nothing in the runtime read the mount; the compose comment
+  and `docs/deployment.md` record what returns with a foundation encoder if
+  one is ever wired. The deployment verification snippets now construct the
+  deterministic `HashedFallbackEncoder` instead of the deleted
+  `TotoEncoder`, and the deferred ledger in `docs/README.md` gains the
+  open proposals (BoE, OpenFIGI, EBA risk dashboard,
+  `docker-compose.simple.yml`) with the precondition each waits on.
+
 ## [3.2.0] - 2026-09-15
 
 ### Added

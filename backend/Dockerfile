@@ -64,7 +64,13 @@ RUN chown -R beacon:beacon /app
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
-ENV CUDA_VISIBLE_DEVICES=0
+# Which GPU the process sees. A baked-in ENV silently defeated the
+# `count: all` device reservation in docker-compose.gpu.yml, so this is a
+# build ARG with the same default: override at build time
+# (docker build --build-arg CUDA_VISIBLE_DEVICES=all, or via .env through
+# docker-compose.gpu.yml) or at runtime (compose `environment:`).
+ARG CUDA_VISIBLE_DEVICES=0
+ENV CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV PYTHONIOENCODING=utf-8

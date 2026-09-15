@@ -46,22 +46,16 @@ __all__ = [
     "compose_input",
     "build_encoder",
     "available_encoders",
-    "resolve_model_dir",
-    "local_model_path",
 ]
 
-
-#: Root of the local model tree, resolved from the environment. Each checkpoint
-#: HuggingFace cache: the load path passes the folder itself to
-#: ``from_pretrained`` and never a ``cache_dir``, so there is no cache to populate
-#: and nothing can be fetched.
-MODEL_DIR_ENV = "BEACON_MODEL_DIR"
-
-#: Files a folder must contain before it is treated as a materialised checkpoint.
-REQUIRED_MODEL_FILES = ("config.json",)
-
-#: Suffixes accepted as a weight file when materialising a checkpoint.
-WEIGHT_FILE_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth")
+# The local model-tree constants that lived here (MODEL_DIR_ENV /
+# REQUIRED_MODEL_FILES / WEIGHT_FILE_SUFFIXES, i.e. the BEACON_MODEL_DIR
+# convention) described how the deleted Toto wrapper materialised checkpoints.
+# They went with it: nothing in the runtime resolves a model directory any
+# more, and docker-compose.yml no longer mounts one. A foundation encoder
+# returns only in the same change that wires an engine path to it (census
+# disposition, backend/tests/test_reachability.py) -- and defines its own
+# weight-resolution contract there, in the open, instead of inheriting these.
 
 
 @dataclass(frozen=True)
