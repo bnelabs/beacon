@@ -129,7 +129,7 @@ class DataCollector:
 
             plugin_type = getattr(item.data_source, "plugin_type", "unknown") if item.data_source else "unknown"
             try:
-                df = self._fetch_item_data(item, start_date, end_date)
+                df = self._fetch_with_retry(item, start_date, end_date)
                 if df is None or df.empty:
                     raise EmptyDatasetError(
                         f"Source returned no rows for '{item.code}'",
@@ -205,6 +205,32 @@ class DataCollector:
             )
 
         return collected
+
+    # Transient provider outages (network blips, rate windows, 5xx) are
+    # retried with bounded exponential backoff; every other typed failure
+    # (missing dataset, schema violation, restricted source) is a decision,
+    # not a blip, and is raised on the first attempt. tenacity is a declared
+    # dependency that nothing used until the sixth round.
+    def _fetch_with_retry(self, item, start_date, end_date):
+        from tenacity import (
+            retry,
+            retry_if_exception_type,
+            stop_after_attempt,
+            wait_exponential_jitter,
+        )
+
+        from backend.exceptions import DataSourceUnavailableError
+
+        @retry(
+            retry=retry_if_exception_type(DataSourceUnavailableError),
+            stop=stop_after_attempt(3),
+            wait=wait_exponential_jitter(initial=1, max=8),
+            reraise=True,
+        )
+        def _attempt():
+            return self._fetch_item_data(item, start_date, end_date)
+
+        return _attempt()
 
     def _fetch_item_data(self, item: DataCatalogueItem, start_date: str, end_date: str) -> pd.DataFrame:
         """Fetch data for a single catalogue item using the plugin system."""
