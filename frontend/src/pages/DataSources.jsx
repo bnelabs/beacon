@@ -6,6 +6,7 @@ import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import {
   useCreateDataSource,
+  useDataDisclosure,
   useDataSources,
   useSyncDataSource,
   useUpdateDataSource
@@ -15,18 +16,19 @@ import DataSourceFormModal from '../components/data-sources/DataSourceFormModal'
 import DataSourceDetailsModal from '../components/data-sources/DataSourceDetailsModal'
 import JobCreationModal from '../components/jobs/JobCreationModal'
 
-const AVAILABLE_PLUGINS = [
-  { value: 'fdic', label: 'FDIC', description: 'Federal Deposit Insurance Corporation', icon: 'FD', enabled: true },
-  { value: 'ecb_banking', label: 'ECB Banking', description: 'European Central Bank Data', icon: 'EC', enabled: true },
-  { value: 'fmp', label: 'FMP', description: 'Financial Modeling Prep', icon: 'FM', enabled: true },
-  { value: 'kaggle', label: 'Kaggle Bulk', description: 'Bulk historical datasets', icon: 'KG', enabled: true },
-  { value: 'yfinance', label: 'Yahoo Finance', description: 'Market data and financials', icon: 'YF', enabled: false },
-  { value: 'world_bank', label: 'World Bank', description: 'Global economic indicators', icon: 'WB', enabled: false },
-  { value: 'imf', label: 'IMF', description: 'International Monetary Fund', icon: 'IM', enabled: false },
-  { value: 'fred', label: 'FRED', description: 'Federal Reserve Economic Data', icon: 'FR', enabled: true },
-  { value: 'bis', label: 'BIS', description: 'Bank for International Settlements', icon: 'BI', enabled: true },
-  { value: 'sec_edgar', label: 'SEC EDGAR', description: 'SEC Company Filings', icon: 'SE', enabled: true }
-]
+// Provenance classes come from the backend disclosure payload; this map only
+// decides how each class is rendered (badge variant + human label). The
+// vocabulary is closed on the backend (PROVENANCE_CLASSES), so an unknown
+// class falls back to the neutral badge rather than disappearing.
+const PROVENANCE_CLASS_META = {
+  supervisory_published: { label: 'Supervisory', variant: 'primary' },
+  official_statistics: { label: 'Official statistics', variant: 'info' },
+  regulatory_filings: { label: 'Regulatory filings', variant: 'info' },
+  market_observed: { label: 'Market observed', variant: 'default' },
+  research_dataset: { label: 'Research dataset', variant: 'warning' },
+  operator_declared: { label: 'Operator declared', variant: 'warning' },
+  undisclosed: { label: 'Undisclosed', variant: 'danger' }
+}
 
 function DataSourceCard({ source, onSync, onConfigure, onView, isSyncing = false }) {
   const statusVariants = {
@@ -115,6 +117,7 @@ function DataSourceCard({ source, onSync, onConfigure, onView, isSyncing = false
 
 export default function DataSources() {
   const { data: sources, isLoading, error, refetch } = useDataSources()
+  const { data: disclosure } = useDataDisclosure()
   const syncMutation = useSyncDataSource()
   const createMutation = useCreateDataSource()
   const updateMutation = useUpdateDataSource()
@@ -123,13 +126,16 @@ export default function DataSources() {
   const [formSource, setFormSource] = useState(null)
   const [detailsSource, setDetailsSource] = useState(null)
 
+  // Plugin options come from the backend disclosure (the runtime registry),
+  // not a hand-maintained frontend list: a feed the API cannot resolve must
+  // not be selectable, and a feed it can must not be missing.
   const pluginOptions = useMemo(() => {
     const seen = new Set()
     const base = []
-    AVAILABLE_PLUGINS.forEach((plugin) => {
-      if (!seen.has(plugin.value)) {
-        base.push({ value: plugin.value, label: plugin.label })
-        seen.add(plugin.value)
+    ;(disclosure?.sources || []).forEach((source) => {
+      if (source.plugin_type && !seen.has(source.plugin_type)) {
+        base.push({ value: source.plugin_type, label: source.name || source.plugin_type })
+        seen.add(source.plugin_type)
       }
     })
     ;(sources || []).forEach((source) => {
@@ -140,11 +146,25 @@ export default function DataSources() {
       }
     })
     return base
-  }, [sources])
+  }, [disclosure, sources])
 
   const [selectedDatasets, setSelectedDatasets] = useState([])
   const selectedDatasetIds = useMemo(() => selectedDatasets.map((dataset) => dataset.id), [selectedDatasets])
   const [isJobModalOpen, setIsJobModalOpen] = useState(false)
+
+  // The most recent real fetch across sources; "Never" when nothing has run.
+  // A hardcoded relative time here would be a fabricated observation.
+  // (Defined above the early returns: hooks must run in the same order on
+  // every render.)
+  const lastSyncLabel = useMemo(() => {
+    const stamps = (sources || [])
+      .map(s => s.last_successful_fetch || s.updated_at || s.last_updated)
+      .filter(Boolean)
+      .map(s => new Date(s).getTime())
+      .filter(t => !Number.isNaN(t))
+    if (stamps.length === 0) return 'Never'
+    return new Date(Math.max(...stamps)).toLocaleString()
+  }, [sources])
 
   const handleDatasetSelection = (datasets = []) => {
     if (!datasets || datasets.length === 0) {
@@ -308,7 +328,7 @@ export default function DataSources() {
               </div>
               <div>
                 <p className="text-sm opacity-90 mb-2">Last Sync</p>
-                <p className="text-lg font-medium">2 hours ago</p>
+                <p className="text-lg font-medium">{lastSyncLabel}</p>
               </div>
             </div>
           </CardContent>
@@ -421,34 +441,114 @@ export default function DataSources() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Available Plugins</CardTitle>
+            <CardTitle>Provenance &amp; disclosure</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {AVAILABLE_PLUGINS.map((plugin) => (
-                <div
-                  key={plugin.value}
-                  className={`p-4 rounded-lg border-2 ${
-                    plugin.enabled
-                      ? 'border-bne-pine/20 bg-bne-pine/5'
-                      : 'border-bne-line bg-bne-card'
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="w-10 h-10 shrink-0 rounded-md border border-bne-line bg-bne-paper-raise flex items-center justify-center font-display text-[13px] font-semibold tracking-wide text-bne-muted">{plugin.icon}</span>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h4 className="font-medium text-bne-ink">{plugin.label}</h4>
-                        {plugin.enabled && (
-                          <Badge variant="success" size="sm">Enabled</Badge>
-                        )}
-                      </div>
-                      <p className="text-xs text-bne-muted">{plugin.description}</p>
+            <p className="text-sm text-bne-muted mb-4">
+              Where every input comes from, and what the platform infers rather than
+              observes. Publisher, provenance class and coverage are curated on the
+              backend; key requirements and configured counts describe this
+              deployment, refreshed from the registry and database at request time.
+            </p>
+            {disclosure?.policy?.synthetic_data && (
+              <div className="mb-4 rounded-md border border-bne-line bg-bne-paper-dim px-4 py-3">
+                <p className="text-xs uppercase tracking-wide text-bne-muted mb-1">Data policy</p>
+                <p className="text-sm text-bne-ink">{disclosure.policy.synthetic_data}</p>
+              </div>
+            )}
+            {disclosure?.sources?.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-bne-line">
+                      <th className="text-left py-2 pr-4 font-semibold text-bne-ink">Source</th>
+                      <th className="text-left py-2 pr-4 font-semibold text-bne-ink">Publisher</th>
+                      <th className="text-left py-2 pr-4 font-semibold text-bne-ink">Class</th>
+                      <th className="text-left py-2 pr-4 font-semibold text-bne-ink">Provides</th>
+                      <th className="text-left py-2 pr-4 font-semibold text-bne-ink">Access</th>
+                      <th className="text-left py-2 font-semibold text-bne-ink">Configured</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {disclosure.sources.map((source) => {
+                      const meta = PROVENANCE_CLASS_META[source.provenance_class] ||
+                        { label: source.provenance_class, variant: 'default' }
+                      return (
+                        <tr key={source.plugin_type} className="border-b border-bne-line/60 align-top">
+                          <td className="py-3 pr-4">
+                            <span className="font-medium text-bne-ink">{source.name}</span>
+                            <span className="block font-mono text-[11px] text-bne-muted">{source.plugin_type}</span>
+                          </td>
+                          <td className="py-3 pr-4 text-bne-muted">{source.publisher || '—'}</td>
+                          <td className="py-3 pr-4">
+                            <Badge variant={meta.variant} size="sm">{meta.label}</Badge>
+                          </td>
+                          <td className="py-3 pr-4 text-bne-muted max-w-md">
+                            {source.provides || '—'}
+                            {source.notes && (
+                              <span className="block text-[11px] text-bne-faint mt-1">{source.notes}</span>
+                            )}
+                          </td>
+                          <td className="py-3 pr-4">
+                            {source.access?.key_required ? (
+                              <Badge variant="warning" size="sm">Key required</Badge>
+                            ) : (
+                              <Badge variant="success" size="sm">Keyless</Badge>
+                            )}
+                          </td>
+                          <td className="py-3">
+                            <span className="font-mono text-bne-ink">
+                              {source.deployment?.configured_sources ?? 0}
+                            </span>
+                            <span className="block text-[11px] text-bne-muted">
+                              {source.deployment?.catalogue_items ?? 0} catalogue items
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-sm text-bne-muted">Provenance disclosure is unavailable.</p>
+            )}
+
+            {disclosure?.inferred_inputs?.length > 0 && (
+              <div className="mt-6">
+                <h4 className="text-sm font-semibold text-bne-ink mb-2">Inferred inputs</h4>
+                <p className="text-xs text-bne-muted mb-3">
+                  Quantities the platform estimates from real inputs instead of observing.
+                  Each is labelled at every surface it appears on and excluded from the
+                  observed-data stores.
+                </p>
+                {disclosure.inferred_inputs.map((input) => (
+                  <div
+                    key={input.name}
+                    className="rounded-md border border-bne-ochre/30 bg-bne-ochre-50/40 px-4 py-3 mb-2"
+                  >
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <span className="font-mono text-xs text-bne-ink">{input.name}</span>
+                      <Badge variant="warning" size="sm">Estimated</Badge>
+                      <span className="text-[11px] text-bne-muted">via {input.produced_by}</span>
                     </div>
+                    <p className="text-xs text-bne-muted">{input.method}</p>
+                    <p className="text-xs text-bne-ink mt-1">{input.caveat}</p>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
+
+            {disclosure?.orphaned_configurations?.length > 0 && (
+              <div className="mt-4 rounded-md border border-bne-clay/30 bg-bne-clay-50/40 px-4 py-3">
+                <p className="text-sm font-medium text-bne-ink mb-1">Configurations that cannot fetch</p>
+                {disclosure.orphaned_configurations.map((orphan) => (
+                  <p key={orphan.plugin_type} className="text-xs text-bne-muted font-mono">
+                    {orphan.plugin_type}: {orphan.problem}
+                  </p>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

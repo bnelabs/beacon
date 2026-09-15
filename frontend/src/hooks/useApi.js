@@ -57,6 +57,14 @@ export function useDataSources() {
   })
 }
 
+export function useDataDisclosure() {
+  return useQuery({
+    queryKey: ['dataSources', 'disclosure'],
+    queryFn: () => fetchApi('/v1/data-sources/disclosure'),
+    staleTime: 300_000
+  })
+}
+
 export function useCreateJob() {
   const queryClient = useQueryClient()
 
