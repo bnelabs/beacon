@@ -55,3 +55,51 @@ def test_release_dry_run_computes_the_next_version_without_writing():
 def test_changelog_has_an_unreleased_block():
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert re.search(r"^## \[Unreleased\]", changelog, re.M)
+
+
+def test_release_syncs_the_lockfile(tmp_path):
+    """The lock carries the version twice; release.py must keep both equal.
+
+    Regression: the lock sat at 3.0.0 while package.json moved to 3.1.1, so
+    every npm install rewrote it as an uncommitted diff.
+    """
+    import importlib.util
+    import json
+
+    spec = importlib.util.spec_from_file_location(
+        "release_script", ROOT / "scripts" / "release.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    lock = tmp_path / "package-lock.json"
+    lock.write_text(
+        json.dumps(
+            {
+                "name": "beacon-frontend",
+                "version": "0.0.1",
+                "lockfileVersion": 3,
+                "packages": {"": {"name": "beacon-frontend", "version": "0.0.1"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert module.sync_lockfile(lock, "9.9.9") is True
+    data = json.loads(lock.read_text(encoding="utf-8"))
+    assert data["version"] == "9.9.9"
+    assert data["packages"][""]["version"] == "9.9.9"
+    assert module.sync_lockfile(lock, "9.9.9") is False, "sync must be idempotent"
+    assert module.sync_lockfile(tmp_path / "missing.json", "1.0.0") is False
+
+
+def test_lock_and_package_json_agree_with_version():
+    """The live tree guard: the drift release.py once produced is visible now."""
+    import json
+
+    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    lock_path = ROOT / "frontend" / "package-lock.json"
+    if not lock_path.exists():
+        return
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    assert lock.get("version") == version
+    assert lock.get("packages", {}).get("", {}).get("version") == version

@@ -3,7 +3,8 @@
 
 Fails when:
   1. VERSION is missing or not strict semver;
-  2. frontend/package.json disagrees with VERSION;
+  2. frontend/package.json disagrees with VERSION, or
+     frontend/package-lock.json (when present) disagrees with VERSION;
   3. the top block of CHANGELOG.md is neither [Unreleased] nor VERSION;
   4. backend.__version__ disagrees with VERSION.
 """
@@ -33,6 +34,16 @@ if package.get("version") != version:
     errors.append(
         f"frontend/package.json version {package.get('version')!r} != VERSION {version!r}"
     )
+
+package_lock = ROOT / "frontend" / "package-lock.json"
+if package_lock.exists():
+    lock = json.loads(package_lock.read_text(encoding="utf-8"))
+    lock_versions = {lock.get("version"), lock.get("packages", {}).get("", {}).get("version")}
+    if lock_versions != {version}:
+        errors.append(
+            f"frontend/package-lock.json versions {sorted(map(repr, lock_versions))} "
+            f"!= VERSION {version!r}"
+        )
 
 changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 blocks = re.findall(r"^## \[([^\]]+)\]", changelog, flags=re.M)

@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = ROOT / "VERSION"
 CHANGELOG = ROOT / "CHANGELOG.md"
 PACKAGE_JSON = ROOT / "frontend" / "package.json"
+PACKAGE_LOCK = ROOT / "frontend" / "package-lock.json"
 
 SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$")
 
@@ -60,6 +61,30 @@ def move_changelog_block(text: str, new_version: str) -> str:
     return text.replace("## [Unreleased]", f"## [Unreleased]\n\n{dated}", 1)
 
 
+def sync_lockfile(lock_path: Path, new_version: str) -> bool:
+    """Keep frontend/package-lock.json's version fields equal to the release.
+
+    The lockfile carries the package version twice (top level and under
+    ``packages[""]``). Skipping it left the lock at 3.0.0 while package.json
+    moved to 3.1.1 -- every ``npm install`` then rewrote the lock as an
+    uncommitted diff. Returns whether anything was written.
+    """
+    if not lock_path.exists():
+        return False
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    changed = False
+    if lock.get("version") != new_version:
+        lock["version"] = new_version
+        changed = True
+    root_package = lock.get("packages", {}).get("")
+    if isinstance(root_package, dict) and root_package.get("version") != new_version:
+        root_package["version"] = new_version
+        changed = True
+    if changed:
+        lock_path.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
+    return changed
+
+
 def run(cmd: list[str]) -> None:
     subprocess.run(cmd, cwd=ROOT, check=True)
 
@@ -90,8 +115,11 @@ def main() -> None:
     VERSION_FILE.write_text(new_version + "\n", encoding="utf-8")
     CHANGELOG.write_text(changelog, encoding="utf-8")
     PACKAGE_JSON.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+    sync_lockfile(PACKAGE_LOCK, new_version)
 
     run(["git", "add", "VERSION", "CHANGELOG.md", "frontend/package.json"])
+    if PACKAGE_LOCK.exists():
+        run(["git", "add", "frontend/package-lock.json"])
     run(["git", "commit", "-m", f"release: v{new_version}"])
     if args.tag:
         run(["git", "tag", "-a", f"v{new_version}",
