@@ -1,3 +1,17 @@
+# One image, three services.
+#
+# backend, celery-worker and migrate all run `beacon-backend`. Building the worker
+# as its own image downloaded the multi-GB CUDA torch wheel a second time into a
+# second layer set -- on a single-host deployment that is what filled a 17 GB
+# BuildKit cache -- and two images drift, so the worker can end up running
+# different code from the API it takes jobs from. The anchor lives at document
+# level (a top-level `x-` key is a compose extension field, which compose ignores
+# as a service) and both overlays redefine the *build* of `backend`, so the GPU
+# file still swaps in the CUDA Dockerfile for all three at once.
+#
+# Override the tag with BEACON_BACKEND_IMAGE if you build your own.
+x-backend-image: &backend-image ${BEACON_BACKEND_IMAGE:-beacon-backend:latest}
+
 services:
   # PostgreSQL + TimescaleDB.
   # TimescaleDB is a drop-in PostgreSQL extension, so the SQLAlchemy models,
@@ -6,7 +20,6 @@ services:
   # become compressed, time-partitioned hypertables with continuous aggregates.
   postgres:
     image: timescale/timescaledb:2.15.2-pg15
-    container_name: beacon-postgres
     command:
       - postgres
       - -c
@@ -27,7 +40,16 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U beacon_user -d beacon_db"]
+      # Interpolated in the *container's* shell, hence the doubled $$. Hardcoding
+      # beacon_user/beacon_db here made postgres permanently unhealthy for anyone
+      # who set POSTGRES_USER or POSTGRES_DB in .env -- and because backend and
+      # celery-worker wait on `condition: service_healthy`, the whole stack then
+      # hung on a database that was in fact fine.
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER:-beacon_user} -d $${POSTGRES_DB:-beacon_db}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -38,7 +60,6 @@ services:
   # Redis for Celery and caching
   redis:
     image: redis:7-alpine
-    container_name: beacon-redis
     command: redis-server --appendonly yes --save 60 1 --loglevel warning
     sysctls:
       - net.core.somaxconn=511
@@ -57,19 +78,62 @@ services:
 
   # Backend API (FastAPI)
   # Note: GPU support is configured via docker-compose.gpu.yml overlay
+  # Schema changes are applied exactly once, by exactly one container.
+  #
+  # Previously backend and celery-worker each ran `alembic upgrade head` from
+  # their entrypoints, so two containers raced on first boot; the retry loop in
+  # entrypoint.sh tolerated that, but when the migration itself was broken both
+  # restart-looped (64 restarts observed) and `docker compose ps` reported `Up`
+  # for a backend that had never served a request. A one-shot service that must
+  # exit 0 makes a migration failure the *reason the stack does not start*,
+  # which is the failure mode you want.
+  migrate:
+    image: *backend-image
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-beacon_user}:${POSTGRES_PASSWORD:-beacon_password}@postgres:5432/${POSTGRES_DB:-beacon_db}?client_encoding=utf8
+      PYTHONPATH: /app
+      # The entrypoint would otherwise migrate a second time.
+      BEACON_RUN_MIGRATIONS: "0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - beacon-network
+    restart: "no"
+
   backend:
+    image: *backend-image
+    # The single build for all three services. `context: .` is the repository
+    # root, not ./backend, because alembic.ini lives at the root and the
+    # entrypoint runs `alembic upgrade head` -- with the old ./backend context
+    # the config file was never in the image. Both overlays redefine this block,
+    # so the GPU file swaps the Dockerfile for all three services at once.
     build:
-      context: ./backend
-      dockerfile: Dockerfile.cpu  # Default to CPU for compatibility
-    container_name: beacon-backend
+      context: .
+      dockerfile: backend/Dockerfile.cpu  # Default to CPU for compatibility
     ports:
       - "3456:3456"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3456/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 12
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-beacon_user}:${POSTGRES_PASSWORD:-beacon_password}@postgres:5432/${POSTGRES_DB:-beacon_db}?client_encoding=utf8
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       PYTHONPATH: /app
+      # migrate owns the schema; see the `migrate` service above.
+      BEACON_RUN_MIGRATIONS: "0"
       PORT: 3456
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
@@ -95,6 +159,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - beacon-network
     restart: unless-stopped
@@ -103,16 +169,16 @@ services:
   # Celery Worker for background tasks
   # Note: GPU support is configured via docker-compose.gpu.yml overlay
   celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.cpu  # Default to CPU for compatibility
-    container_name: beacon-celery-worker
+    image: *backend-image
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-beacon_user}:${POSTGRES_PASSWORD:-beacon_password}@postgres:5432/${POSTGRES_DB:-beacon_db}?client_encoding=utf8
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       PYTHONPATH: /app
+      # migrate owns the schema. The worker used to run `alembic upgrade head`
+      # from the same entrypoint as the API, concurrently.
+      BEACON_RUN_MIGRATIONS: "0"
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       PYTHONIOENCODING: utf-8
@@ -137,8 +203,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      backend:
-        condition: service_started
+      migrate:
+        condition: service_completed_successfully
     networks:
       - beacon-network
     restart: unless-stopped
@@ -155,11 +221,16 @@ services:
         # made a remote browser call *itself*: the value was fixed at build time
         # but resolved against whatever machine opened the page.
         VITE_API_BASE_URL: ""
-    container_name: beacon-frontend
     ports:
       - "9876:80"
     depends_on:
-      - backend
+      backend:
+        # `service_started` was the old behaviour, and it is what produced the
+        # "frontend healthy, backend restart-looping" state a deployment reported:
+        # nginx came up and served the SPA while every /api/ call behind it was
+        # reset. Waiting on health means `compose ps` cannot report a working
+        # frontend on top of a backend that never served a request.
+        condition: service_healthy
     networks:
       - beacon-network
     restart: unless-stopped

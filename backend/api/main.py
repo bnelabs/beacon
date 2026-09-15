@@ -40,7 +40,7 @@ from .routes import (
     network,
 )
 from backend import __version__
-from backend.database import init_db, close_db
+from backend.database import DATABASE_URL, init_db, close_db
 from backend.exceptions import BeaconError
 from backend.api.job_events import relay_job_updates
 
@@ -51,8 +51,29 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup
-    logger.info("Initializing database...")
-    init_db()
+    #
+    # `init_db()` is `Base.metadata.create_all()`. On PostgreSQL that made the
+    # application a *second* schema owner alongside Alembic, and the two
+    # disagreed: `20251107_152125` created `notifications.metadata` while
+    # `backend/models/notification.py` declares `extra_data`, so which column a
+    # database had depended on whether the API or the migration reached it
+    # first. It also meant a database built by the app carried no
+    # `alembic_version` row, so the next `alembic upgrade head` replayed the
+    # whole chain over an existing schema and failed on the first duplicate.
+    #
+    # PostgreSQL schema is now owned by exactly one thing: the `migrate` service
+    # in docker-compose.yml, which backend waits on with
+    # `service_completed_successfully`. SQLite stays on create_all because the
+    # test suite and local development build a throwaway database per run and
+    # running Alembic there would only add a second thing to keep in sync.
+    if DATABASE_URL.startswith("sqlite"):
+        logger.info("Initializing SQLite development schema...")
+        init_db()
+    else:
+        logger.info(
+            "PostgreSQL schema is owned by Alembic (the compose `migrate` "
+            "service); not calling create_all()"
+        )
 
     # Populate catalogue if empty
     from backend.database import SessionLocal

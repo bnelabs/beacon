@@ -103,48 +103,167 @@ sudo ufw status
 
 ## 5. Operating the stack
 
+Six services, of which one is a one-shot:
+
+| Service | Role | Lifetime |
+|---|---|---|
+| `postgres` | TimescaleDB (PostgreSQL 15 + extension) | long-running |
+| `redis` | Celery broker, result backend, WebSocket relay | long-running |
+| `migrate` | `alembic upgrade head`, exactly once | **exits 0** |
+| `backend` | FastAPI on :3456 | long-running |
+| `celery-worker` | the four job tasks | long-running |
+| `frontend` | nginx serving the SPA on :9876, proxying `/api/` | long-running |
+
+`migrate`, `backend` and `celery-worker` are **one image**. Only `backend`
+carries a `build:` block; the other two declare the same `image:` tag
+(`${BEACON_BACKEND_IMAGE:-beacon-backend:latest}`) and no build of their own, so
+the CUDA torch wheel is downloaded once rather than twice and the worker cannot
+drift from the API it takes jobs from.
+
 ```bash
-cd /home/komedi/Denemeler/beacon
+cd /path/to/beacon
+cp .env.example .env      # then edit it
 
-# GPU build + start
-sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+# Validate before building. Both are fast and need no daemon.
+python scripts/validate_compose.py
+sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml config --quiet
 
-# CPU-only (no GPU needed)
-sudo docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d --build
+# Build once, then start. Do not pass --no-cache for a normal rebuild.
+sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml build backend frontend
+sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --force-recreate
 
+# The migration is the first thing to look at, because everything else waits on it.
 sudo docker compose ps
-sudo docker compose logs -f backend
-sudo docker compose down          # add -v to drop the database volume
+sudo docker compose logs migrate
 ```
 
-Confirm the container can actually see the GPU:
+CPU-only hosts substitute `docker-compose.cpu.yml` for the GPU overlay.
+
+### Boot order, and why it is enforced rather than hoped for
+
+```
+postgres healthy ──> migrate runs once ──> migrate exits 0 ──> backend + celery-worker start
+                                                                      │
+                                            backend healthy ──────────┴──> frontend starts
+```
+
+`backend` and `celery-worker` depend on `migrate` with
+`condition: service_completed_successfully`, and `frontend` depends on `backend`
+with `condition: service_healthy`. Both are deliberate:
+
+* All three services set `BEACON_RUN_MIGRATIONS=0`, so the entrypoint's own
+  `alembic upgrade head` is disabled everywhere. Two containers used to migrate
+  concurrently on first boot; the retry loop in `entrypoint.sh` tolerated the
+  race, but when the migration itself was broken both restart-looped — 64
+  restarts observed on a real deployment — while `docker compose ps` reported
+  `Up`, because both containers *were* up and neither had ever served a request.
+* `frontend` previously used the short-form `depends_on: [backend]`, which means
+  "started", not "working". That is what produced a healthy nginx in front of an
+  API that was reset on every connection.
+
+A migration failure now stops the stack with `migrate` exited non-zero and its
+error in `docker compose logs migrate`, instead of presenting as a backend that
+will not answer.
+
+### "Up" is not "operational"
+
+`docker compose ps` reports a container that is restarting as `Up` between
+restarts. When the UI loads and every `/api/` call fails, check these in order:
+
+```bash
+sudo docker compose ps                       # migrate must show Exited (0)
+sudo docker compose logs --tail=100 migrate  # the schema error, if any
+sudo docker compose inspect backend --format '{{.RestartCount}} {{.State.Status}}'
+curl -sS http://127.0.0.1:3456/health        # {"status":"healthy","database":"connected"}
+```
+
+A non-zero `RestartCount` on `backend` means it is crash-looping, whatever `ps`
+says.
+
+### GPU: two variables that are not interchangeable
 
 ```bash
 sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
-  exec backend python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.device_count())"
+  exec backend python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.device_count())"
 ```
 
-How many GPUs it sees is controlled by `CUDA_VISIBLE_DEVICES` — a build arg on
-`backend/Dockerfile` that the gpu overlay defaults to `all` (it reserves every
-GPU); the base image default is `0`. Pin a subset from `.env` if needed (see
-`.env.example`).
+| Variable | Read by | Valid values |
+|---|---|---|
+| `NVIDIA_VISIBLE_DEVICES` | the NVIDIA **container runtime**, to decide which GPUs enter the container | `all`, `none`, or indices |
+| `CUDA_VISIBLE_DEVICES` | **CUDA/PyTorch inside** the container | indices or UUIDs — **not `all`** |
 
-### A note on the two backend images
+Setting `CUDA_VISIBLE_DEVICES=all` does not mean "every GPU". torch parses it as a
+device list, matches nothing, and reports `torch.cuda.is_available() == False` in
+a container that can see the GPU perfectly well. The image used to bake `all` in
+as its default and the GPU overlay passed `${CUDA_VISIBLE_DEVICES:-all}` to it,
+which produced exactly that: an RTX 3090 visible to `nvidia-smi` inside the
+container and invisible to torch. Both now default to `0`, and the container-level
+`NVIDIA_VISIBLE_DEVICES` still defaults to `all`, so the reservation is unchanged.
+Pin a subset from `.env` (`CUDA_VISIBLE_DEVICES=0,1`).
 
-Both now install torch from an **explicit index**, because the default is a trap:
+### Build context and .dockerignore
+
+The backend build context is the **repository root**, not `./backend`, because
+`alembic.ini` lives at the root and the entrypoint runs `alembic upgrade head`.
+Alembic reads its config from `alembic.ini` relative to the working directory and
+its `script_location = backend/alembic` is relative to that same directory, so
+with `WORKDIR /app` both resolve — and neither did when the context was
+`./backend`, because `alembic.ini` was never in the image.
+
+That also broke the build outright: the Dockerfiles ended with
+`COPY backend/entrypoint.sh`, which under a `./backend` context resolves to
+`backend/backend/entrypoint.sh` and does not exist. `scripts/validate_compose.py`
+now checks every `COPY` source against the build context on every CI run, since
+the workflow that would have caught it (`docker-backend.yml`) is manual-only.
+
+`.dockerignore` at the root keeps `.git`, `frontend/`, model weights, local
+`data/`, `logs/` and caches out of that context. It is a deny list rather than
+`*` plus negations on purpose: an allowlist that starts with `*` has to
+re-include everything the build needs, and getting that wrong fails as a missing
+file minutes into an image build.
+
+### Reclaiming disk
+
+Build cache grows without bound and is not shared between differently-tagged
+builds. On a single host it reached 17.5 GB before the duplicate worker build was
+removed.
+
+```bash
+sudo docker system df                  # what is being held, and how much is reclaimable
+sudo docker builder prune              # dangling build cache only
+sudo docker image prune -a             # images no container references
+```
+
+`docker compose down` preserves the database volume; `down -v` deletes it. The
+second is a destructive reset and is never part of a normal rebuild.
+
+### Backing up before a migration
+
+```bash
+sudo docker compose exec -T postgres pg_dump -U "${POSTGRES_USER:-beacon_user}" \
+  "${POSTGRES_DB:-beacon_db}" > "beacon-$(date +%Y%m%d-%H%M%S).sql"
+```
+
+Migrations are guarded and idempotent, and `backend/tests/test_migrations_live.py`
+runs all three histories against a real PostgreSQL in CI. That is a reason to
+expect an upgrade to work, not a reason to skip the backup: `alembic stamp head`
+is not a shortcut for a failed migration, and a downgrade of
+`baseline_core_001` raises by design rather than guessing which tables it created.
+
+### A note on the two Dockerfiles
+
+Both install torch from an **explicit index**, because the default is a trap:
 
 * PyPI's plain `torch==2.14.0` Linux wheel **is** the CUDA 13.0 build — its
   dependencies are `nvidia-*-cu13`. Installing `requirements.txt` alone therefore
   pulled ~3 GB of CUDA into the *CPU* image.
-* `Dockerfile.cpu` now uses `TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu`
+* `Dockerfile.cpu` uses `TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu`
   and asserts `torch.version.cuda is None`.
 * `Dockerfile` uses `.../whl/cu130` and asserts a CUDA torch is present.
-* The GPU image no longer bases on `nvidia/cuda:*`. torch's wheels bundle the CUDA
+* The GPU image does not base on `nvidia/cuda:*`. torch's wheels bundle the CUDA
   runtime, so the base contributed a second, differently-versioned copy (the old
   base was CUDA 12.6 against a 13.0 torch). The *driver* is injected by the
-  container runtime, so nothing is lost. Both images now share the same code
-  layout (`COPY . backend/`), which is what makes the compose command
-  `backend.api.main:app` valid for both.
+  container runtime, so nothing is lost.
 
 ---
 
@@ -200,18 +319,23 @@ e = HashedFallbackEncoder(embed_dim=64)
 print('encoder OK:', e.embed_dim, e.provenance.is_pretrained)"
 ```
 
-### Rebuilding: `backend` and `celery-worker` are separate images
+### Rebuilding: one image, three services
 
-They are built from the same context (`./backend`) but are **distinct images**,
-so `docker compose build backend` does not update the worker. Rebuilding only the
-API leaves the worker on the previous code, and because the worker is where job
-progress is produced, live updates then appear half-broken in a way that is easy
-to misread. Rebuild everything, or name both:
+`migrate`, `backend` and `celery-worker` run the same image, so
+`docker compose build backend` updates all three. There is no second worker image
+to remember to rebuild — which was the previous arrangement, and the reason a
+worker could be left running the code from a prior release while the API ran the
+new one. Because the worker is where job progress is produced, that drift showed
+up as live updates looking half-broken in a way that was easy to misread as a
+WebSocket problem.
 
 ```bash
-docker compose build backend celery-worker frontend
-docker compose up -d
+docker compose build backend frontend
+docker compose up -d --force-recreate
 ```
+
+`--force-recreate` matters after a rebuild: without it compose leaves a running
+container on the image it started with.
 
 ### The frontend healthcheck
 

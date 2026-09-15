@@ -82,7 +82,11 @@ results/dashboards/*.html
 !results/dashboards/.gitkeep
 
 # Docker
-.dockerignore
+# `.dockerignore` was listed here from the original restructure, which is why the
+# repository never had one. It is not an artefact: it is build configuration that
+# decides what enters the image context, so it has to be tracked for a build to be
+# reproducible anywhere but on the machine that happened to write it.
+!.dockerignore
 
 # Database
 *.db

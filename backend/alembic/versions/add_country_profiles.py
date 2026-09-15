@@ -5,9 +5,14 @@ Revises: add_datasource_registration_fields
 Create Date: 2025-11-06 12:40:00.000000
 
 """
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
+from backend.alembic.guards import (
+    create_index_if_missing,
+    create_table_if_missing,
+    drop_index_if_exists,
+    drop_table_if_exists,
+)
 
 # revision identifiers, used by Alembic.
 revision = 'country_profiles_001'
@@ -18,7 +23,7 @@ depends_on = None
 
 def upgrade():
     # Create country_profiles table
-    op.create_table(
+    create_table_if_missing(
         'country_profiles',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('country_code', sa.String(length=3), nullable=False),
@@ -52,13 +57,13 @@ def upgrade():
     )
 
     # Create indexes
-    op.create_index('idx_country_code', 'country_profiles', ['country_code'])
-    op.create_index('idx_region', 'country_profiles', ['region'])
-    op.create_index('idx_risk_level', 'country_profiles', ['risk_level'])
-    op.create_index('idx_gdp_usd', 'country_profiles', ['gdp_usd'])
+    create_index_if_missing('idx_country_code', 'country_profiles', ['country_code'])
+    create_index_if_missing('idx_region', 'country_profiles', ['region'])
+    create_index_if_missing('idx_risk_level', 'country_profiles', ['risk_level'])
+    create_index_if_missing('idx_gdp_usd', 'country_profiles', ['gdp_usd'])
 
     # Create country_indicators table for time series data
-    op.create_table(
+    create_table_if_missing(
         'country_indicators',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('country_code', sa.String(length=3), nullable=False),
@@ -76,13 +81,13 @@ def upgrade():
     )
 
     # Create indexes for efficient queries
-    op.create_index('idx_country_indicators_country', 'country_indicators', ['country_code'])
-    op.create_index('idx_country_indicators_code', 'country_indicators', ['indicator_code'])
-    op.create_index('idx_country_indicators_year', 'country_indicators', ['year'])
-    op.create_index('idx_country_indicators_category', 'country_indicators', ['category'])
+    create_index_if_missing('idx_country_indicators_country', 'country_indicators', ['country_code'])
+    create_index_if_missing('idx_country_indicators_code', 'country_indicators', ['indicator_code'])
+    create_index_if_missing('idx_country_indicators_year', 'country_indicators', ['year'])
+    create_index_if_missing('idx_country_indicators_category', 'country_indicators', ['category'])
 
     # Create country_comparisons table for cached comparisons
-    op.create_table(
+    create_table_if_missing(
         'country_comparisons',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('country_codes', sa.ARRAY(sa.String(3)), nullable=False),
@@ -93,21 +98,21 @@ def upgrade():
         sa.PrimaryKeyConstraint('id')
     )
 
-    op.create_index('idx_country_codes', 'country_comparisons', ['country_codes'], postgresql_using='gin')
+    create_index_if_missing('idx_country_codes', 'country_comparisons', ['country_codes'], postgresql_using='gin')
 
 
 def downgrade():
-    op.drop_index('idx_country_codes', table_name='country_comparisons')
-    op.drop_table('country_comparisons')
+    drop_index_if_exists('idx_country_codes', 'country_comparisons')
+    drop_table_if_exists('country_comparisons')
 
-    op.drop_index('idx_country_indicators_category', table_name='country_indicators')
-    op.drop_index('idx_country_indicators_year', table_name='country_indicators')
-    op.drop_index('idx_country_indicators_code', table_name='country_indicators')
-    op.drop_index('idx_country_indicators_country', table_name='country_indicators')
-    op.drop_table('country_indicators')
+    drop_index_if_exists('idx_country_indicators_category', 'country_indicators')
+    drop_index_if_exists('idx_country_indicators_year', 'country_indicators')
+    drop_index_if_exists('idx_country_indicators_code', 'country_indicators')
+    drop_index_if_exists('idx_country_indicators_country', 'country_indicators')
+    drop_table_if_exists('country_indicators')
 
-    op.drop_index('idx_gdp_usd', table_name='country_profiles')
-    op.drop_index('idx_risk_level', table_name='country_profiles')
-    op.drop_index('idx_region', table_name='country_profiles')
-    op.drop_index('idx_country_code', table_name='country_profiles')
-    op.drop_table('country_profiles')
+    drop_index_if_exists('idx_gdp_usd', 'country_profiles')
+    drop_index_if_exists('idx_risk_level', 'country_profiles')
+    drop_index_if_exists('idx_region', 'country_profiles')
+    drop_index_if_exists('idx_country_code', 'country_profiles')
+    drop_table_if_exists('country_profiles')

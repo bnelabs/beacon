@@ -1,0 +1,18 @@
+# This file governs the frontend build because that build's context is
+# ./frontend (see docker-compose.yml) and Docker reads .dockerignore from the
+# context root. It does NOT apply to the backend build, whose context is the
+# repository root and which is governed by /.dockerignore.
+#
+# node_modules is the reason this file exists: without it the whole host
+# dependency tree is copied into the build context on every build, and the image
+# then installs a second copy over it.
+node_modules/
+dist/
+.vite/
+.cache/
+test-results/
+playwright-report/
+coverage/
+*.log
+.env
+.env.*

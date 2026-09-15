@@ -1,15 +1,17 @@
 # CPU-only configuration for macOS, Linux without GPU
 # Usage: docker compose -f docker-compose.yml -f docker-compose.cpu.yml up
+#
+# Only `backend` carries a build; `migrate` and `celery-worker` run the same
+# image tag from docker-compose.yml, so this builds one CPU image for all three.
+# No GPU resources are allocated to any service.
 
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.cpu  # Use CPU Dockerfile
-    # No GPU resources allocated
-
-  celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.cpu  # Use CPU Dockerfile
-    # No GPU resources allocated
+      context: .
+      dockerfile: backend/Dockerfile.cpu
+    environment:
+      # Belt and braces: the CPU image installs a CPU-only torch, which ignores
+      # this, but a stale value inherited from a shell or a .env left over from a
+      # GPU run should not be able to hide a device.
+      CUDA_VISIBLE_DEVICES: ""
