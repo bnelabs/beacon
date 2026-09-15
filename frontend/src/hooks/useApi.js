@@ -307,3 +307,15 @@ export function useSystemStatus(options = {}) {
     ...options
   })
 }
+
+/**
+ * Predictive-validity report for a backtest job (round P1).
+ * Absence is a status ("not_validated"), never an error wall.
+ */
+export function useValidationReport(jobId) {
+  return useQuery({
+    queryKey: ['validation', jobId],
+    queryFn: () => fetchApi(`/v2/reports/validation/${jobId}`),
+    enabled: !!jobId
+  })
+}

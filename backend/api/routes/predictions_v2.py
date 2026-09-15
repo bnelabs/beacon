@@ -154,6 +154,65 @@ async def get_prediction_report(job_id: int, db: Session = Depends(get_db)):
         )
 
 
+@router.get("/reports/validation/{job_id}")
+async def get_validation_report(job_id: int, db: Session = Depends(get_db)):
+    """Predictive-validity report for a backtest job.
+
+    Round-five wiring stores per-source event metrics (ROC AUC, average
+    precision, conservative lead-time statistics against declared stress
+    events) in the backtest result when the job carried an
+    ``event_definition``. This endpoint surfaces them as a first-class
+    report -- and says plainly when a job was never validated, because a
+    missing validation is a status, not an error and not a zero.
+    """
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.job_type != "backtest":
+        raise HTTPException(status_code=400, detail="Validation reports exist for backtest jobs only")
+
+    result = job.result or {}
+    backtest_metrics = result.get("backtest_metrics", {}) or {}
+    event_metrics = backtest_metrics.get("event_metrics")
+
+    if not event_metrics:
+        return {
+            "job_id": job_id,
+            "status": "not_validated",
+            "reason": (
+                "this backtest ran without an event_definition, so no stress "
+                "events were labelled and no predictive-validity statistics "
+                "exist; re-run the backtest with an event definition to "
+                "measure precision, recall and lead time"
+            ),
+            "validation": None,
+        }
+
+    by_source = event_metrics.get("by_source", {}) or {}
+    measured = {
+        name: payload for name, payload in by_source.items()
+        if isinstance(payload, dict) and "roc_auc" in payload
+    }
+    aucs = [payload["roc_auc"] for payload in measured.values() if payload.get("roc_auc") is not None]
+    return {
+        "job_id": job_id,
+        "status": "validated",
+        "validation": {
+            "definition": event_metrics.get("definition"),
+            "sources_measured": len(measured),
+            "sources_skipped": {
+                name: payload for name, payload in by_source.items() if name not in measured
+            },
+            "mean_roc_auc": float(sum(aucs) / len(aucs)) if aucs else None,
+            "by_source": by_source,
+            "quant_metrics": {
+                key: backtest_metrics.get(key)
+                for key in ("mse", "mae", "rmse", "r2", "directional_accuracy", "hit_rate")
+            },
+        },
+    }
+
+
 @router.get("/reports/backtest/{job_id}", response_model=BacktestReport)
 async def get_backtest_report(job_id: int, db: Session = Depends(get_db)):
     try:

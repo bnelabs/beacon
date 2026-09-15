@@ -13,6 +13,11 @@ const JOB_TYPES = [
     value: 'training',
     label: 'Model Training',
     description: 'Train an AI model using a completed data collection job.'
+  },
+  {
+    value: 'backtest',
+    label: 'Backtest & validate',
+    description: 'Score history walk-forward and measure predictive validity against declared stress events.'
   }
 ]
 
@@ -97,6 +102,11 @@ export default function JobCreationModal({
   ] = useState(getDefaultTrainingWindow)
 
   const [jobType, setJobType] = useState(initialJobType || 'data_collection')
+  const [backtestModelJob, setBacktestModelJob] = useState('')
+  const [eventDirection, setEventDirection] = useState('up')
+  const [eventQuantile, setEventQuantile] = useState('0.95')
+  const [eventHorizon, setEventHorizon] = useState('5')
+  const [eventMinDuration, setEventMinDuration] = useState('2')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
 
@@ -396,6 +406,21 @@ export default function JobCreationModal({
         }
 
         payload.parameters = params
+      } else if (jobType === 'backtest') {
+        if (!backtestModelJob) {
+          setFormError('Select a completed training job to backtest.')
+          return
+        }
+        const params = { trained_model_job: Number(backtestModelJob) }
+        if (eventQuantile) {
+          params.event_definition = {
+            direction: eventDirection,
+            quantile: Number(eventQuantile),
+            horizon: Number(eventHorizon || 5),
+            min_duration: Number(eventMinDuration || 2)
+          }
+        }
+        payload.parameters = params
       }
 
       await createJob.mutateAsync(payload)
@@ -427,6 +452,60 @@ export default function JobCreationModal({
       }
     >
       <form id="job-create-form" className="space-y-5" onSubmit={handleSubmit}>
+        {jobType === 'backtest' && (
+          <div className="space-y-4 rounded-md border border-bne-line bg-bne-paper-raise p-4">
+            <p className="bne-micro">Backtest configuration</p>
+            <label className="block text-sm text-bne-muted">
+              Trained model job
+              <input
+                className="mt-1 w-full rounded-md border border-bne-line bg-bne-card px-3 py-2 text-sm text-bne-ink"
+                value={backtestModelJob}
+                onChange={(e) => setBacktestModelJob(e.target.value)}
+                placeholder="training job id"
+              />
+            </label>
+            <p className="text-xs leading-relaxed text-bne-faint">
+              Optional event definition: declares what counts as a stress episode
+              (direction, tail quantile of the horizon move, minimum duration).
+              With it, the backtest reports ROC AUC, average precision and
+              lead-time statistics per source; without it, validation is
+              reported as not performed.
+            </p>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <label className="block text-xs text-bne-muted">Direction
+                <select
+                  className="mt-1 w-full rounded-md border border-bne-line bg-bne-card px-2 py-1.5 text-sm text-bne-ink"
+                  value={eventDirection}
+                  onChange={(e) => setEventDirection(e.target.value)}
+                >
+                  <option value="up">rising = stress</option>
+                  <option value="down">falling = stress</option>
+                </select>
+              </label>
+              <label className="block text-xs text-bne-muted">Quantile
+                <input
+                  className="mt-1 w-full rounded-md border border-bne-line bg-bne-card px-2 py-1.5 text-sm text-bne-ink"
+                  value={eventQuantile}
+                  onChange={(e) => setEventQuantile(e.target.value)}
+                />
+              </label>
+              <label className="block text-xs text-bne-muted">Horizon
+                <input
+                  className="mt-1 w-full rounded-md border border-bne-line bg-bne-card px-2 py-1.5 text-sm text-bne-ink"
+                  value={eventHorizon}
+                  onChange={(e) => setEventHorizon(e.target.value)}
+                />
+              </label>
+              <label className="block text-xs text-bne-muted">Min duration
+                <input
+                  className="mt-1 w-full rounded-md border border-bne-line bg-bne-card px-2 py-1.5 text-sm text-bne-ink"
+                  value={eventMinDuration}
+                  onChange={(e) => setEventMinDuration(e.target.value)}
+                />
+              </label>
+            </div>
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <label className="flex flex-col gap-2">
             <span className="text-sm font-medium text-bne-muted">Job Type</span>
