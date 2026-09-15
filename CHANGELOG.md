@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-09-15
+
 ### Added
 - Container entrypoint runs `alembic upgrade head` before the API/worker starts;
   `baseline_core_001` reconciles the core tables; CI renders the chain offline.
