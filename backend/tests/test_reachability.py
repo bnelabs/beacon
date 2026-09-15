@@ -133,6 +133,16 @@ KNOWN_UNREACHABLE: Dict[str, Disposition] = {
         plan="wire",
         next_step="consume it after conformal: it answers the question conformal does not (is the interval wide because the world is noisy, or because the model is lost), and its docstring says an epistemic spike should refuse the prediction",
     ),
+    "backend.services.lei_service": Disposition(
+        blocker="entity mapping has no consumer yet: no plugin currently joins FDIC/EBA/BIS namespaces",
+        plan="wire",
+        next_step="use LEI resolution when the EBA transparency ingest lands, so institution identities join across sources without guessed matches",
+    ),
+    "backend.modules.engine.garch": Disposition(
+        blocker="the GARCH(1,1) volatility baseline has no consumer yet: level baselines price levels, not variance",
+        plan="wire",
+        next_step="price it as a volatility baseline in the backtest harness and feed conditional vol as a feature once the event-labelled validation exists",
+    ),
     "backend.modules.risk.network_estimation": Disposition(
         blocker="no production surface offers an estimated network as a scenario input yet",
         plan="wire",

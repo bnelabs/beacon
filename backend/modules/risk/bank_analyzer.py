@@ -84,6 +84,7 @@ from .regulatory import (
     translate_systemic_stress,
 )
 from .fire_sale import FireSaleResult, FireSaleScenario, solve_fire_sale
+from .channel_decomposition import decompose_channels
 from .liquidity_spiral import (
     LiquiditySpiralModel,
     SpiralParameters,
@@ -327,6 +328,11 @@ class MultiBankAnalysis:
     """
 
     liquidity_spiral: Dict[str, SpiralResult] = field(default_factory=dict)
+    channel_decomposition: Optional[Dict[str, Any]] = None
+    """Measured contagion-channel increments (clearing / fire-sale feedback /
+    spiral amplification) from :mod:`backend.modules.risk.channel_decomposition`.
+    Channels that were not run appear as ``None`` with a reason -- an absent
+    channel is missing information, not a zero contribution."""
     """Per-institution Brunnermeier-Pedersen spiral, keyed by institution id.
 
     Populated only for institutions that both failed to pay in the clearing
@@ -374,6 +380,7 @@ class MultiBankAnalysis:
             "systemic_risk_score": self.systemic_risk_score,
             "clearing": self.clearing.to_dict() if self.clearing else None,
             "fire_sale": self.fire_sale.to_dict() if self.fire_sale else None,
+            "channel_decomposition": self.channel_decomposition,
             "regulatory_stress": (
                 self.regulatory_stress.to_dict() if self.regulatory_stress else None
             ),
@@ -795,6 +802,7 @@ class BankRiskAnalyzer:
             shock_scenarios=shock_scenarios,
             systemic_risk_score=systemic_risk_score,
             fire_sale=fire_sale_result,
+            channel_decomposition=decompose_channels(clearing, fire_sale_result, spiral_results).to_dict(),
             regulatory_stress=regulatory_stress_result,
             crowding=crowding_result,
             topology=topology_result,
