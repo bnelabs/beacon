@@ -12,7 +12,7 @@ schema at `/openapi.json` or the Swagger UI at `/docs`.
 
 Application: **BEACON API - Banking Network Engine** v2.0.0
 
-**118 operations across 22 tags.**
+**119 operations across 22 tags.**
 
 
 ## Pipeline (DATA-ENGINE-RESULTS)
@@ -217,6 +217,7 @@ Application: **BEACON API - Banking Network Engine** v2.0.0
 |---|---|---|---|
 | `GET` | `/api/v2/predictions/{job_id}` | `PredictionReport` | Get Prediction Report. |
 | `GET` | `/api/v2/reports/backtest/{job_id}` | `BacktestReport` | Get Backtest Report. |
+| `GET` | `/api/v2/reports/validation/{job_id}` | untyped | Predictive-validity report for a backtest job. |
 
 
 ## Advanced Analytics

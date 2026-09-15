@@ -7,6 +7,8 @@ import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import { useModel } from '../hooks/useApi'
 import { useRouter } from '../store/useRouter'
+import { useValidationReport } from '../hooks/useApi'
+import EmptyState from '../components/ui/EmptyState'
 
 function formatNumber(value, digits = 4) {
   if (value === null || value === undefined) return '—'
@@ -31,6 +33,80 @@ function MetricCard({ title, value, subtitle }) {
       <CardContent>
         <p className="text-2xl font-semibold text-bne-ink">{value}</p>
         {subtitle && <p className="text-sm text-bne-muted mt-1">{subtitle}</p>}
+      </CardContent>
+    </Card>
+  )
+}
+
+function ValidationReportCard({ jobId }) {
+  const { data, isLoading } = useValidationReport(jobId)
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base">Predictive validity — job #{jobId}</CardTitle>
+          {data?.status === 'validated' ? (
+            <Badge variant="success" size="sm">validated</Badge>
+          ) : (
+            <Badge size="sm">not validated</Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-bne-muted">Loading validation report…</p>
+        ) : !data || data.status !== 'validated' ? (
+          <EmptyState
+            compact
+            title="No predictive-validity statistics for this backtest"
+            hint={data?.reason || 'Run the backtest with an event definition to measure precision, recall and lead time against declared stress events.'}
+          />
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-bne-muted">
+              Event definition: {data.validation.definition?.direction === 'down' ? 'falling' : 'rising'} moves
+              above the {data.validation.definition?.quantile} quantile of the {data.validation.definition?.horizon}-step
+              move, sustained {data.validation.definition?.min_duration}+ steps.
+              Mean ROC AUC across {data.validation.sources_measured} source(s):{' '}
+              <span className="bne-figure">{data.validation.mean_roc_auc == null ? '—' : data.validation.mean_roc_auc.toFixed(3)}</span>
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[13px]">
+                <thead>
+                  <tr className="bne-micro">
+                    <th className="py-1 pr-4">Source</th>
+                    <th className="py-1 pr-4">ROC AUC</th>
+                    <th className="py-1 pr-4">Avg precision</th>
+                    <th className="py-1 pr-4">Events</th>
+                    <th className="py-1 pr-4">Median lead</th>
+                    <th className="py-1">Zero-lead</th>
+                  </tr>
+                </thead>
+                <tbody className="text-bne-ink-soft">
+                  {Object.entries(data.validation.by_source || {}).map(([source, payload]) => (
+                    <tr key={source} className="border-t border-bne-line-soft">
+                      <td className="py-1.5 pr-4 font-mono text-xs">{source}</td>
+                      {payload && payload.roc_auc != null ? (
+                        <>
+                          <td className="py-1.5 pr-4 tnum">{payload.roc_auc?.toFixed(3) ?? '—'}</td>
+                          <td className="py-1.5 pr-4 tnum">{payload.average_precision?.toFixed(3) ?? '—'}</td>
+                          <td className="py-1.5 pr-4 tnum">{payload.n_events ?? '—'}</td>
+                          <td className="py-1.5 pr-4 tnum">{payload.lead_time?.median_lead ?? '—'}</td>
+                          <td className="py-1.5 tnum">{payload.lead_time?.n_zero_lead ?? '—'}</td>
+                        </>
+                      ) : (
+                        <td className="py-1.5 text-bne-faint" colSpan={5}>
+                          {payload?.skipped || 'not measured'}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )
@@ -156,6 +232,7 @@ export default function Results({ params = {} }) {
   } = useModel(modelId)
 
   const [scenario, setScenario] = useState(null)
+  const validationJobId = params?.jobId
   const [scenarioLoading, setScenarioLoading] = useState(false)
   const [scenarioError, setScenarioError] = useState(null)
   const [scenarioReloadKey, setScenarioReloadKey] = useState(0)
@@ -472,6 +549,7 @@ export default function Results({ params = {} }) {
       }
     >
       <div className="space-y-6">
+        {validationJobId && <ValidationReportCard jobId={validationJobId} />}
         {scenarioError && (
           <ErrorMessage
             title="Unable to load scenario"
