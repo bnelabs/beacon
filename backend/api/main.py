@@ -6,6 +6,7 @@ FastAPI application entry point for BEACON system.
 Copyright © 2025 BNE (Banking Network Engine). All rights reserved.
 """
 
+import hmac
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -38,6 +39,7 @@ from .routes import (
     reports,
     network,
 )
+from backend import __version__
 from backend.database import init_db, close_db
 from backend.exceptions import BeaconError
 from backend.api.job_events import relay_job_updates
@@ -92,9 +94,31 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="BEACON API - Banking Network Engine",
     description="Banking Early Alert Comprehensive Observation Network - Production-grade systemic liquidity risk monitoring",
-    version="2.0.0",
+    version=__version__,
     lifespan=lifespan
 )
+
+# Optional bearer-token gate (P4). BEACON ships single-operator and
+# unauthenticated by default; deployments that need multi-tenant hygiene set
+# BEACON_API_TOKEN and every /api/* call must carry it. Documentation
+# endpoints stay open so the gate is discoverable rather than a brick wall.
+_AUTH_EXEMPT_PREFIXES = ("/docs", "/redoc", "/openapi.json", "/health")
+
+
+@app.middleware("http")
+async def bearer_token_gate(request, call_next):
+    token = os.getenv("BEACON_API_TOKEN", "").strip()
+    path = request.url.path
+    if not token or not path.startswith("/api") or path.startswith(_AUTH_EXEMPT_PREFIXES):
+        return await call_next(request)
+    header = request.headers.get("authorization", "")
+    scheme, _, value = header.partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(value.strip(), token):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "BEACON_API_TOKEN is set; supply Authorization: Bearer <token>"},
+        )
+    return await call_next(request)
 
 # CORS middleware for frontend access
 # In production, set ALLOWED_ORIGINS environment variable

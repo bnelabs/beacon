@@ -30,17 +30,33 @@ export interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
  * callers must never see a 404 body parsed as data. A 204 (or empty body)
  * resolves to `null` rather than throwing on `response.json()`.
  */
+export const API_TOKEN_KEY = 'beacon.api_token'
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...extra }
+  try {
+    const token = window.localStorage.getItem(API_TOKEN_KEY)
+    if (token) headers.Authorization = `Bearer ${token}`
+  } catch {
+    // storage unavailable: run without a token
+  }
+  return headers
+}
+
 export async function fetchApi<T = unknown>(
   endpoint: string,
   options: ApiRequestOptions = {}
 ): Promise<T | null> {
   const response = await fetch(`${API_BASE}${endpoint}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers
-    },
+    headers: authHeaders(options.headers),
     ...options
   })
+
+  if (response.status === 401) {
+    // The deployment requires a bearer token (BEACON_API_TOKEN). Surface it
+    // once per episode so the app can ask, instead of sprinkling 401s.
+    window.dispatchEvent(new CustomEvent('beacon:unauthorized'))
+  }
 
   if (!response.ok) {
     const errorPayload = await response
