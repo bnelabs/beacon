@@ -78,21 +78,18 @@ services:
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       SEC_API_KEY: ${SEC_API_KEY:-}
       FMP_API_KEY: ${FMP_API_KEY:-}
-      # Path to the model tree *inside the container*. The weights are
-      # bind-mounted read-only from the host below, never baked into the image and
-      # never re-downloaded. See backend/modules/engine/foundation_encoders.py.
-      BEACON_MODEL_DIR: /models
+      # No model weights are mounted: the Toto 2.0 encoder stack was removed in
+      # the 2026-09 hygiene round (REMOVED register, backend/tests/test_reachability.py;
+      # docs/deployment.md section 3). Nothing in the runtime reads /models or
+      # BEACON_MODEL_DIR. A foundation encoder returns only in the same change
+      # that wires an engine path to embed nodes with it -- and its read-only
+      # host mount returns with it.
     volumes:
       - ./configs:/app/configs
       - ./data:/app/data
       - ./models:/app/saved_models
       - ./logs:/app/logs
       - ./results:/app/results
-      # The Toto 2.0 checkpoints live on the host (~14 GB) and are mounted
-      # READ-ONLY rather than copied into the image or fetched again: copying
-      # would duplicate gigabytes per image, and read-only means no container can
-      # corrupt a checkpoint. Override the host side with BEACON_MODEL_HOST_DIR.
-      - ${BEACON_MODEL_HOST_DIR:-/home/komedi/models/beacon/toto}:/models:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,21 +120,18 @@ services:
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       SEC_API_KEY: ${SEC_API_KEY:-}
       FMP_API_KEY: ${FMP_API_KEY:-}
-      # Path to the model tree *inside the container*. The weights are
-      # bind-mounted read-only from the host below, never baked into the image and
-      # never re-downloaded. See backend/modules/engine/foundation_encoders.py.
-      BEACON_MODEL_DIR: /models
+      # No model weights are mounted: the Toto 2.0 encoder stack was removed in
+      # the 2026-09 hygiene round (REMOVED register, backend/tests/test_reachability.py;
+      # docs/deployment.md section 3). Nothing in the runtime reads /models or
+      # BEACON_MODEL_DIR. A foundation encoder returns only in the same change
+      # that wires an engine path to embed nodes with it -- and its read-only
+      # host mount returns with it.
     volumes:
       - ./configs:/app/configs
       - ./data:/app/data
       - ./models:/app/saved_models
       - ./logs:/app/logs
       - ./results:/app/results
-      # The Toto 2.0 checkpoints live on the host (~14 GB) and are mounted
-      # READ-ONLY rather than copied into the image or fetched again: copying
-      # would duplicate gigabytes per image, and read-only means no container can
-      # corrupt a checkpoint. Override the host side with BEACON_MODEL_HOST_DIR.
-      - ${BEACON_MODEL_HOST_DIR:-/home/komedi/models/beacon/toto}:/models:ro
     depends_on:
       postgres:
         condition: service_healthy

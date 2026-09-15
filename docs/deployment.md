@@ -117,16 +117,17 @@ sudo docker compose logs -f backend
 sudo docker compose down          # add -v to drop the database volume
 ```
 
-Confirm the containers can actually see the weights and the GPU:
+Confirm the container can actually see the GPU:
 
 ```bash
 sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
-  exec backend python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
-
-sudo docker compose exec backend python -c \
-  "from backend.modules.engine.foundation_encoders import local_model_path; print(local_model_path('Datadog/Toto-2.0-313m'))"
-# /models/Toto-2.0-313m
+  exec backend python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.device_count())"
 ```
+
+How many GPUs it sees is controlled by `CUDA_VISIBLE_DEVICES` — a build arg on
+`backend/Dockerfile` that the gpu overlay defaults to `all` (it reserves every
+GPU); the base image default is `0`. Pin a subset from `.env` if needed (see
+`.env.example`).
 
 ### A note on the two backend images
 
@@ -177,13 +178,10 @@ or in a secret manager.
 ```bash
 cd /home/komedi/Denemeler/beacon
 
-# Unit + integration suite (offline; no network needed)
+# Unit + integration suite (offline; no network needed — the foundation-encoder
+# tests run against the deterministic HashedFallbackEncoder, there is no
+# real-weight mode any more)
 PYTHONPATH=. /home/komedi/Denemeler/beacon-venv/bin/python -m pytest backend/tests -o addopts='' -q
-
-# Real-weight encoder tests run only when the model tree is set
-BEACON_MODEL_DIR=/home/komedi/models/beacon/toto \
-  PYTHONPATH=. /home/komedi/Denemeler/beacon-venv/bin/python -m pytest \
-  backend/tests/test_foundation_encoders.py -o addopts='' -q
 
 /home/komedi/Denemeler/beacon-venv/bin/python -m ruff check backend --select E9,F63,F7,F82
 ```
@@ -193,13 +191,13 @@ Then at the container level:
 ```bash
 docker compose ps                      # frontend must be (healthy), not merely Up
 
-# The Toto encoder must load inside the image. Its Python package is declared in
-# backend/requirements.txt; if that pin is ever dropped, construction raises
-# ModuleNotFoundError rather than failing at first prediction.
+# No weights ship and none are fetched (section 3). The encoder that does exist
+# is the deterministic fallback: it must construct inside the image with no
+# network and no model tree.
 docker compose exec backend python -c "
-from backend.modules.engine.foundation_encoders import TotoEncoder
-e = TotoEncoder(model_id='Datadog/Toto-2.0-313m', device='cpu')
-print('encoder OK:', e.n_parameters(), e.embed_dim)"
+from backend.modules.engine.foundation_encoders import HashedFallbackEncoder
+e = HashedFallbackEncoder(embed_dim=64)
+print('encoder OK:', e.embed_dim, e.provenance.is_pretrained)"
 ```
 
 ### Rebuilding: `backend` and `celery-worker` are separate images
