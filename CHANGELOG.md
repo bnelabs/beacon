@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-09-15
+
 ### Added
 - `POST /api/v1/network/estimate`: estimated bilateral networks as a
   production scenario input. Maximum-entropy **and** minimum-support
