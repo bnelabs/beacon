@@ -55,6 +55,9 @@ const jobsList = [
     created_at: '2024-02-14T12:20:00Z',
     started_at: '2024-02-14T12:25:00Z',
     progress: 0,
+    error: 'Connection timeout while fetching data.',
+    user_friendly_error:
+      'The provider stopped answering mid-download. Nothing was written; retrying is safe.',
     result: {
       error: 'Connection timeout while fetching data.'
     }
@@ -1028,12 +1031,51 @@ export async function registerApiMocks(page) {
         )
       }
 
+      const retryMatch = normalizedPath.match(/\/api\/v1\/jobs\/(\d+)\/retry$/)
+      if (retryMatch) {
+        // A retry is a NEW job with the same parameters, lineage recorded:
+        // the failed job stays a record, not a draft.
+        return respond(
+          {
+            id: 902,
+            job_type: 'data_collection',
+            status: 'pending',
+            progress: 0.0,
+            parameters: { retry_of: Number(retryMatch[1]), origin: 'retry' }
+          },
+          201
+        )
+      }
+
       const probeMatch = normalizedPath.match(/\/api\/v1\/data-sources\/(\d+)\/probe$/)
       if (probeMatch) {
         return respond({
           success: true,
           message: 'reachable: provider answered 200',
           details: { latency_ms: 120 }
+        })
+      }
+
+      if (normalizedPath === '/api/v1/network/exposures') {
+        return respond(
+          { stored: 4, as_of: '2024-02-01', source_institution: 'mock attribution' },
+          201
+        )
+      }
+
+      if (normalizedPath === '/api/v1/network/estimate') {
+        return respond({
+          method: 'maximum_entropy_ras',
+          nodes: [{ id: 'BANK_A' }, { id: 'BANK_B' }],
+          edges: [
+            { source: 'BANK_A', target: 'BANK_B', exposure: 55.0, kind: 'estimated' },
+            { source: 'BANK_B', target: 'BANK_A', exposure: 45.0, kind: 'estimated' }
+          ],
+          n_links: 2,
+          edges_truncated: false,
+          marginal_residual: 0.0,
+          uncertainty:
+            'estimated completion of declared aggregate marginals: a prior over bilateral structure, not a measurement of bilateral exposures; clearing results inherit this caveat'
         })
       }
 

@@ -5,6 +5,7 @@ import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import RiskMap from '../components/map/RiskMap'
+import { ExposureUploadModal, EstimateNetworkModal } from '../components/map/NetworkIntakeModals'
 import { normalizeNetworkGraph, useBanksByRegion, useNetworkGraph } from '../hooks/useApi'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
@@ -49,6 +50,8 @@ export default function RiskMapPage() {
   const [showHeatmap, setShowHeatmap] = useState(true)
   const [resetToken, setResetToken] = useState(0)
   const [selectedConnection, setSelectedConnection] = useState(null)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [estimateOpen, setEstimateOpen] = useState(false)
 
   const regionFilters = useMemo(() => {
     if (!selectedRegion) return null
@@ -232,6 +235,16 @@ export default function RiskMapPage() {
               )}
             >
               <p className="flex-1">{networkStatus}</p>
+              {network.status !== 'available' && !networkLoading && (
+                <span className="flex shrink-0 items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setUploadOpen(true)}>
+                    Upload matrix
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setEstimateOpen(true)}>
+                    Estimate from marginals
+                  </Button>
+                </span>
+              )}
               {networkIsError && !fallbackActive && (
                 <button
                   type="button"
@@ -581,6 +594,17 @@ export default function RiskMapPage() {
           </Card>
         </div>
       </div>
+
+      <ExposureUploadModal
+        isOpen={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        onDone={() => refetchNetwork()}
+      />
+      <EstimateNetworkModal
+        isOpen={estimateOpen}
+        onClose={() => setEstimateOpen(false)}
+        onDone={() => refetchNetwork()}
+      />
     </PageContainer>
   )
 }

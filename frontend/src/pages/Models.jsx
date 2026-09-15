@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 import PageContainer from '../components/ui/PageContainer'
 import Card, { CardHeader, CardTitle, CardContent, CardFooter } from '../components/ui/Card'
 import Button from '../components/ui/Button'
@@ -79,6 +80,10 @@ function TrainModelModal({ isOpen, onClose, model }) {
 }
 
 function ModelDetailsDrawer({ model, onClose, onLaunch }) {
+  const drawerRef = useRef(null)
+  // Above the early returns: the trap must engage and release in the same
+  // order on every render, including the render where the drawer closes.
+  useFocusTrap(drawerRef, Boolean(model), onClose)
   const [scenarioName, setScenarioName] = useState('')
   const [horizonDays, setHorizonDays] = useState(30)
   const [adjustments, setAdjustments] = useState({})
@@ -154,7 +159,7 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end">
+    <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={model.name} className="fixed inset-0 z-40 flex justify-end">
       <div className="absolute inset-0 bg-bne-ink/25" onClick={onClose} />
       <Card className="relative z-50 w-full max-w-xl h-full overflow-y-auto shadow-2xl" as="div">
         <CardHeader className="flex items-center justify-between">

@@ -1,4 +1,5 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
+import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { createPortal } from 'react-dom'
 import { cn } from '../../utils/cn'
 
@@ -14,27 +15,24 @@ export default function Modal({
   footer,
   widthClass = 'max-w-2xl'
 }) {
+  const panelRef = useRef(null)
+  // The trap owns Escape as well as Tab, so the keyboard story lives in one
+  // place instead of half here and half in the hook.
+  useFocusTrap(panelRef, isOpen, onClose)
+
   useEffect(() => {
     if (!isOpen) {
       return
     }
 
-    function handleKeyDown(event) {
-      if (event.key === 'Escape') {
-        onClose?.()
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
     // Prevent scrolling the background while modal is open.
     const originalOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
 
     return () => {
-      document.removeEventListener('keydown', handleKeyDown)
       document.body.style.overflow = originalOverflow
     }
-  }, [isOpen, onClose])
+  }, [isOpen])
 
   if (!isOpen || typeof document === 'undefined') {
     return null
@@ -48,6 +46,10 @@ export default function Modal({
         role="presentation"
       />
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={typeof title === 'string' ? title : undefined}
         className={cn(
           'relative z-10 w-full rounded-md bg-bne-card shadow-bne-lift',
           'border border-bne-line',
