@@ -44,6 +44,38 @@ async def list_data_sources(
         )
 
 
+@router.get("/disclosure")
+async def get_provenance_disclosure(
+    db: Session = Depends(get_db)
+):
+    """Provenance disclosure: every feed, its publisher, and what is inferred.
+
+    **For auditors and operators:** answers, for this deployment, *where each
+    input comes from* -- publisher, provenance class (supervisory publication,
+    official statistics, regulatory filing, market observation, research
+    dataset, operator declaration), key requirements derived from each
+    plugin's own declaration, configured/enabled counts and catalogue
+    coverage -- plus the platform's data policy and the list of **inferred**
+    inputs (today: the bilateral network estimated from declared aggregate
+    marginals, which is labelled everywhere and never stored as an
+    observation).
+
+    Registered before ``/{data_source_id}`` so the literal path wins over the
+    integer parameter route.
+    """
+    from backend.modules.data.provenance import build_disclosure
+
+    try:
+        return build_disclosure(db)
+    except Exception as e:
+        error_logger = ErrorLogger(db)
+        error_log = error_logger.log_error(e, context="building provenance disclosure", endpoint="/api/v1/data-sources/disclosure", method="GET")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
+        )
+
+
 @router.get("/{data_source_id}", response_model=DataSourceResponse)
 async def get_data_source(
     data_source_id: int,
