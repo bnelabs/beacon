@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-09-15
+
 ### Removed
 - Four closed review logs: `docs/G_SIB_BUILD.md`,
   `docs/EXECUTIVE_REVIEW_REMEDIATION.md`, `docs/data_connectors.md`,
