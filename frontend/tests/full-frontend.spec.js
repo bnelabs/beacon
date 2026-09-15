@@ -255,7 +255,9 @@ test('navigates the application and exercises primary interactions', async ({ pa
   // backing-off feed says so, and the manual-only feed shows no false alarm.
   await expect(page.getByRole('heading', { name: 'Refresh Cadence' })).toBeVisible()
   await expect(page.getByText('backing off ×4')).toBeVisible()
-  await expect(page.getByText('FDIC Call Reports')).toBeVisible()
+  // Scoped to the details table: the Refresh Cadence panel above also
+  // names the feed, and both are correct.
+  await expect(page.getByRole('table').getByText('FDIC Call Reports')).toBeVisible()
 
   // Analytics interactions
   await page.getByRole('button', { name: 'Analytics' }).click()

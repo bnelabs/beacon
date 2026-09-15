@@ -345,6 +345,14 @@ export default function DataQuality() {
   const { data: trendsData, isLoading: trendsLoading } = useQualityTrends(30)
   const { data: healthPayload } = useDataSourceHealth()
 
+  // Scheduled feeds only: a manual source has no cadence to keep, and showing
+  // "overdue" for a feed nobody promised to refresh would be a false alarm.
+  // (Above the early returns: hooks must run in the same order every render.)
+  const scheduledHealth = useMemo(
+    () => (healthPayload?.sources || []).filter((row) => row.scheduled),
+    [healthPayload]
+  )
+
   if (statsLoading || sourcesLoading || trendsLoading) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
@@ -369,13 +377,6 @@ export default function DataQuality() {
   }
 
   const { overview, freshness, quality, anomalies } = stats
-
-  // Scheduled feeds only: a manual source has no cadence to keep, and showing
-  // "overdue" for a feed nobody promised to refresh would be a false alarm.
-  const scheduledHealth = useMemo(
-    () => (healthPayload?.sources || []).filter((row) => row.scheduled),
-    [healthPayload]
-  )
 
   return (
     <div className="p-6 space-y-6">
