@@ -104,6 +104,13 @@ jobs:
         run: |
           PYTHONPATH=. python scripts/generate_api_docs.py --check
 
+      - name: Render migrations offline
+        # Catches unrenderable migration chains (import errors, bad op calls)
+        # without a database; the baseline migration reconciles model metadata.
+        run: |
+          export DATABASE_URL=postgresql://user:pass@localhost:5432/db
+          alembic upgrade head --sql > /dev/null
+
       - name: Run tests
         env:
           PYTHONUNBUFFERED: "1"
