@@ -160,7 +160,7 @@ export function useOnboarding() {
                   <li><strong>Configure Data Sources</strong> - Connect FDIC, ECB, or FMP data</li>
                   <li><strong>Create Your First Job</strong> - Train a model or run predictions</li>
                   <li><strong>Explore Country Profiles</strong> - Pre-evaluate economic metrics</li>
-                  <li><strong>Check Help Center</strong> - For detailed documentation</li>
+                  <li><strong>Check Help</strong> - For detailed documentation</li>
                 </ol>
                 <p class="mt-3 text-sm text-bne-muted">You can restart this tour anytime from Settings → Onboarding.</p>
               </div>

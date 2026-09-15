@@ -9,7 +9,7 @@ const PAGE_METADATA = {
   countries: { title: 'Country Profiles', parent: null },
   results: { title: 'Results', parent: 'jobs' },
   settings: { title: 'Settings', parent: null },
-  help: { title: 'Help Center', parent: null }
+  help: { title: 'Help', parent: null }
 }
 
 export default function Breadcrumbs() {

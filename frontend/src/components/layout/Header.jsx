@@ -104,7 +104,7 @@ export default function Header() {
                   className="w-full text-left px-4 py-2 text-sm text-bne-ink hover:bg-bne-paper-dim transition-colors"
                   role="menuitem"
                 >
-                  Help Center
+                  Help
                 </button>
                 <div className="border-t border-bne-line my-1" />
                 {hasStoredToken ? (
