@@ -10,6 +10,28 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- Container entrypoint runs `alembic upgrade head` before the API/worker starts;
+  `baseline_core_001` reconciles the core tables; CI renders the chain offline.
+- SSRF fetch policy for the custom-API plugin (https-only default, refused
+  ranges, resolved-address inspection, operator allowlist).
+- Pipeline-stage tests (formatter/cleaner/collector retry), release-tooling
+  guards, dashboard/panel docs and a real Help reference page.
+
+### Changed
+- Analyzer accuracy is now `None` (unmeasured) instead of a hand-rolled weight
+  blend; validator anomalies propagate as a measured integrity count.
+- Report pipeline carries no legacy channel aliases: `model_score_report`
+  with semantics, funding as explicit `not_measured`, institutional profiles
+  without invented narrative.
+- `FMP_API_KEY` reaches the containers; deployment docs no longer reference
+  the removed Toto stack.
+
+### Fixed
+- The README's migration procedure no longer crashes on booted databases
+  (unguarded `create_table`); neither schema tool was a complete source of
+  truth before `baseline_core_001`.
+
+### Added
 - Frontend design system ("field report"): warm-paper surfaces, pine brand,
   moss→ochre→rust→clay risk scale, serif display type, monogram chips, new
   beacon mark and favicon; reference screenshots under `docs/images/`.
