@@ -105,3 +105,25 @@ class ModelMetricPoint(Base):
 
     def __repr__(self) -> str:
         return f"<ModelMetricPoint {self.metric_name}@{self.time}={self.metric_value}>"
+
+class IndicatorVintageLog(Base):
+    """Append-only vintages of indicator observations.
+
+    Every write to ``indicator_observations`` appends here: the value as
+    written, and when this deployment published it. Restatements therefore
+    leave both the new value (latest-value store) and the history of what was
+    believed before (this log), which is what makes a number re-derivable as
+    of a past date instead of silently revised under yesterday's backtest.
+    """
+
+    __tablename__ = "indicator_vintage_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_code = Column(String(100), nullable=False, index=False)
+    indicator_code = Column(String(100), nullable=False, index=False)
+    region = Column(String(50), nullable=False, server_default="GLOBAL")
+    time = Column(DateTime(timezone=True), nullable=False)
+    value = Column(Float, nullable=False)
+    published_at = Column(DateTime(timezone=True), nullable=False, index=False)
+    ingest_job_id = Column(String(100), nullable=True, index=True)
+

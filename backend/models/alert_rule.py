@@ -35,6 +35,13 @@ class AlertRule(Base):
 
     # Status
     is_enabled = Column(Boolean, default=True)
+
+    # Evaluation memory (alert_evaluation_001): the tick reads these to honour
+    # each rule's own frequency and its cooldown, instead of re-evaluating
+    # everything every five minutes and re-alerting on a breach that is still
+    # the same breach.
+    last_evaluated_at = Column(DateTime(timezone=True))
+    last_triggered_at = Column(DateTime(timezone=True))
     is_active = Column(Boolean, default=True)  # Can be temporarily disabled by system
 
     # Notification settings

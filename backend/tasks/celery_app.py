@@ -37,6 +37,12 @@ celery_app.conf.update(
             "task": "dispatch_due_collections",
             "schedule": 300.0,
         },
+        # Alert rules are evaluated on their own frequencies; the tick only
+        # decides which rules are due, never how often a rule means.
+        "evaluate-alert-rules": {
+            "task": "evaluate_alert_rules",
+            "schedule": 300.0,
+        },
     },
 )
 
