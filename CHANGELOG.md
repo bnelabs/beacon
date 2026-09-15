@@ -10,6 +10,31 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- `backend/tests/test_migrations_live.py`: the Alembic chain applied to a real
+  PostgreSQL from each of the three histories a deployed database can have --
+  empty, `Base.metadata.create_all()` with no `alembic_version` row, and a
+  partial upgrade -- asserting each reaches head and that **the two terminal
+  schemas are identical**, compared column by column over every table rather than
+  a hardcoded list. 11 of the 12 fail against the pre-fix migrations. They skip
+  without a reachable server, so Backend CI now declares a
+  `timescale/timescaledb:2.15.2-pg15` service -- the image compose runs -- and
+  sets `MIGRATION_TEST_DATABASE_URL`.
+- `scripts/validate_compose.py` + `backend/tests/test_compose_stack.py`: 112
+  invariants over the merged compose YAML for the base file and both overlays,
+  plus every Dockerfile `COPY` source resolved against the build context. Needs
+  no daemon, so it runs on every pull request instead of only in the manual
+  `docker-backend.yml` workflow. The test also runs it against a deliberately
+  broken copy of the stack and asserts a non-zero exit naming the invariant.
+- `backend/alembic/guards.py`: existence guards for migrations that have to run
+  against databases they did not create. The rule is that an object is skipped
+  **only when the inspector says it already exists** -- none of them catches an
+  exception, so a wrong column type or a missing foreign-key target still fails
+  the deploy instead of hiding behind a green run. Offline (`--sql`) aware, so
+  the CI render step keeps working.
+- Root and `frontend/` `.dockerignore`, now that the backend build context is the
+  whole repository: `.git`, `frontend/`, model weights, local `data/`/`logs/`/
+  `results/`, `.env` and caches stay out of the image.
+
 - `TestEMIterationBookkeeping` in `backend/tests/test_hidden_markov.py`: the EM loop's cost and bookkeeping invariants, which nothing previously asserted. `test_one_forward_pass_per_iteration_plus_one_final_score` counts `_forward` invocations and expects `E + 1` for `E` E-steps; it **fails on the pre-fix code** (12 passes for 5 E-steps), so the redundant pass cannot return unnoticed. Also pins the identity the change rests on (`sum(log_scale)` from the E-step's own forward pass *is* `log_likelihood`), that the convergence threshold is scaled to the objective, and that a converged fit stops before the iteration cap.
 - `bench_regime_nowcast` in `scripts/bench_systemic.py`: the Student-t regime nowcast at T=250 and T=1 000 -- the one hot path on the *prediction* path rather than the scenario path. `docs/LANGUAGE_STRATEGY.md` embeds the numbers, and that document's own rule is that they come from this script.
 - Property-based tests (`backend/tests/test_property_based.py`, new
@@ -54,6 +79,70 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   `docker-compose.simple.yml`) with the precondition each waits on.
 
 ### Fixed
+- **A fresh database could not be migrated at all.** `003` is the root revision
+  and added columns to `data_sources`, which `baseline_core_001` creates five
+  revisions later, so `alembic upgrade head` on an empty database failed with
+  `UndefinedTable: relation "data_sources" does not exist`. backend and
+  celery-worker each ran it from their entrypoints, so both restart-looped -- 64
+  restarts observed on a real deployment -- while `docker compose ps` reported
+  `Up`, because both containers were up and neither had ever served a request.
+  The released image was not installable on a clean volume.
+- **A legacy database could not be migrated either.** `init_db()` called
+  `Base.metadata.create_all()` on every API boot, PostgreSQL included, so an
+  app-built database had every table and no `alembic_version`; the next
+  `upgrade head` replayed the chain over an existing schema and failed with
+  `DuplicateColumn` / `DuplicateTable`. `init_db()` is now called only for
+  SQLite, and on PostgreSQL the schema has exactly one owner: the compose
+  `migrate` service.
+- **`notifications` had two different columns depending on its history.**
+  `20251107_152125` created `metadata`; `backend/models/notification.py:46` and
+  `backend/schemas/notification.py:20` have always declared `extra_data`. A
+  `create_all` database got the model's column and a migrated database got one no
+  ORM query references, so any notification write touching `extra_data` failed
+  with `UndefinedColumn` on a migrated-from-empty database. Found by comparing
+  the two histories rather than reading either; the notification route tests run
+  on SQLite built by `create_all`, which was the path that happened to be
+  correct. `notifications_extra_data_001` renames it where the wrong name landed.
+- **The backend image could not be built.** Both Dockerfiles ended with
+  `COPY backend/entrypoint.sh` while compose built them with `context: ./backend`,
+  so the source resolved to `backend/backend/entrypoint.sh`. Added by `c03f4af`;
+  nothing caught it because the image-building workflow is manual-only and states
+  that consequence in its own header. `alembic.ini` was never in the image either
+  -- it lives at the repository root, and alembic resolves both it and
+  `script_location` against the working directory. The context is now the
+  repository root and `alembic.ini` is copied explicitly.
+- **Two containers raced to migrate.** `migrate` is now a one-shot service
+  (`restart: "no"`) that must exit 0; backend and celery-worker set
+  `BEACON_RUN_MIGRATIONS=0` and depend on it with
+  `service_completed_successfully`. A migration failure stops the stack with a
+  readable error instead of presenting as a backend that will not answer.
+- **`frontend` waited on a *started* backend, not a working one**
+  (`depends_on: [backend]`), which is what produced a healthy nginx serving the
+  SPA in front of an API that reset every connection. It now waits on
+  `service_healthy`, against a healthcheck the backend did not previously
+  declare.
+- **celery-worker was a second image**, so a GPU build downloaded the multi-GB
+  CUDA torch wheel twice into two layer sets -- 17.5 GB of BuildKit cache on a
+  single host -- and the two could drift, leaving the worker running different
+  code from the API it takes jobs from. All three services share
+  `${BEACON_BACKEND_IMAGE:-beacon-backend:latest}` and only `backend` builds.
+- **`CUDA_VISIBLE_DEVICES=all` hid the GPU from PyTorch.** `all` is valid for
+  `NVIDIA_VISIBLE_DEVICES`, which the container runtime reads; torch parses
+  `CUDA_VISIBLE_DEVICES` as a device list, matches nothing, and reports
+  `torch.cuda.is_available() == False` in a container that can see the GPU. The
+  image baked `all` in and the gpu overlay passed it through. The two are now set
+  separately and documented as not interchangeable.
+- **The postgres healthcheck hardcoded `beacon_user` / `beacon_db`**, so setting
+  `POSTGRES_USER` or `POSTGRES_DB` in `.env` made postgres permanently unhealthy
+  and hung the whole stack on a database that was fine. It now interpolates both.
+- `container_name` removed from all five services: a fixed name collides with a
+  second checkout, release or compose project on the same host, and service DNS
+  never needed them.
+- `.dockerignore` was listed in `.gitignore` under "# Docker" since the original
+  restructure, which is why the repository never had one. It is build
+  configuration, not an artefact, and an untracked one makes a build reproducible
+  only on the machine that wrote it.
+
 - `README.md` advertised two things the tree does not contain. "Gaussian and Student-t HMM regime detection *(not wired)*" -- it is wired: `_regime_label` fits a two-state Student-t HMM per source at `prediction_engine.py:1005`, which is what the mixture-of-experts census disposition means by "the live regime label now exists". And "Toto 2.0 foundation-model node encoder: loadable from a local model folder, and constructed only by `backend/scripts/compare_encoder_sizes.py`" -- that script and the whole encoder dependency train were deleted in the 2026-09 hygiene round and are recorded in the census `REMOVED` register. `hidden_markov` was also in *neither* census registry despite being reachable, so nothing would have failed had it been unwired.
 - `scripts/release.py` annotated `fail()` as `"NoReturn"` with a `# type: ignore[name-defined]` instead of importing it, so the advisory ruff step in Backend CI reported F821 on every run -- one of the two errors that step was reporting on main. `NoReturn` is now imported and the suppression is gone; `ruff check backend scripts --select E9,F63,F7,F82` is clean.
 

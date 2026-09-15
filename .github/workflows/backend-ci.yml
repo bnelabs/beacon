@@ -30,8 +30,15 @@ jobs:
   #     tmp_path and drives the pipeline from a locally generated CSV.
   #   * test_country_scope.py is the only docker/Postgres/Redis-dependent test; it is
   #     skipped unless RUN_DOCKER_SCOPE_TESTS=1, which this workflow never sets.
-  # A postgres:15 service would therefore add container startup time without exercising
-  # a single additional test.
+  #
+  # A postgres service IS declared below, and the reason is
+  # test_migrations_live.py. This job used to conclude that no service was needed
+  # because nothing exercised a real database, and the migration "test" was
+  # `alembic upgrade head --sql` -- which cannot fail on a migration-ordering
+  # defect, because baseline_core_001 renders as a deliberate no-op offline. That
+  # is how a release shipped whose root migration added columns to a table created
+  # five revisions later, so no fresh install could start. The step below is kept
+  # as a cheap import/render check; the service is what makes the ordering real.
   test:
     name: Compile and test (Python 3.12)
     runs-on: ubuntu-latest
@@ -42,6 +49,26 @@ jobs:
       # Install into the setup-python interpreter without a venv to keep the
       # commands below free of repeated --system flags.
       UV_SYSTEM_PYTHON: "1"
+      # test_migrations_live.py creates and drops throwaway databases on this
+      # server. Without it the live migration tests skip, and a skip is not a
+      # pass -- which is the whole point of naming the variable here.
+      MIGRATION_TEST_DATABASE_URL: postgresql://beacon_user:beacon_password@127.0.0.1:5432/postgres
+    services:
+      # Same image and major version as docker-compose.yml, so the migrations are
+      # validated against what deployments actually run.
+      postgres:
+        image: timescale/timescaledb:2.15.2-pg15
+        env:
+          POSTGRES_USER: beacon_user
+          POSTGRES_PASSWORD: beacon_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U beacon_user -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Check out repository
@@ -105,11 +132,26 @@ jobs:
           PYTHONPATH=. python scripts/generate_api_docs.py --check
 
       - name: Render migrations offline
-        # Catches unrenderable migration chains (import errors, bad op calls)
-        # without a database; the baseline migration reconciles model metadata.
+        # Catches unrenderable migration chains (import errors, bad op calls).
+        # This is NOT a migration test and is not offered as one:
+        # baseline_core_001 returns early when `op.get_context().as_sql`, so the
+        # revision that creates data_sources renders nothing and an ordering
+        # defect between it and the root revision is invisible here. Applying the
+        # chain to a real database is test_migrations_live.py, which the postgres
+        # service above exists for.
         run: |
           export DATABASE_URL=postgresql://user:pass@localhost:5432/db
           alembic upgrade head --sql > /dev/null
+
+      - name: Validate the compose stack and Dockerfile COPY sources
+        # No daemon needed: this parses the merged YAML for the base file and both
+        # overlays, and checks every Dockerfile COPY source against the build
+        # context. It is what catches `COPY backend/entrypoint.sh` under
+        # `context: ./backend`, which cannot be built and was released anyway.
+        # `docker compose config` in the manual docker-backend.yml workflow still
+        # covers what only the real binary can.
+        run: |
+          python scripts/validate_compose.py
 
       - name: Run tests
         env:

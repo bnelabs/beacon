@@ -35,16 +35,27 @@ Every workflow uses a per-ref `concurrency` group, but cancellation is
   at run time and installed from `https://download.pytorch.org/whl/cpu` *before*
   the requirements files, so the runner does not download the multi-GB CUDA
   bundles and the two can never drift apart.
-- **No database service.** The suite does not need a live PostgreSQL. The tests force
-  SQLite through `USE_SQLITE=true` (`test_api_smoke.py`, `test_pipeline_integration.py`)
-  and drive the app with FastAPI's in-process `TestClient`. The only Docker/Postgres test,
-  `test_country_scope.py`, is skipped unless `RUN_DOCKER_SCOPE_TESTS=1`, which CI never
-  sets. See the `# why:` comment at the top of the job for details.
+- **A PostgreSQL service, for the migrations only.** The application tests do not
+  need one: they force SQLite through `USE_SQLITE=true` (`test_api_smoke.py`,
+  `test_pipeline_integration.py`) and drive the app with FastAPI's in-process
+  `TestClient`, and `test_country_scope.py` is still skipped unless
+  `RUN_DOCKER_SCOPE_TESTS=1`. What needs a real server is
+  `test_migrations_live.py`, which applies the chain to an actual PostgreSQL —
+  the same `timescale/timescaledb:2.15.2-pg15` image compose runs — from each of
+  the three histories a deployed database can have (empty, `create_all`, partial)
+  and asserts they converge on one schema. `MIGRATION_TEST_DATABASE_URL` points it
+  at the service; without that variable the tests skip, and a skip is not a pass.
+  This job previously declared that no service was needed because the migration
+  "test" was `alembic upgrade head --sql`, which cannot detect an ordering defect:
+  `baseline_core_001` renders as a deliberate no-op offline. That is how a release
+  shipped whose root migration altered a table created five revisions later.
 - **Steps:** `python -m compileall -q backend` (fast syntax gate) →
   `python scripts/generate_api_docs.py --check` (the generated endpoint inventory
-  matches the app) → `python -m pytest` with coverage → upload the
-  `backend-coverage` artifact (`coverage.xml`, `htmlcov/`) → an advisory `ruff`
-  check that reports real defects without blocking.
+  matches the app) → `alembic upgrade head --sql` (render check only) →
+  `python scripts/validate_compose.py` (the merged compose stack and every
+  Dockerfile COPY source, no daemon required) → `python -m pytest` with coverage →
+  upload the `backend-coverage` artifact (`coverage.xml`, `htmlcov/`) → an advisory
+  `ruff` check that reports real defects without blocking.
 - The target and coverage flags are passed explicitly as well as living in
   `pytest.ini` (which uses the correct `[pytest]` header and sets
   `testpaths = backend/tests`). Keeping them in the workflow makes the invocation
