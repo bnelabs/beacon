@@ -88,6 +88,7 @@ REQUIRED_REACHABLE: Dict[str, str] = {
     "backend.modules.engine.neural_sde": "latent stress puts the SDE on the engine path",
     "backend.modules.engine.latent_dynamics": "the SDE scenario the engine accepts",
     "backend.modules.data.fractional": "ADF/KPSS and fractional differencing",
+    "backend.modules.engine.hidden_markov": "the Student-t regime nowcast in prediction_engine._regime_label, which is the live regime label the mixture-of-experts disposition was waiting on",
     "backend.modules.data.quality_gate": "the data certification gate",
     "backend.modules.data.pit": "point-in-time exposure vintages behind the network graph (load_as_of)",
     "backend.modules.data.event_labeller": "declared stress-event labels feeding event_metrics in run_backtest",
