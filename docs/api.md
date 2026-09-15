@@ -131,6 +131,7 @@ Three endpoints turn "configured" into "connected":
 | `GET /api/v1/data-sources/health` | Per feed: cadence (`sync_interval_minutes`, null means manual-only), backoff factor, consecutive failures with the last reason, last start/duration/rows, next due date, `overdue`, `collection_running`. |
 | `POST /api/v1/data-sources/{id}/sync` | **202** and a queued `data_collection` job scoped to the source's enabled catalogue items -- the same job the scheduler queues. **409** while a collection for that source is open or the source is disabled. |
 | `POST /api/v1/data-sources/{id}/probe` | Runs the plugin's own `test_connection` against the live provider with the saved config; environment-held API keys are injected exactly as the collector injects them. Answers `{success, message, details}`. |
+| `POST /api/v1/jobs/{id}/retry` | **201** and a new job carrying the failed job's type and parameters plus `retry_of`; **409** unless the job's status is `failed` -- a running job is not a draft. |
 
 Celery beat ticks every five minutes and enqueues whichever scheduled sources
 are due (interval, doubled per consecutive failure up to eight intervals, plus

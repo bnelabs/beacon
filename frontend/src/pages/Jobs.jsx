@@ -5,7 +5,7 @@ import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
-import { useJobs, useJob, useCancelJob, useBatchCancelJobs, useJobDataQuality } from '../hooks/useApi'
+import { useJobs, useJob, useCancelJob, useBatchCancelJobs, useJobDataQuality, useRetryJob } from '../hooks/useApi'
 import { useJobsWebSocket } from '../hooks/useJobsWebSocket'
 import JobCreationModal from '../components/jobs/JobCreationModal'
 import { useRouter } from '../store/useRouter'
@@ -202,7 +202,7 @@ function LossChart({ train = [], val = [] }) {
   )
 }
 
-function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining }) {
+function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRetry, retryPending = false }) {
   const { data: job, isLoading, error } = useJob(jobId)
   const qualityQuery = useJobDataQuality(jobId, {
     enabled: !!jobId && (job?.job_type === 'data_collection')
@@ -439,15 +439,34 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining }) {
         </Card>
       )}
 
-      {job.error && (
+      {(job.error || job.user_friendly_error) && (
         <Card>
           <CardHeader>
-            <CardTitle>Error Details</CardTitle>
+            <div className="flex items-center justify-between w-full">
+              <CardTitle>Error Details</CardTitle>
+              {job.status === 'failed' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onRetry?.(job)}
+                  loading={retryPending}
+                >
+                  Retry job
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="bg-bne-clay/5 border border-bne-clay/20 rounded-lg p-4">
-              <p className="text-sm text-bne-clay font-mono">{job.error}</p>
-            </div>
+            {/* The translated reason first: it is the one a human can act on.
+                The technical string stays, in mono, for the log-driven. */}
+            {job.user_friendly_error && (
+              <p className="text-sm text-bne-clay mb-3">{job.user_friendly_error}</p>
+            )}
+            {job.error && (
+              <div className="bg-bne-clay/5 border border-bne-clay/20 rounded-lg p-4">
+                <p className="text-sm text-bne-clay font-mono">{job.error}</p>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -482,6 +501,7 @@ export default function Jobs() {
   const [batchMode, setBatchMode] = useState(false)
   const { data: jobs, isLoading, error, refetch } = useJobs()
   const batchCancelMutation = useBatchCancelJobs()
+  const retryMutation = useRetryJob()
   const navigate = useRouter((state) => state.navigate)
 
   // Enable real-time WebSocket updates
@@ -760,6 +780,8 @@ export default function Jobs() {
             {selectedJobId ? (
               <JobDetails
                 jobId={selectedJobId}
+                onRetry={(failedJob) => retryMutation.mutate(failedJob.id ?? failedJob.job_id)}
+                retryPending={retryMutation.isPending}
                 onOpenModel={(modelId) => navigate('results', { modelId })}
                 onOpenResults={(modelId) => navigate('results', { modelId })}
                 onCreateTraining={(dataJob) => {

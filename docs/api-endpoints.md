@@ -12,7 +12,7 @@ schema at `/openapi.json` or the Swagger UI at `/docs`.
 
 Application: **BEACON API - Banking Network Engine** v3.2.0
 
-**123 operations across 22 tags.**
+**124 operations across 22 tags.**
 
 
 ## Pipeline (DATA-ENGINE-RESULTS)
@@ -39,6 +39,7 @@ Application: **BEACON API - Banking Network Engine** v3.2.0
 | `POST` | `/api/v1/jobs/batch/cancel` | `BatchCancelResponse` | Cancel multiple jobs at once. |
 | `GET` | `/api/v1/jobs/{job_id}` | `JobResponse` | Get details of a specific job. |
 | `DELETE` | `/api/v1/jobs/{job_id}` | — | Cancel a running job. |
+| `POST` | `/api/v1/jobs/{job_id}/retry` | `JobResponse` | Re-queue a failed job with the same type and parameters. |
 
 
 ## Data Sources

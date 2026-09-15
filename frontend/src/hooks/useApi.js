@@ -117,6 +117,17 @@ export function useCreateJob() {
   })
 }
 
+export function useRetryJob() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (jobId) => fetchApi(`/v1/jobs/${jobId}/retry`, { method: 'POST' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+    }
+  })
+}
+
 export function useCancelJob() {
   const queryClient = useQueryClient()
 

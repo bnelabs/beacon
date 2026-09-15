@@ -220,7 +220,14 @@ suite -- the tour button, the Help navigation entries and the old Help copy
 must stay absent -- in the same style as the reachability census: a removal is
 a decision, and decisions get tests. When the platform matures, guided help
 returns; it should be written from this document, not from memory of the old
-pages.
+pages. Until then the dashboard carries a **first-run checklist derived from
+live state** (no sources, nothing fetched, nothing scheduled, no exposure
+matrix): each step is true when it appears, clears when the state clears, and
+can be dismissed by hand. It is not a tour -- it describes the deployment the
+user has, not the product an author had.
+
+Overlays (Modal, the model details drawer) trap Tab and own Escape through
+`hooks/useFocusTrap`, returning focus to the invoking control on close.
 
 ## Risk map
 

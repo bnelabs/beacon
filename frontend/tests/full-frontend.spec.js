@@ -33,6 +33,13 @@ test('navigates the application and exercises primary interactions', async ({ pa
   // Dashboard interactions
   await page.getByRole('button', { name: 'Dashboard' }).click()
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+  // The state-driven checklist replaced the guided tour: in this mocked
+  // deployment sources exist, have fetched and are scheduled, so the only
+  // step left is the missing exposure matrix -- and dismissing it sticks.
+  const checklistStep = page.getByText('Upload or estimate interbank exposures')
+  await expect(checklistStep).toBeVisible()
+  await page.getByRole('button', { name: 'dismiss' }).first().click()
+  await expect(checklistStep).not.toBeVisible()
   const dashboardNewJobButton = page.getByRole('main').getByRole('button', { name: 'New Job', exact: true })
   await expect(dashboardNewJobButton).toBeVisible()
   await dashboardNewJobButton.click()
@@ -79,6 +86,14 @@ test('navigates the application and exercises primary interactions', async ({ pa
     await networkToggle.click()
     await expect(page.getByRole('button', { name: 'Hide Network' })).toBeVisible()
   }
+  // The network layer's intake path: with no exposure matrix in this mocked
+  // deployment the strip offers the two ways to get one, and the estimate
+  // modal carries its caveat verbatim from the API response.
+  await page.getByRole('button', { name: 'Estimate from marginals' }).click()
+  await page.getByRole('button', { name: 'Estimate', exact: true }).click()
+  await expect(page.getByText('a prior over bilateral structure')).toBeVisible()
+  await page.getByRole('button', { name: 'Close', exact: true }).click()
+
   const heatmapToggle = page.getByRole('button', { name: /Show Heatmap|Hide Heatmap/ })
   if (await heatmapToggle.isVisible()) {
     await heatmapToggle.click()
@@ -166,6 +181,15 @@ test('navigates the application and exercises primary interactions', async ({ pa
     // We simply assert that the control is interactable so the remainder of
     // the navigation path remains stable.
   }
+
+  // A failed job shows the reason a human can act on, and retries as a new
+  // job with the same parameters instead of asking for the form again.
+  await page.getByText('ID: 103').first().click()
+  await expect(
+    page.getByText('The provider stopped answering mid-download. Nothing was written; retrying is safe.')
+  ).toBeVisible()
+  await page.getByRole('button', { name: 'Retry job' }).click()
+  await expect(page.getByRole('button', { name: 'Retry job' })).toBeVisible()
 
   // Data Sources interactions
   await page.getByRole('button', { name: 'Data Sources' }).click()

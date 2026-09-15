@@ -124,6 +124,44 @@ async def create_job(
         )
 
 
+@router.post("/{job_id}/retry", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
+async def retry_job(
+    job_id: int,
+    db: Session = Depends(get_db)
+):
+    """Re-queue a failed job with the same type and parameters.
+
+    **For non-technical users:** A job that failed can be tried again without
+    rebuilding its form: this copies exactly what it ran with into a new job.
+    The old job stays as it is -- a failure is a record, not a draft -- and
+    the new job carries `retry_of` in its parameters so the lineage is
+    readable in the jobs list.
+    """
+    service = JobService(db)
+    original = service.get_job(job_id)
+    if original is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "technical": f"Job {job_id} not found",
+                "user_friendly": "We couldn't locate that job. It may have been removed."
+            }
+        )
+    if original.status != "failed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "technical": f"Job {job_id} is {original.status}, not failed",
+                "user_friendly": "Only failed jobs can be retried. This one is still running or already finished."
+            }
+        )
+    parameters = dict(original.parameters or {})
+    parameters["retry_of"] = original.id
+    return service.create_job(
+        JobCreate(job_type=original.job_type, parameters=parameters)
+    )
+
+
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def cancel_job(
     job_id: int,

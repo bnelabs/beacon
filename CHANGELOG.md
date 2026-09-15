@@ -10,6 +10,30 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **Failed jobs retry as new jobs.** `POST /api/v1/jobs/{id}/retry` re-queues a
+  failed job with exactly its own type and parameters plus `retry_of`
+  lineage; 409 unless the job actually failed, because a running job is not a
+  draft. The job details card now leads with `user_friendly_error` -- the
+  sentence a human can act on -- and keeps the technical string below it in
+  mono for the log-driven.
+- **A first-run checklist derived from live state**, the successor to the
+  guided tour: no sources configured, nothing fetched, nothing scheduled, no
+  exposure matrix -- each step appears only while its condition is true and
+  clears the moment it is not, and hand-dismissals persist in localStorage.
+  A scripted tour describes the product its author had; these steps describe
+  the deployment the user has.
+- **The network layer's missing half, in the UI.** The Risk Map strip now
+  offers "Upload matrix" (`POST /network/exposures`, CSV or parquet with an
+  attributing institution and a stored vintage) and "Estimate from marginals"
+  (`POST /network/estimate`, declared aggregate claims and obligations
+  completed by maximum entropy). The estimate modal renders the response's
+  `uncertainty` string verbatim: an estimated network presented without its
+  prior-status is the quiet invention this platform refuses everywhere else.
+- **Focus traps for overlays.** Modals and the model details drawer trap Tab
+  and own Escape through `hooks/useFocusTrap`, and return focus on close.
+  They closed on Escape before but never trapped: a keyboard user tabbing
+  forward left the dialog and wandered the page behind it, which is the
+  difference between an overlay and a suggestion.
 - **Alert rules now evaluate.** The beat tick runs `evaluate_alert_rules`:
   each enabled rule is measured on its own frequency over its own window
   (success_rate, execution_time, quality_score, rmse), compared with its
