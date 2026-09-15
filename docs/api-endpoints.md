@@ -12,7 +12,7 @@ schema at `/openapi.json` or the Swagger UI at `/docs`.
 
 Application: **BEACON API - Banking Network Engine** v3.1.1
 
-**119 operations across 22 tags.**
+**120 operations across 22 tags.**
 
 
 ## Pipeline (DATA-ENGINE-RESULTS)
@@ -246,6 +246,7 @@ Application: **BEACON API - Banking Network Engine** v3.1.1
 
 | Method | Path | Success model | Purpose |
 |---|---|---|---|
+| `POST` | `/api/v1/network/estimate` | untyped | Estimate a bilateral network from declared aggregates and clear it. |
 | `POST` | `/api/v1/network/exposures` | untyped | Accept and persist a bilateral exposure matrix. |
 | `GET` | `/api/v1/network/graph` | untyped | Return the current multiplex network graph, or an explicit unavailable state. |
 

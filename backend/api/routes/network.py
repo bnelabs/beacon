@@ -16,6 +16,15 @@ matrix (CSV or Parquet) and persists it through that store. Validation and the
 security posture are documented on the store module; this module is the
 transport.
 
+``POST /api/v1/network/estimate`` is the third surface: when no bilateral
+matrix exists but *aggregate* interbank totals do (the common case -- call
+reports publish totals, not counterparties), it estimates the bilateral
+network from the declared marginals, brackets it with the minimum-support
+completion, and propagates Eisenberg-Noe clearing over marginal-preserving
+structural draws. The response carries the estimator's uncertainty caveat and
+is **never persisted**: an estimated matrix must not silently become an
+"uploaded observation" in the exposure store.
+
 Why REST and not WebSocket
 --------------------------
 
@@ -82,6 +91,13 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from backend.modules.engine.multiplex import build_interbank_exposure_layer
+from backend.modules.risk.network_estimation import (
+    EstimatedNetwork,
+    estimate_bilateral_matrix,
+    estimate_minimum_density,
+    propagate_estimation_uncertainty,
+)
+from backend.schemas.network import NetworkEstimateRequest
 from backend.services.bilateral_exposure_store import (
     ExposureEmptyError,
     ExposureUploadTooLargeError,
@@ -449,3 +465,151 @@ async def upload_bilateral_exposures(
         as_of=as_of,
     )
     return {"status": "stored", **manifest}
+
+
+_ESTIMATE_EDGE_CAP = 1000
+
+
+def _estimated_graph(network: EstimatedNetwork, *, edge_cap: int = _ESTIMATE_EDGE_CAP) -> Dict[str, Any]:
+    """Compact node/edge view of an estimated matrix.
+
+    The maximum-entropy completion is dense by construction, so the edge
+    list is capped at the ``edge_cap`` largest exposures and the truncation
+    is stated rather than hidden. The clearing computation inside the
+    endpoint uses the full matrix; the cap applies to the response payload
+    only.
+    """
+    matrix = network.liabilities
+    gross_liabilities = matrix.sum(axis=1)
+    gross_claims = matrix.sum(axis=0)
+    nodes = [
+        {
+            "id": node_id,
+            "name": node_id,
+            "gross_liabilities": float(gross_liabilities[position]),
+            "gross_claims": float(gross_claims[position]),
+            "out_degree": int((matrix[position] > 0).sum()),
+            "in_degree": int((matrix[:, position] > 0).sum()),
+            "risk_score": None,
+        }
+        for position, node_id in enumerate(network.node_ids)
+    ]
+    rows, cols = np.nonzero(matrix)
+    amounts = matrix[rows, cols]
+    order = np.argsort(-amounts)
+    total_links = int(order.size)
+    kept = order[:edge_cap]
+    edges = [
+        {
+            "source": network.node_ids[int(rows[idx])],
+            "target": network.node_ids[int(cols[idx])],
+            "exposure": float(amounts[idx]),
+            "kind": "estimated",
+            "is_clearing_eligible": True,
+        }
+        for idx in kept
+    ]
+    return {
+        "method": network.method,
+        "nodes": nodes,
+        "edges": edges,
+        "n_links": total_links,
+        "edges_truncated": total_links > len(edges),
+        "marginal_residual": network.marginal_residual,
+        "uncertainty": network.uncertainty,
+    }
+
+
+@router.post("/estimate", response_model=Dict[str, Any])
+async def estimate_network_from_marginals(
+    payload: NetworkEstimateRequest,
+) -> Dict[str, Any]:
+    """Estimate a bilateral network from declared aggregates and clear it.
+
+    For when the exposure matrix does not exist but the marginals do: the
+    operator declares each institution's total interbank claims and
+    obligations (e.g. from published call reports), and this endpoint
+
+    1. completes them to a bilateral matrix with the **maximum-entropy**
+       estimator (least-informative given the totals);
+    2. optionally also computes the **minimum-support** completion, the
+       concentrated corner that brackets it;
+    3. applies the declared endowment ratio and shock, and runs
+       Eisenberg-Noe clearing on the point estimate **and** on
+       ``n_draws`` marginal-preserving structural draws, returning
+       percentile bands of total shortfall and default count.
+
+    The bands measure sensitivity to the unknown bilateral structure given
+    the declared aggregates. They are not confidence intervals for a
+    measured network, and the response says so in ``uncertainty``.
+
+    The estimate is **not persisted** to the exposure store: estimated
+    exposures must never become indistinguishable from uploaded
+    observations. ``GET /api/v1/network/graph`` keeps reporting the stored
+    (or unavailable) state exactly as before.
+    """
+    rng = np.random.default_rng(payload.seed)
+    try:
+        maximum_entropy = estimate_bilateral_matrix(
+            payload.interbank_assets, payload.interbank_liabilities
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"technical": str(error), "user_friendly": str(error)},
+        )
+
+    try:
+        uncertainty = propagate_estimation_uncertainty(
+            maximum_entropy,
+            endowment_ratio=payload.endowment_ratio,
+            shocks=payload.shocks,
+            n_draws=payload.n_draws,
+            concentration=payload.concentration,
+            rng=rng,
+            percentiles=tuple(payload.percentiles),
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"technical": str(error), "user_friendly": str(error)},
+        )
+
+    bounds: Dict[str, Any] = {"maximum_entropy": _estimated_graph(maximum_entropy)}
+    if payload.include_min_density:
+        minimum_density = estimate_minimum_density(
+            payload.interbank_assets, payload.interbank_liabilities
+        )
+        bounds["minimum_density"] = _estimated_graph(minimum_density)
+
+    declared_assets_total = float(sum(payload.interbank_assets.values()))
+    declared_liabilities_total = float(sum(payload.interbank_liabilities.values()))
+    return {
+        "status": "estimated",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "source": "estimated_from_declared_marginals",
+        "persistence": "not_stored",
+        "persistence_note": (
+            "estimated matrices are never written to the bilateral exposure "
+            "store; the graph endpoint keeps reporting only uploaded "
+            "observations or an explicit unavailable state"
+        ),
+        "marginals": {
+            "declared_assets_total": declared_assets_total,
+            "declared_liabilities_total": declared_liabilities_total,
+            "marginal_mismatch": maximum_entropy.marginal_mismatch,
+            "marginal_residual": maximum_entropy.marginal_residual,
+            "n_institutions": len(maximum_entropy.node_ids),
+        },
+        "bounds": bounds,
+        "clearing": {
+            "endowment_ratio": uncertainty.endowment_ratio,
+            "shocks": uncertainty.shocks,
+            "n_draws": uncertainty.n_draws,
+            "percentiles": list(uncertainty.percentiles),
+            "point": uncertainty.point,
+            "bands": uncertainty.bands,
+        },
+        "uncertainty": uncertainty.uncertainty,
+        "notes": list(maximum_entropy.notes) + list(uncertainty.notes),
+    }

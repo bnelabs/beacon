@@ -97,6 +97,7 @@ REQUIRED_REACHABLE: Dict[str, str] = {
     "backend.modules.risk.bank_analyzer": "per-institution systemic analysis",
     "backend.modules.risk.fire_sale": "coupled fire-sale equilibrium",
     "backend.modules.risk.regulatory": "Basel III stress translation",
+    "backend.modules.risk.network_estimation": "POST /api/v1/network/estimate serves marginal-consistent estimated networks with posterior-propagated clearing bands",
     "backend.modules.engine.persistence_vectors": "topological signature vectors",
     "backend.modules.engine.portfolio_overlap": "crowded-trade overlap",
     "backend.modules.engine.causal_discovery": "NOTEARS, linear and non-linear basis",
@@ -143,11 +144,6 @@ KNOWN_UNREACHABLE: Dict[str, Disposition] = {
         blocker="the GARCH(1,1) volatility baseline has no consumer yet: level baselines price levels, not variance",
         plan="wire",
         next_step="price it as a volatility baseline in the backtest harness and feed conditional vol as a feature once the event-labelled validation exists",
-    ),
-    "backend.modules.risk.network_estimation": Disposition(
-        blocker="no production surface offers an estimated network as a scenario input yet",
-        plan="wire",
-        next_step="accept estimate-from-marginals in the scenario/prediction endpoints, with the estimator's uncertainty caveat carried into every clearing result",
     ),
     # -- decide: blocked on a call, not on effort ----------------------------
     "backend.modules.engine.foundation_encoders": Disposition(
