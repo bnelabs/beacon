@@ -133,6 +133,11 @@ KNOWN_UNREACHABLE: Dict[str, Disposition] = {
         plan="wire",
         next_step="consume it after conformal: it answers the question conformal does not (is the interval wide because the world is noisy, or because the model is lost), and its docstring says an epistemic spike should refuse the prediction",
     ),
+    "backend.modules.risk.network_estimation": Disposition(
+        blocker="no production surface offers an estimated network as a scenario input yet",
+        plan="wire",
+        next_step="accept estimate-from-marginals in the scenario/prediction endpoints, with the estimator's uncertainty caveat carried into every clearing result",
+    ),
     # -- decide: blocked on a call, not on effort ----------------------------
     "backend.modules.engine.foundation_encoders": Disposition(
         blocker="the encoder contract, compose_input and the deterministic stand-in survive; the Toto wrapper and its dependency train were deleted in the 2026-09 hygiene round because no production path ever embedded a node with them",
