@@ -71,6 +71,12 @@ jobs:
         # /api/v1/data-sources/disclosure presented as a create-source form that
         # would not close, with the button still disabled after a 201.
         # This names the endpoint instead. No browser, no daemon, ~0.2s.
+        # why: the job defaults to working-directory frontend, but the check
+        # lives at the repository root (backend/tests/test_e2e_api_coverage.py
+        # and the workflows README reference that path), so this one step runs
+        # from the checkout root. The script resolves every path from its own
+        # location, not the cwd.
+        working-directory: .
         run: node scripts/check_e2e_api_coverage.mjs
 
       - name: Build production bundle
