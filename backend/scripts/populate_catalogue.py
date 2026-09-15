@@ -1397,6 +1397,125 @@ def populate_catalogue():
                 "priority": 98,
                 "tags": ["systemic_risk", "network_metrics", "contagion", "early_warning"]
             },
+
+            # ============================================
+            # OBSERVABLE SYSTEMIC-STRESS TARGETS (round-eight curation)
+            # Free, keyless series that make "stress" measurable: validation
+            # targets for the event labeller and calibration, not features to
+            # be mined. Sign conventions live in modules/data/semantics.py.
+            # ============================================
+            {
+                "code": "FRED_STLFSI4",
+                "name": "St. Louis Fed Financial Stress Index",
+                "description": "Weekly composite of 18 weekly/daily/monthly indicators of system-wide financial stress; zero is normal, positive is stressed.",
+                "category": DataCategory.ECONOMIC_INDICATORS,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.MARKET_LIQUIDITY.value],
+                "data_source_id": sources["FRED"].id,
+                "endpoint": "STLFSI4",
+                "frequency": "weekly",
+                "granularity": "macro",
+                "unit": "index",
+                "default_selected": True,
+                "priority": 99,
+                "tags": ["stress_index", "validation_target", "us", "weekly"]
+            },
+            {
+                "code": "FRED_KCFSI",
+                "name": "Kansas City Fed Financial Stress Index",
+                "description": "Monthly financial stress index with credit, equity and funding components; depth back to 1990 for regime and lead-time studies.",
+                "category": DataCategory.ECONOMIC_INDICATORS,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["FRED"].id,
+                "endpoint": "KCFSI",
+                "frequency": "monthly",
+                "granularity": "macro",
+                "unit": "index",
+                "default_selected": True,
+                "priority": 97,
+                "tags": ["stress_index", "validation_target", "us", "long_history"]
+            },
+            {
+                "code": "ECB_CISS",
+                "name": "ECB Composite Indicator of Systemic Stress",
+                "description": "Euro-area composite of money, bond, equity, FX and banking-sector stress; the euro-area counterpart of STLFSI4.",
+                "category": DataCategory.ECONOMIC_INDICATORS,
+                "region": DataRegion.EUROPE,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["ECB"].id,
+                "endpoint": "CISS/D.U2.Z0Z.4F.EC.SS_CI.IDX",
+                "frequency": "weekly",
+                "granularity": "macro",
+                "unit": "index",
+                "default_selected": True,
+                "priority": 99,
+                "tags": ["stress_index", "validation_target", "euro_area"]
+            },
+            {
+                "code": "FRED_SOFR",
+                "name": "SOFR (Secured Overnight Financing Rate)",
+                "description": "Benchmark cost of overnight secured funding; spikes mark repo-market funding stress.",
+                "category": DataCategory.INTEREST_RATES,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.FUNDING_LIQUIDITY.value],
+                "data_source_id": sources["FRED"].id,
+                "endpoint": "SOFR",
+                "frequency": "daily",
+                "granularity": "macro",
+                "unit": "percent",
+                "default_selected": True,
+                "priority": 96,
+                "tags": ["funding", "repo", "benchmark"]
+            },
+            {
+                "code": "FRED_RRPONTSYD",
+                "name": "ON RRP Facility Usage (Total)",
+                "description": "Daily balances in the NY Fed overnight reverse-repo facility; a gauge of system-wide safe-asset demand and cash abundance.",
+                "category": DataCategory.MONEY_MARKET,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.FUNDING_LIQUIDITY.value],
+                "data_source_id": sources["FRED"].id,
+                "endpoint": "RRPONTSYD",
+                "frequency": "daily",
+                "granularity": "macro",
+                "unit": "billions_usd",
+                "default_selected": False,
+                "priority": 90,
+                "tags": ["funding", "repo", "fed_facility"]
+            },
+            {
+                "code": "FRED_BAMLH0A0HYM2",
+                "name": "US High-Yield Option-Adjusted Spread",
+                "description": "Credit-risk compensation in high-yield bonds; a market-priced proxy for funding and liquidity stress.",
+                "category": DataCategory.CREDIT_MARKETS,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.MARKET_LIQUIDITY.value],
+                "data_source_id": sources["FRED"].id,
+                "endpoint": "BAMLH0A0HYM2",
+                "frequency": "daily",
+                "granularity": "macro",
+                "unit": "percent",
+                "default_selected": True,
+                "priority": 94,
+                "tags": ["credit", "spread", "funding_stress"]
+            },
+            {
+                "code": "FRED_T10Y2Y",
+                "name": "10-Year minus 2-Year Treasury Spread",
+                "description": "Term-structure slope; persistent inversion precedes funding-pressure episodes in the historical record.",
+                "category": DataCategory.INTEREST_RATES,
+                "region": DataRegion.NORTH_AMERICA,
+                "risk_types": [RiskType.SYSTEMIC_RISK.value],
+                "data_source_id": sources["FRED"].id,
+                "endpoint": "T10Y2Y",
+                "frequency": "daily",
+                "granularity": "macro",
+                "unit": "percent",
+                "default_selected": False,
+                "priority": 88,
+                "tags": ["term_structure", "leading_indicator"]
+            },
         ]
 
         # Insert all catalogue items
