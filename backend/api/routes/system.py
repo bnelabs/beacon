@@ -1,5 +1,6 @@
 """API routes for system monitoring."""
 
+import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import psutil
@@ -69,6 +70,13 @@ async def get_system_status(db: Session = Depends(get_db)):
             "status": "operational",
             "version": __version__,
             "git_revision": git_sha(),
+            # Auth posture is reported, never inferred by the client: the UI
+            # must not claim "no auth" while a bearer gate is live, and must
+            # not imply accounts where there are none. Mode only — never the
+            # token, its length or a hash of it.
+            "auth": {
+                "mode": "bearer-gate" if os.getenv("BEACON_API_TOKEN", "").strip() else "none",
+            },
             "cpu": {
                 "cores": cpu_count,
                 "usage_percent": round(cpu_percent, 1)

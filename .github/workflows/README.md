@@ -10,6 +10,7 @@ workflows, Dependabot configuration, and a pull-request template.
 | `docker-backend.yml` | Validate every compose file and build the backend CPU image. **Manual only.** | `workflow_dispatch` (*Actions → Docker backend image → Run workflow*). |
 | `docker-frontend.yml` | Build the frontend image. **Manual only.** | `workflow_dispatch` (*Actions → Docker frontend image → Run workflow*). |
 | `security.yml` | Advisory dependency audits: `pip-audit` for `backend/requirements.txt` and `npm audit` for `frontend/`. Never blocks a merge. | `push` to `main`, every `pull_request`, weekly `schedule` (Mondays 06:17 UTC), manual `workflow_dispatch`. |
+| `versioning-ci.yml` | Runs `scripts/check_versioning.py`: VERSION is strict semver, `frontend/package.json` and `backend.__version__` agree with it, and the top changelog block is `[Unreleased]` or the current version. | `push` to `main`, every `pull_request`. |
 | `../dependabot.yml` | Version-update PRs for `github-actions`; security-update PRs for `pip` and `npm`. No `docker` entry. | GitHub's scheduler (see the policy below). |
 
 ## Concurrency
@@ -157,6 +158,16 @@ execution that trains a model, plus FastAPI application start-up.
   hard-coded, so the audit tool cannot drift from the pinned dev dependency set.
 - Every audit step is `continue-on-error: true`: findings show up in the checks UI but do
   not block merges. Fix findings as a dedicated, reviewable dependency bump.
+
+## Versioning guard (`versioning-ci.yml`)
+
+Runs `scripts/check_versioning.py` on every pull request and every push to
+`main`: `VERSION` must be strict semver, `frontend/package.json` and
+`backend.__version__` must agree with it, and the top block of `CHANGELOG.md`
+must be `[Unreleased]` or the current version. This is the mechanism that makes
+the policy in [`../../docs/VERSIONING.md`](../../docs/VERSIONING.md) impossible
+to skip by accident; see that document for what each bump level means and how
+`scripts/release.py` cuts a release.
 
 ## Dependabot (`../dependabot.yml`)
 

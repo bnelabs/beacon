@@ -2,9 +2,10 @@
 
 This repository has now found the *same* defect three times: a module with a
 complete implementation and a thorough test suite that no production code
-imports. It happened to `liquidity_spiral` and `tncm_vae` (fixed, see
-`docs/G_SIB_BUILD.md` §2.10), then again to `cpcv` and `neural_sde` (fixed, see
-`docs/EXECUTIVE_REVIEW_REMEDIATION.md` §5.0), and a scan then found a dozen more.
+imports. It happened to `liquidity_spiral` and `tncm_vae`, then again to `cpcv`
+and `neural_sde`, and a scan then found a dozen more. The fixes for each are
+merged; the registers below (`REQUIRED_REACHABLE`, `KNOWN_UNREACHABLE`,
+`REMOVED`) are the record.
 
 The reason it keeps happening is structural: unit tests pass whether or not
 anything calls the module, so a green suite cannot distinguish "this works" from
@@ -56,8 +57,8 @@ is excluded: plugins are resolved by name through ``get_plugin`` by design. A
 dynamic registry whose entry point has no caller is *not* excluded, which is how
 the connectors package was caught: ``build_connector`` was never called from
 production even though the registry itself was dynamic. That layer has since been
-deleted on the evidence -- see :data:`REMOVED` -- and
-``docs/data_connectors.md`` keeps the findings. Reachability is a necessary
+deleted on the evidence -- see :data:`REMOVED`, which keeps the findings.
+Reachability is a necessary
 condition for a capability, not proof of usefulness.
 """
 
@@ -199,7 +200,7 @@ REMOVED: Dict[str, str] = {
         "granularity the engine needs, and the plugin interface it would have been "
         "bridged into cannot carry its two-clock guarantee -- fetch_indicator_data "
         "returns Date, Value, and observed_at/revision appear nowhere in "
-        "backend/plugins/. docs/data_connectors.md keeps the findings."
+        "backend/plugins/. This register keeps the findings."
     ),
     "backend.modules.data.connectors.bis_credit": "deleted with the connector layer; see connectors.base",
     "backend.modules.data.connectors.ecb_ccp": "deleted with the connector layer; see connectors.base",

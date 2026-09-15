@@ -165,7 +165,7 @@ def _apply_timescale() -> None:
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(
                 f"TimescaleDB is installed but converting '{table}' to a hypertable failed: {exc}. "
-                "Fix the table definition or apply configs/timescaledb/timescale_setup.sql manually."
+                "Fix the table definition, or apply this migration's DDL manually against a TimescaleDB-enabled database."
             ) from exc
 
     for name, create_sql, policy_sql in CONTINUOUS_AGGREGATES:
@@ -178,8 +178,8 @@ def _apply_timescale() -> None:
             # hypertables are already correct, and TimeSeriesStore falls back to
             # plain aggregation, so this is a performance regression only.
             logger.error(
-                "Could not create continuous aggregate '%s'. Apply "
-                "configs/timescaledb/timescale_setup.sql manually to enable "
+                "Could not create continuous aggregate '%s'. Re-run this "
+                "migration against a TimescaleDB-enabled database to enable "
                 "pre-aggregated dashboard queries.",
                 name,
                 exc_info=True,

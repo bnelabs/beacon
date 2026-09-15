@@ -2,9 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from '../../store/useRouter'
 import NotificationBell from '../NotificationBell'
 import { BeaconMark, Wordmark } from '../Brand'
+import { API_TOKEN_KEY } from '../../utils/apiClient'
 
 export default function Header() {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
+  const [hasStoredToken, setHasStoredToken] = useState(
+    () => Boolean(window.localStorage.getItem(API_TOKEN_KEY))
+  )
   const profileRef = useRef(null)
   const { navigate } = useRouter()
 
@@ -103,15 +107,30 @@ export default function Header() {
                   Help Center
                 </button>
                 <div className="border-t border-bne-line my-1" />
-                <button
-                  type="button"
-                  disabled
-                  className="w-full text-left px-4 py-2 text-sm text-bne-faint cursor-not-allowed"
-                  role="menuitem"
-                  aria-disabled="true"
-                >
-                  Sign out — auth not configured
-                </button>
+                {hasStoredToken ? (
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2 text-sm text-bne-ink hover:bg-bne-paper-dim transition-colors"
+                    role="menuitem"
+                    onClick={() => {
+                      window.localStorage.removeItem(API_TOKEN_KEY)
+                      setHasStoredToken(false)
+                      window.location.reload()
+                    }}
+                  >
+                    Sign out — clears this browser's token
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    className="w-full text-left px-4 py-2 text-sm text-bne-faint cursor-not-allowed"
+                    role="menuitem"
+                    aria-disabled="true"
+                  >
+                    Sign out — no token in this browser
+                  </button>
+                )}
               </div>
             )}
           </div>

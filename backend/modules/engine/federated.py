@@ -74,8 +74,7 @@ could in principle reach a module by name do not: ``backend/__init__.py``
 resolves a fixed five-entry table, and ``backend/plugins/__init__.py`` loads
 data-source plugins only. The gap is recorded in
 ``backend/tests/test_reachability.py`` (``KNOWN_UNREACHABLE``), which fails if an
-importer appears without the census being updated, and in
-``docs/EXECUTIVE_REVIEW_REMEDIATION.md``.
+importer appears without the census being updated.
 
 The masking, threshold sharing and dropout recovery below are implemented and
 tested but unreachable, and are labelled as such rather than advertised as a

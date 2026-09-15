@@ -62,7 +62,7 @@ Frontend (React 18 + Vite + Deck.gl + Tailwind)
   └── Error boundary per view: a failing page degrades, the shell never blanks
 
 Backend (FastAPI + Celery + Redis)
-  └── DATA: 15 plugins → validation → cleaning → formatting → quality gate
+  └── DATA: 17 plugins → validation → cleaning → formatting → quality gate
   └── ENGINE: training, inference, backtesting, systemic scenario modules
   └── RESULTS: reports (JSON/Excel/PDF), prediction artefacts
   └── Jobs API (v1) + WebSocket progress relayed over Redis
@@ -262,8 +262,8 @@ alembic upgrade head --sql  # render SQL for review without touching a database
 Time-series tables become TimescaleDB hypertables with continuous aggregates
 via `timescale_001`; without TimescaleDB the migration creates plain tables
 and logs a warning, and `TimeSeriesStore` falls back to base-table
-aggregation. `configs/timescaledb/timescale_setup.sql` applies the same DDL
-manually for DBAs.
+aggregation. The Alembic migrations are the single source of truth for the
+schema; there is deliberately no second copy of the DDL that could drift.
 
 ## CI/CD
 
@@ -288,10 +288,10 @@ Full index: [`docs/README.md`](docs/README.md).
 | [`docs/api-endpoints.md`](docs/api-endpoints.md) | **Generated** endpoint inventory — do not edit by hand |
 | [`docs/frontend.md`](docs/frontend.md) | Design system and brand, pages, navigation, search, onboarding, risk map, known gaps |
 | [`docs/deployment.md`](docs/deployment.md) | Compose, GPU, model weights, secrets, verification |
-| [`docs/data_connectors.md`](docs/data_connectors.md) | Decision record: the deleted connector layer and the point-in-time path that replaced it |
-| [`docs/G_SIB_BUILD.md`](docs/G_SIB_BUILD.md) | G-SIB-grade build: added, verified, and still missing |
-| [`docs/EXECUTIVE_REVIEW_REMEDIATION.md`](docs/EXECUTIVE_REVIEW_REMEDIATION.md) | Review findings mapped to code, round by round |
-| [`docs/QUANT_REVIEW_2026-09.md`](docs/QUANT_REVIEW_2026-09.md) | Fourth-round external quant review: findings, evidence, phased plan |
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operate it: boot, environment, health checks, failure matrix, backup/restore drill |
+| [`docs/VERSIONING.md`](docs/VERSIONING.md) | SemVer policy, changelog rules, release script, what CI enforces |
+| [`docs/LANGUAGE_STRATEGY.md`](docs/LANGUAGE_STRATEGY.md) | Measured Python/Rust boundary and the rule for moving it |
+| [`docs/QUANT_REVIEW_2026-09.md`](docs/QUANT_REVIEW_2026-09.md) | Fourth-round external quant review: findings, evidence, phased plan — the live limitations register |
 
 - **Swagger UI**: http://localhost:3456/docs
 - **Configuration**: `.env` (see `.env.example`)

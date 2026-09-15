@@ -141,12 +141,25 @@ export default function Settings() {
             </span>
           </div>
           <div className="flex justify-between"><span>Preferences storage</span><span>this browser (localStorage)</span></div>
-          <div className="flex justify-between"><span>Authentication</span><span>not configured — single-operator mode</span></div>
+          <div className="flex justify-between">
+            <span>Authentication</span>
+            <span>
+              {!systemStatus
+                ? 'not reachable'
+                : systemStatus.auth?.mode === 'bearer-gate'
+                  ? 'bearer gate — token required on /api/*'
+                  : 'not configured — single-operator mode'}
+            </span>
+          </div>
         </CardContent>
       </Card>
 
       <p className="text-sm text-bne-muted">
-        Personalise how Beacon keeps you informed. Settings are stored locally while role-based policies remain managed by your administrator.
+        Preferences are stored in this browser only. BEACON has no user accounts,
+        roles or per-user state: a deployment either runs open on a trusted
+        network or gates every <span className="bne-figure">/api/*</span> call
+        behind one shared bearer token (<span className="bne-figure">BEACON_API_TOKEN</span>),
+        which the posture above reports live from the backend.
       </p>
 
       <div className="grid gap-6 lg:grid-cols-2">

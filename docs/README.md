@@ -14,22 +14,45 @@ they stayed stale for ten months without anyone noticing.
 | [`api-endpoints.md`](api-endpoints.md) | **Generated.** Every route and tag, read from the FastAPI app |
 | [`frontend.md`](frontend.md) | Design system and brand, UI stack, pages and navigation model, data fetching, ⌘K search, onboarding, risk map, jobs/WebSocket status |
 | [`deployment.md`](deployment.md) | Deploying on this host: Docker Compose, GPU, model weights, secrets, verification |
+| [`RUNBOOK.md`](RUNBOOK.md) | Operating the deployment: boot order, environment, health checks, failure matrix, backup/restore drill |
+| [`VERSIONING.md`](VERSIONING.md) | SemVer policy, changelog discipline, release tooling, what CI enforces |
+| [`LANGUAGE_STRATEGY.md`](LANGUAGE_STRATEGY.md) | The measured Python/Rust boundary and the rule for moving it |
 | [`../.github/workflows/README.md`](../.github/workflows/README.md) | CI/CD workflows and how to reproduce each locally |
-| [`FIFTH_ROUND_RESPONSE.md`](FIFTH_ROUND_RESPONSE.md) | Fifth-round (last-mile) review: claim audit, wiring executed, rejections with reasons |
-| [`QUANT_REVIEW_2026-09.md`](QUANT_REVIEW_2026-09.md) | Fourth-round external quant review: trajectory, per-subsystem verdicts, findings register with dispositions, phased fix plan |
+| [`QUANT_REVIEW_2026-09.md`](QUANT_REVIEW_2026-09.md) | Fourth-round external quant review: trajectory, per-subsystem verdicts, findings register with dispositions, phased fix plan — the live limitations register |
 
-## Historical records
+## Audit history and standing decisions
 
-These describe work that is **done and closed**. They are kept because the
-reasoning matters for a regulated codebase — why a thing was built the way it
-was, and what was deliberately refused — not because they describe the current
-tree.
+Five external review rounds (executive ×3, quant, last-mile) ran against this
+tree between 2025 and 2026-09. Their per-finding logs were deleted once every
+item in them closed; the reasoning that still governs decisions lives here and
+in the reachability census (`backend/tests/test_reachability.py`), not in
+archived narratives:
 
-| Document | Contents |
-|---|---|
-| [`EXECUTIVE_REVIEW_REMEDIATION.md`](EXECUTIVE_REVIEW_REMEDIATION.md) | Finding-by-finding remediation of the executive review, then second and third core-review rounds |
-| [`G_SIB_BUILD.md`](G_SIB_BUILD.md) | The G-SIB-grade build: what was added, how each item is verified, and what is explicitly still not done |
-| [`data_connectors.md`](data_connectors.md) | Decision record: the NBFI / CCP connector layer — why it was deleted, and the point-in-time exposure path that replaced it |
+- **Point-in-time is the only exposure path.** The NBFI/CCP connector layer was
+  deleted (no production caller, granularity the engine cannot consume, and the
+  plugin interface cannot carry its two-clock guarantee). Revision-vintage
+  exposures go through the PIT store; the census `REMOVED` register holds the
+  evidence.
+- **Neural SDE stays a caller-declared latent-stress scenario**, not the default
+  propagator: the default must remain the verified Eisenberg–Noe/GLT core.
+- **Parked, not deleted, with preconditions:** temporal GNN (needs exposure
+  vintages at training time), mixture-of-experts (needs labelled regime
+  history), subgraph explanations, causal validation, streaming/federated
+  training. Each census disposition names its unblocking input.
+- **Deferred with reasons:** copula dependence (the clearing engine already
+  propagates joint stress), generalized-hyperbolic tails (the Student-t HMM
+  covers the regime-variance channel first).
+- **No hand-maintained endpoint documentation.** The inventory is generated
+  (`api-endpoints.md`, guard test) after a hand-written one documented seven
+  endpoints that did not exist.
+- **Auth is an optional bearer gate** (`BEACON_API_TOKEN`), not a user model;
+  multi-user deployments are out of scope and say so in `deployment.md`.
+- **Removed modules stay removed in the census**, with the evidence, so the
+  deletion stays discoverable and cannot be silently re-introduced.
+
+What shipped in each round is in [`../CHANGELOG.md`](../CHANGELOG.md); what is
+still open is in the [`QUANT_REVIEW_2026-09.md`](QUANT_REVIEW_2026-09.md)
+register and the census dispositions.
 
 ## Deliberately not duplicated here
 
@@ -50,6 +73,16 @@ was replaced by a generator:
 | `docs/priority_3_features.md` | Wrong notification contract (`urgent` priority, `data_quality`/`pipeline` categories — none exist), wrong response field names, stale `localhost:8000` URLs. True content folded into [`api.md`](api.md) and [`frontend.md`](frontend.md) |
 | `IMPLEMENTATION_SUMMARY.md` | Documented a Three.js 3D globe deleted with `src/components/globe/`; internally contradictory (listed WebSocket as both "Not Implemented" and "Added"); referenced `src/lib/utils/export.js`, which had moved |
 | `REAL_TIME_JOBS_DOCUMENTATION.md` | Claimed live WebSocket job updates shipped. Neither half was ever wired: nothing calls `broadcast_job_update()`, and the client used port 8000. Current status in [`frontend.md`](frontend.md) and [`api.md`](api.md) |
+| `G_SIB_BUILD.md` | Rounds 1–2 log, closed: every verified item is merged and its "still missing" list was superseded by the [`QUANT_REVIEW_2026-09.md`](QUANT_REVIEW_2026-09.md) register |
+| `EXECUTIVE_REVIEW_REMEDIATION.md` | Rounds 1–4 finding-by-finding log, closed: every item merged. Still-governing reasoning now lives in the standing-decisions list above and the reachability census |
+| `data_connectors.md` | Decision record folded into the census `REMOVED` register and the point-in-time tests; the doc added no fact neither holds |
+| `FIFTH_ROUND_RESPONSE.md` | Last-mile response log, closed: wiring merged, rejections and queued preconditions live in census dispositions |
+
+Outside `docs/`: `configs/timescaledb/timescale_setup.sql` was deleted as a
+drifted second copy of the migration DDL (it lacked the three baseline tables;
+migration error messages now state the manual step), and
+`configs/scenario_library.json` was deleted with zero references from any code,
+test, workflow or doc.
 
 Their content survives in git history, and every still-true fact was carried
 forward before deletion.

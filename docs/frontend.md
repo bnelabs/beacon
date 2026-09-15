@@ -339,11 +339,15 @@ The dashboard is an operations brief, not a widget dump. Contract:
 ### Settings
 
 - Preference toggles persist to `localStorage` under `beacon.preferences.v1`
-  and are **labelled as browser-local** — BEACON ships without authentication,
-  and pretending otherwise would be a lie in the UI.
+  and are **labelled as browser-local** — BEACON has no user accounts, and
+  pretending otherwise would be a lie in the UI.
 - The Platform card states the truth about the deployment: frontend version
   (`__APP_VERSION__`, stamped by Vite from `package.json`), build channel,
-  backend version/revision or "not reachable", and the auth posture
-  ("not configured — single-operator mode").
-- The profile menu's sign-out entry says "Sign out — auth not configured"
-  rather than promising a feature that does not exist.
+  backend version/revision or "not reachable", and the auth posture read live
+  from `GET /api/v1/system/status` (`auth.mode`): "bearer gate — token required
+  on /api/*" when the deployment sets `BEACON_API_TOKEN`, otherwise
+  "not configured — single-operator mode". The UI never infers this locally.
+- The profile menu's sign-out entry reflects reality: with a stored token it
+  signs out by clearing it and reloading; without one it stays disabled and
+  says "no token in this browser" rather than promising accounts that do not
+  exist.
