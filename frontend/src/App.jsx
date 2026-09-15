@@ -18,7 +18,6 @@ const ModelPerformance = lazy(() => import('./pages/ModelPerformance'))
 const DataQuality = lazy(() => import('./pages/DataQuality'))
 const Analytics = lazy(() => import('./pages/Analytics'))
 const Settings = lazy(() => import('./pages/Settings'))
-const Help = lazy(() => import('./pages/Help'))
 
 export default function App() {
   const { currentPage, params } = useRouter()
@@ -66,8 +65,6 @@ export default function App() {
           return Analytics
         case 'settings':
           return Settings
-        case 'help':
-          return Help
         default:
           return Dashboard
       }

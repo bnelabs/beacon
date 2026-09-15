@@ -795,7 +795,7 @@ Data Sources Analyzed: {len(predictions_df)}
 The model score is a one-step-ahead prediction of each indicator's
 standardized next value. It is not a probability, it is not bounded to
 0-100, and its direction of stress depends on the indicator; no calibrated
-mapping to a risk level exists yet (docs/QUANT_REVIEW_2026-09.md, Phase 2).
+mapping to a risk level exists yet (README.md, Scoring and validation).
 
 KEY FINDINGS:
 {self._generate_key_findings(predictions_df)}

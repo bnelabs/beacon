@@ -99,3 +99,11 @@ body {
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* Range inputs carried no styling at all: in a shell where every other control
+   follows the field-report tokens, the browser-default blue slider was the one
+   off-brand pixel on the Models and Results screens. accent-color brings the
+   native control into the pine family without re-implementing it. */
+input[type='range'] {
+  accent-color: #2c5545;
+}

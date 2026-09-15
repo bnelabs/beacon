@@ -187,7 +187,17 @@ function extractHandler(source) {
 async function makeInvoker() {
   const source = readFileSync(MOCKS, 'utf-8')
   const body = extractHandler(source)
-  const dataSection = source.slice(0, source.indexOf('async function registerBasemapTileMocks'))
+  // The data section is everything before the first function declaration: the
+  // fixtures the handler closes over. It used to end at a named function
+  // (registerBasemapTileMocks) that the basemap removal deleted; slicing to a
+  // missing marker is slice(0, -1) -- the whole module, export keywords
+  // included -- which new Function then rejects with "Unexpected token
+  // 'export'". Anchoring on the first declaration cannot dangle like that.
+  const firstFunction = source.match(/^async function /m)
+  if (!firstFunction || firstFunction.index === undefined) {
+    throw new Error('no function declaration found in apiMocks.js')
+  }
+  const dataSection = source.slice(0, firstFunction.index)
 
   // The data constants are module-scope in apiMocks.js; the handler closes over
   // them. Evaluate both in one scope rather than exporting anything.

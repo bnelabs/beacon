@@ -55,11 +55,6 @@ test('navigates the application and exercises primary interactions', async ({ pa
   await expect(createJobButton).toBeEnabled()
   await createJobButton.click()
   await expect(dashboardJobForm).not.toBeVisible()
-  const maybeLaterButton = page.getByRole('button', { name: 'Maybe Later' })
-  if (await maybeLaterButton.isVisible()) {
-    await maybeLaterButton.click()
-    await expect(page.getByRole('heading', { name: 'Welcome to BEACON' })).not.toBeVisible()
-  }
   await page.getByRole('button', { name: 'View All' }).click()
   const searchButton = page.getByRole('button', { name: 'Search' })
   if (await searchButton.isVisible()) {
@@ -77,7 +72,7 @@ test('navigates the application and exercises primary interactions', async ({ pa
   await expect(page.getByTestId('risk-map')).toBeVisible()
   await expect(page.getByTestId('risk-map').locator('canvas')).toBeVisible()
   await expect(page.getByTestId('map-legend')).toBeVisible()
-  await expect(page.getByTestId('map-attribution')).toContainText('OpenStreetMap')
+  await expect(page.getByTestId('map-attribution')).toContainText('Natural Earth')
 
   const networkToggle = page.getByRole('button', { name: /Show Network|Hide Network/ })
   if (await networkToggle.isVisible()) {
@@ -145,10 +140,13 @@ test('navigates the application and exercises primary interactions', async ({ pa
   await expect(page.getByText('Scenario executed with mocked response.')).toBeVisible()
   await page.getByRole('button', { name: 'Back to Models' }).click()
   await expect(page.getByRole('heading', { name: 'Models' })).toBeVisible()
+  // The details drawer survives the round trip to Results. Wait for its Close
+  // button rather than sampling it: a isVisible() race once skipped the click,
+  // and the drawer's backdrop then intercepted every later navigation click.
   const closeDrawerButton = page.getByRole('button', { name: 'Close' }).first()
-  if (await closeDrawerButton.isVisible()) {
-    await closeDrawerButton.click()
-  }
+  await expect(closeDrawerButton).toBeVisible()
+  await closeDrawerButton.click()
+  await expect(closeDrawerButton).toHaveCount(0)
 
   // Jobs interactions
   await page.getByRole('button', { name: 'Jobs' }).click()
@@ -264,27 +262,14 @@ test('navigates the application and exercises primary interactions', async ({ pa
   await page.getByRole('button', { name: 'Mute all' }).click()
   await page.getByRole('button', { name: 'Restore defaults' }).click()
   await page.getByRole('button', { name: 'Connect' }).first().click()
-  await expect(page.getByRole('button', { name: /Start Tour|Restart Tour/ })).toBeVisible()
+  // The guided tour and the Help page were removed while the platform is still
+  // maturing; guided help lands again when the system does. Until then the
+  // suite asserts they stay gone, in the same style as the dispositions census:
+  // a removal is a decision, and a decision gets a test.
+  await expect(page.getByRole('button', { name: /Start Tour|Restart Tour/ })).toHaveCount(0)
 
-  // Help interactions
-  await page.getByRole('button', { name: 'Help' }).click()
-  // 46ea089 rewrote this page and left three assertions here describing the old
-  // one: the title changed from "Help Center" to "Help", and "Popular
-  // walkthroughs" and "Ask Beacon Support" were deleted with the marketing
-  // content they belonged to. Nothing caught it because the change shipped with
-  // this suite already failing for the same reason -- frontend-ci has been red on
-  // every run since that merge, on main and on every branch cut from it.
-  //
-  // Asserted against what the page now says, including the part that is the
-  // point of the rewrite: it documents the platform's own limits and points at
-  // the in-repo registers that hold them.
-  await expect(page.getByRole('heading', { name: 'Help', exact: true })).toBeVisible()
-  await expect(page.getByText('what it refuses to measure')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'How BEACON reads risk' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Known limitations' })).toBeVisible()
-  await expect(page.getByText('docs/QUANT_REVIEW_2026-09.md')).toBeVisible()
-  // And the content that was removed stays removed, so it cannot come back
-  // without someone deciding to.
+  // Help interactions: the page is gone, and its marketing-era content with it.
+  await expect(page.getByRole('button', { name: 'Help', exact: true })).toHaveCount(0)
   await expect(page.getByText('Ask Beacon Support')).toHaveCount(0)
   await expect(page.getByText('Popular walkthroughs')).toHaveCount(0)
 })
@@ -298,12 +283,12 @@ test('navigates the application and exercises primary interactions', async ({ pa
 test('global search finds jobs, models and catalogue items', async ({ page }) => {
   await page.goto('/')
 
-  const maybeLaterButton = page.getByRole('button', { name: 'Maybe Later' })
-  if (await maybeLaterButton.isVisible()) {
-    await maybeLaterButton.click()
-  }
-
   const openSearch = async () => {
+    // The palette's key handler registers when the header mounts. The welcome
+    // banner's dismissal used to give the app this beat for free; with the
+    // banner gone the first keypress raced React and lost, so wait for the
+    // chrome instead of guessing.
+    await expect(page.getByRole('button', { name: 'Search' })).toBeVisible()
     await page.keyboard.press('Control+k')
     const input = page.getByPlaceholder('Search pages, jobs, models, countries...')
     await expect(input).toBeVisible()

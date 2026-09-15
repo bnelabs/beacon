@@ -8,8 +8,7 @@ const PAGE_METADATA = {
   datasources: { title: 'Data Sources', parent: null },
   countries: { title: 'Country Profiles', parent: null },
   results: { title: 'Results', parent: 'jobs' },
-  settings: { title: 'Settings', parent: null },
-  help: { title: 'Help', parent: null }
+  settings: { title: 'Settings', parent: null }
 }
 
 export default function Breadcrumbs() {

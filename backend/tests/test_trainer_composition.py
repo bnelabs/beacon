@@ -2,7 +2,7 @@
 
 The unit suite verifies components; nothing in it ever composed
 ``MultiScaleTrainer.train`` or ``ModelTrainer.train`` end to end, which is how
-three production defects survived a green suite (docs/QUANT_REVIEW_2026-09.md,
+three production defects survived a green suite (fourth-round quant review,
 findings F1, F2, F3, F5, F8):
 
 * ``ReduceLROnPlateau(verbose=True)`` raises ``TypeError`` under the pinned

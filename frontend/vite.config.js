@@ -22,8 +22,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           'react-vendor': ['react', 'react-dom'],
-          'query-vendor': ['@tanstack/react-query', 'zustand'],
-          'onboarding': ['driver.js']
+          'query-vendor': ['@tanstack/react-query', 'zustand']
         }
       }
     },

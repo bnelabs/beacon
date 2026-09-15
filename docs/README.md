@@ -18,7 +18,6 @@ they stayed stale for ten months without anyone noticing.
 | [`VERSIONING.md`](VERSIONING.md) | SemVer policy, changelog discipline, release tooling, what CI enforces |
 | [`LANGUAGE_STRATEGY.md`](LANGUAGE_STRATEGY.md) | The measured Python/Rust boundary and the rule for moving it |
 | [`../.github/workflows/README.md`](../.github/workflows/README.md) | CI/CD workflows and how to reproduce each locally |
-| [`QUANT_REVIEW_2026-09.md`](QUANT_REVIEW_2026-09.md) | Fourth-round external quant review: trajectory, per-subsystem verdicts, findings register with dispositions, phased fix plan — the live limitations register |
 
 ## Audit history and standing decisions
 
@@ -75,8 +74,8 @@ archived narratives:
   deletion stays discoverable and cannot be silently re-introduced.
 
 What shipped in each round is in [`../CHANGELOG.md`](../CHANGELOG.md); what is
-still open is in the [`QUANT_REVIEW_2026-09.md`](QUANT_REVIEW_2026-09.md)
-register and the census dispositions.
+still open is the limitations register in [`../README.md`](../README.md)
+§Scoring and validation, plus the census dispositions.
 
 ## Deliberately not duplicated here
 
@@ -97,7 +96,8 @@ was replaced by a generator:
 | `docs/priority_3_features.md` | Wrong notification contract (`urgent` priority, `data_quality`/`pipeline` categories — none exist), wrong response field names, stale `localhost:8000` URLs. True content folded into [`api.md`](api.md) and [`frontend.md`](frontend.md) |
 | `IMPLEMENTATION_SUMMARY.md` | Documented a Three.js 3D globe deleted with `src/components/globe/`; internally contradictory (listed WebSocket as both "Not Implemented" and "Added"); referenced `src/lib/utils/export.js`, which had moved |
 | `REAL_TIME_JOBS_DOCUMENTATION.md` | Claimed live WebSocket job updates shipped. Neither half was ever wired: nothing calls `broadcast_job_update()`, and the client used port 8000. Current status in [`frontend.md`](frontend.md) and [`api.md`](api.md) |
-| `G_SIB_BUILD.md` | Rounds 1–2 log, closed: every verified item is merged and its "still missing" list was superseded by the [`QUANT_REVIEW_2026-09.md`](QUANT_REVIEW_2026-09.md) register |
+| `G_SIB_BUILD.md` | Rounds 1–2 log, closed: every verified item is merged and its "still missing" list was superseded by the fourth-round register |
+| `QUANT_REVIEW_2026-09.md` | Fourth-round quant review. Its findings merged with dispositions and its open items live on as the limitations register in [`../README.md`](../README.md) §Scoring and validation; the round-by-round narrative was development history, not user documentation, and was deleted with the Help page that pointed at it |
 | `EXECUTIVE_REVIEW_REMEDIATION.md` | Rounds 1–4 finding-by-finding log, closed: every item merged. Still-governing reasoning now lives in the standing-decisions list above and the reachability census |
 | `data_connectors.md` | Decision record folded into the census `REMOVED` register and the point-in-time tests; the doc added no fact neither holds |
 | `FIFTH_ROUND_RESPONSE.md` | Last-mile response log, closed: wiring merged, rejections and queued preconditions live in census dispositions |

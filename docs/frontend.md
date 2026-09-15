@@ -1,7 +1,7 @@
 # Frontend
 
 The BEACON single-page application: its pages, state model, data fetching, and
-the interactive features (search, onboarding, notifications, the risk map).
+the interactive features (search, notifications, the risk map).
 
 This document replaces three overlapping write-ups that were removed —
 `IMPLEMENTATION_SUMMARY.md`, `REAL_TIME_JOBS_DOCUMENTATION.md` and
@@ -24,7 +24,6 @@ they are short and typed by convention.
 | Server state | TanStack Query 5 |
 | Client state | Zustand 5 |
 | Styling | Tailwind CSS 3.4 on the `bne-*` field-report token system (see [Design system](#design-system-and-brand)) |
-| Tours | driver.js 1.3 (theme overridden in `styles/onboarding.css`) |
 | E2E | Playwright 1.49 (see [`.github/workflows/README.md`](../.github/workflows/README.md)) |
 
 There is **no** router library. Navigation is a Zustand store, not URL routing —
@@ -119,7 +118,7 @@ shipped ~170 dead classes (`bne-frost`, `bne-indigo`, `bne-sky`,
 
 `data/network-connections.js` exports `RISK_COLORS`
 (low `#67854F`, medium `#C29A33`, high `#C05F2C`, critical `#8A3320`,
-uncalibrated `#8A8168`) on the CARTO **light** basemap. Region fills are warm
+uncalibrated `#8A8168`) on the bundled Natural Earth basemap. Region fills are warm
 washes, labels are ink with paper halos, and the heatmap ramp runs
 moss → ochre → rust → clay. `MapLegend` documents the bands, the heat ramp
 and the *uncalibrated* state.
@@ -143,8 +142,7 @@ on `dashboard`.
 | `performance` | `pages/ModelPerformance.jsx` | |
 | `data-quality` | `pages/DataQuality.jsx` | |
 | `analytics` | `pages/Analytics.jsx` | |
-| `settings` | `pages/Settings.jsx` | Restart the onboarding tour |
-| `help` | `pages/Help.jsx` | |
+| `settings` | `pages/Settings.jsx` | |
 
 `components/Breadcrumbs.jsx` derives a trail from a static parent map.
 `performance`, `data-quality` and `analytics` are absent from that map, so those
@@ -157,7 +155,7 @@ three pages render no breadcrumb.
   the backend, so the default is correct there. See [`deployment.md`](deployment.md).
 - Each domain has a hook under `frontend/src/hooks/`: `useApi` (jobs, models,
   batch cancel), `useCountries`, `useNotifications`, `useDataQuality`,
-  `useAnalytics`, `useJobsWebSocket`, `useOnboarding`.
+  `useAnalytics`, `useJobsWebSocket`.
 - Polling intervals are set per query rather than globally: notifications
   every 30 s, data-quality `stats` and `sources` every 60 s, `trends` every
   120 s.
@@ -197,13 +195,17 @@ corrected: the mocks now mirror the real API and unknown paths 404, and
 `full-frontend.spec.js` asserts that a search for a job, a model and a catalogue
 item actually returns each one.
 
-## Onboarding tour
+## Guided help (deliberately absent)
 
-`hooks/useOnboarding.js` drives a seven-step driver.js tour: Welcome, Risk Map,
-Models, Jobs, Results, Global Search, Done. Completion is persisted to
-localStorage; `Settings` exposes "Restart Tour". Targets are marked with
-`data-tour` attributes (`Header.jsx` for the search button, `Sidebar.jsx` for
-nav items), so adding a step means adding the attribute as well as the step.
+A Help Centre page and a seven-step driver.js tour existed until 2026-09 and
+were removed on reviewer feedback: guided help for a system that is still
+moving documents behaviour faster than it can be written, and reads as
+confidence the product does not claim yet. The removal is asserted by the e2e
+suite -- the tour button, the Help navigation entries and the old Help copy
+must stay absent -- in the same style as the reachability census: a removal is
+a decision, and decisions get tests. When the platform matures, guided help
+returns; it should be written from this document, not from memory of the old
+pages.
 
 ## Risk map
 
@@ -211,8 +213,13 @@ The former 3D globe is gone. `pages/RiskMapPage.jsx` renders a 2D Deck.gl map vi
 `components/map/RiskMap.jsx` and `MapLegend.jsx` (the legend documents the
 bands, the heat ramp and the *uncalibrated* state):
 
-- a free CARTO **light** raster basemap — **no Mapbox token required** — so the
-  map sits on the same paper idiom as the rest of the shell
+- a **bundled Natural Earth basemap** (`src/data/world-countries.json`, public
+  domain, trimmed to 1:110m land polygons): no tile service, no API key, no
+  network. The keyless CARTO raster endpoint this map used to read now answers
+  with tiles watermarked "API KEY REQUIRED" diagonally across the map, and a
+  tile CDN was also an offline failure mode -- an earlier README capture showed
+  a blank sea where the basemap never loaded. At 1:110m the land is context,
+  not detail; zoom is capped at 6 to say so
 - `ScatterplotLayer` for banks/regions coloured by `RISK_COLORS`
 - `HeatmapLayer` for liquidity intensity on a moss→ochre→rust→clay ramp
 - `ArcLayer` for interbank exposures (unscored edges draw in stone, never in a
@@ -225,6 +232,13 @@ bands, the heat ramp and the *uncalibrated* state):
 existing navigation keeps working, but all user-facing copy says "Risk Map"
 and the component file is now `RiskMapPage.jsx`.
 `src/data/network-connections.js` still holds the static connection set.
+
+The live-network states (loading, unavailable, request failed, demo fallback,
+live vintage with edge and node counts) are stated in a status strip *above*
+the map card, never watermarked across the canvas: a warning painted over the
+map reads as part of the map, and the map must mean what it shows. The strip
+keeps one wording and one colour per state, so a failed backend and a backend
+with no exposure matrix yet still look different.
 
 ## Jobs: real-time updates and batch operations
 
@@ -293,8 +307,8 @@ The composite quality score and the freshness thresholds are defined in
 
 ## Build and code splitting
 
-`vite.config.js` splits three vendor chunks — `react-vendor`, `query-vendor` and
-`onboarding` — and every page except `Dashboard` is loaded with `React.lazy()`.
+`vite.config.js` splits two vendor chunks — `react-vendor` and `query-vendor` —
+and every page except `Dashboard` is loaded with `React.lazy()`.
 
 The `three-vendor` chunk recorded in the removed implementation summary is gone
 along with Three.js, and so are the specific bundle-size figures from that

@@ -2,7 +2,7 @@
 
 ``EngineOrchestrator`` is what ``POST /api/v1/pipeline`` runs between the DATA
 and RESULTS stages, and before this round nothing composed it in a test. The
-defects these tests pin down (docs/QUANT_REVIEW_2026-09.md, findings F4, F9):
+defects these tests pin down (fourth-round quant review, findings F4, F9;
 
 * with no trained checkpoint, the orchestrator scored the payload through a
   randomly initialized LSTM and called the output a risk score -- now it fails

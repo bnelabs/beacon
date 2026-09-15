@@ -39,17 +39,22 @@ data that did not pass certification.
 A single-page application in a warm-paper, print-briefing idiom — serif
 mastheads, hairline rules, tabular figures, and a moss→ochre→rust→clay risk
 scale shared by badges, map markers and the legend. The full design system is
-specified in [`docs/frontend.md`](docs/frontend.md).
+specified in [`docs/frontend.md`](docs/frontend.md). Four screens carry the
+daily work; each is shown as it ships, against the mocked API, with no
+invented data.
 
 | | |
 |---|---|
 | ![Dashboard](docs/images/dashboard.png) | ![Risk Map](docs/images/risk-map.png) |
-| **Dashboard** — job activity, live host status (measured CPU/memory/disk/GPU from `GET /api/v1/system/status`, never asserted), onboarding | **Risk Map** — 2D Deck.gl view: liquidity heat, institution markers, interbank exposure arcs on a light basemap |
+| **Dashboard** — the morning view: job activity, data-quality gate status and live host status (CPU, memory, disk, GPU, measured from `GET /api/v1/system/status`, never asserted). | **Risk Map** — geographic liquidity heat, institution markers and interbank exposure arcs on a bundled public-domain basemap; degraded backend states are stated in a strip above the map, never painted over it. |
+| ![Models](docs/images/models.png) | ![Results](docs/images/results.png) |
+| **Models** — the catalogue: architecture, training configuration and status per model, with the scenario builder that declares stress inputs explicitly. | **Results** — one job's output: predictions with conformal intervals where they exist, regime nowcast, and the reports every run leaves behind. |
 
 Pages: Dashboard · Risk Map · Models · Jobs · Results · Data Sources ·
-Country Profiles · Performance · Data Quality · Analytics · Settings · Help.
-Global search (⌘K), a guided tour, WebSocket job progress and CSV/JSON/PDF/
-Excel export are built in.
+Country Profiles · Performance · Data Quality · Analytics · Settings.
+Global search (⌘K), WebSocket job progress and CSV/JSON/PDF/Excel export are
+built in. Guided help (a tour, a help centre) is deliberately absent while the
+platform is still maturing; it returns when the system does.
 
 ---
 
@@ -190,8 +195,22 @@ Two honesty rules govern every reported number:
    never as a rescaled copy of something else.
 
 The calibration roadmap (event labelling, per-indicator semantics, conformal
-intervals) is specified in
-[`docs/QUANT_REVIEW_2026-09.md`](docs/QUANT_REVIEW_2026-09.md).
+intervals) used to live in a round-by-round review narrative. That narrative
+was development history, not user documentation, and it was deleted; this list
+is the register now, and it is kept short on purpose:
+
+- **No calibrated risk scale.** Risk levels are reported as *uncalibrated*;
+  confidence bounds stay `null` until split-conformal calibration is wired per
+  source. Nothing bands a standardized score against an invented 0–100 scale.
+- **No event target yet.** Crisis early-warning needs a labelled stress-event
+  target (event labeller) and a pre-registered evaluation — lift over
+  persistence/AR baselines under CPCV, event precision and lead time. Until
+  both exist the platform is a data-governance and scenario laboratory, not a
+  demonstrated early-warning system, and it does not claim to be one.
+- **No per-indicator semantics registry.** Cross-source score aggregation
+  waits on a registry of each indicator's stress direction and unit; without
+  it, averaging scores across sources would average apples with inverted
+  apples.
 
 ---
 
@@ -286,12 +305,11 @@ Full index: [`docs/README.md`](docs/README.md).
 |---|---|
 | [`docs/api.md`](docs/api.md) | API protocol: error codes, jobs vs. pipeline, WebSocket, quality score, notifications |
 | [`docs/api-endpoints.md`](docs/api-endpoints.md) | **Generated** endpoint inventory — do not edit by hand |
-| [`docs/frontend.md`](docs/frontend.md) | Design system and brand, pages, navigation, search, onboarding, risk map, known gaps |
+| [`docs/frontend.md`](docs/frontend.md) | Design system and brand, pages, navigation, search, risk map, known gaps |
 | [`docs/deployment.md`](docs/deployment.md) | Compose, GPU, model weights, secrets, verification |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operate it: boot, environment, health checks, failure matrix, backup/restore drill |
 | [`docs/VERSIONING.md`](docs/VERSIONING.md) | SemVer policy, changelog rules, release script, what CI enforces |
 | [`docs/LANGUAGE_STRATEGY.md`](docs/LANGUAGE_STRATEGY.md) | Measured Python/Rust boundary and the rule for moving it |
-| [`docs/QUANT_REVIEW_2026-09.md`](docs/QUANT_REVIEW_2026-09.md) | Fourth-round external quant review: findings, evidence, phased plan — the live limitations register |
 
 - **Swagger UI**: http://localhost:3456/docs
 - **Configuration**: `.env` (see `.env.example`)
