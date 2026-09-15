@@ -9,6 +9,53 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Added
+- `POST /api/v1/network/estimate`: estimated bilateral networks as a
+  production scenario input. Maximum-entropy **and** minimum-support
+  completions of declared aggregate interbank marginals bracket the unknown
+  structure; Eisenberg–Noe clearing is propagated over marginal-preserving
+  structure-bootstrap draws with percentile bands of total shortfall and
+  default count, and the estimator's caveat travels with every response.
+  Estimates are never persisted to the exposure store
+  (`persistence: "not_stored"`), so an estimate can never be mistaken for an
+  uploaded observation.
+- Keyless FRED access: indicator fetches and the connection probe fall back
+  to the `fredgraph.csv` endpoint when no API key is configured, with typed
+  `FredKeylessError` for renamed/retired series and unparseable payloads;
+  `.` gaps are dropped, never zero-filled. Verified live against FRED.
+- Provenance disclosure: `GET /api/v1/data-sources/disclosure` serves, per
+  feed, the publisher, a closed-vocabulary provenance class, what it
+  provides, access facts derived from each plugin's own declaration, and
+  live configured/enabled/catalogue counts for this deployment, plus the
+  platform data policy and the inferred-inputs register. The Data Sources
+  page renders it and the create-form plugin options now come from the
+  runtime registry instead of a hand-maintained list.
+
+### Changed
+- Reachability census: `backend.modules.risk.network_estimation` moved from
+  `KNOWN_UNREACHABLE(wire)` to `REQUIRED_REACHABLE`.
+- Plugin registry integrity: `fdic`, `cftc_cot` and `nyfed` were absent from
+  the loader list and never reached the runtime registry, so no data source
+  could select them; the FDIC plugin additionally imported a base module
+  that never existed in git history while the UI advertised it as enabled.
+  All 17 plugins now register, and a guard test fails when a concrete plugin
+  class is defined but unregistered.
+- FDIC plugin rewritten against the live BankFind Suite API (fields and
+  filter syntax verified by probe on 2026-09-15); only verified fields are
+  served, undeclared fields raise `FDICFieldError` instead of being guessed
+  at a supervisory API.
+- The Data Sources page reports the real most-recent fetch timestamp instead
+  of a fabricated "2 hours ago".
+- Stooq rejected as a keyless feed on evidence: its CSV endpoint sits behind
+  an anti-bot challenge (HTTP 200 + HTML, probed 2026-09-15); the decision
+  is recorded in `docs/README.md` rather than shipping a dead plugin.
+
+### Fixed
+- `scripts/release.py` now syncs both version fields of
+  `frontend/package-lock.json`, and `scripts/check_versioning.py` fails on
+  lock drift; the lock had been stuck at 3.0.0 while `package.json` moved to
+  3.1.1, so every `npm install` produced an uncommitted diff.
+
 ## [3.1.1] - 2026-09-15
 
 ### Removed
