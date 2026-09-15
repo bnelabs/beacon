@@ -19,6 +19,7 @@ import logging
 from datetime import datetime, timezone
 
 from backend.database import SessionLocal
+from backend.services.alert_evaluator import evaluate_due_rules
 from backend.services.scheduling import (
     due_sources,
     enqueue_collection,
@@ -59,6 +60,29 @@ def dispatch_due_collections() -> dict:
         return {"due": len(due), "skipped_open": skipped_open, "enqueued": enqueued}
     except Exception:  # noqa: BLE001 - a broken tick must not kill the beat
         logger.exception("dispatch_due_collections tick failed")
+        raise
+    finally:
+        db.close()
+
+
+@celery_app.task(name="evaluate_alert_rules")
+def evaluate_alert_rules() -> dict:
+    """Evaluate whichever alert rules are due on their own frequency.
+
+    Alert rules had CRUD and no evaluator for their first months: a rule
+    could be created and nothing ever looked at the numbers, which is
+    quieter than having no alert feature at all -- the silence reads as
+    health. Each rule's own ``evaluation_frequency_minutes`` decides whether
+    this tick evaluates it; a breach alerts once per cooldown window.
+    """
+    db = SessionLocal()
+    try:
+        summary = evaluate_due_rules(db, datetime.now(timezone.utc))
+        if summary["triggered"]:
+            logger.warning("alert rules triggered: %s", summary["details"])
+        return summary
+    except Exception:  # noqa: BLE001 - a broken tick must not kill the beat
+        logger.exception("evaluate_alert_rules tick failed")
         raise
     finally:
         db.close()

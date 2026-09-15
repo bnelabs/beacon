@@ -9,7 +9,12 @@ from .error_log import ErrorLog
 from .job import Job
 from .notification import Notification
 from .pipeline_job import DataJob, EngineJob, PipelineJob, ResultJob
-from .timeseries import IndicatorObservation, ModelMetricPoint, RiskScorePoint
+from .timeseries import (
+    IndicatorObservation,
+    IndicatorVintageLog,
+    ModelMetricPoint,
+    RiskScorePoint,
+)
 
 __all__ = [
     "AlertRule",
@@ -27,6 +32,7 @@ __all__ = [
     "EngineJob",
     "ResultJob",
     "IndicatorObservation",
+    "IndicatorVintageLog",
     "ModelMetricPoint",
     "RiskScorePoint",
 ]

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.timeseries import (
     IndicatorObservation,
+    IndicatorVintageLog,
     ModelMetricPoint,
     RiskScorePoint,
 )
@@ -90,13 +91,70 @@ class TimeSeriesStore:
     # -- writes -------------------------------------------------------------
 
     def record_observations(self, rows: Iterable[Dict[str, Any]]) -> int:
-        """Upsert indicator observations keyed by (time, source, indicator, region)."""
-        return self._upsert(
+        """Upsert indicator observations keyed by (time, source, indicator, region).
+
+        Every written row also appends to the vintage log: the latest-value
+        store keeps what is currently believed, the log keeps what was
+        believed when, which is the difference between a restated series and
+        a silently rewritten history.
+        """
+        rows = list(rows)
+        count = self._upsert(
             IndicatorObservation,
-            list(rows),
+            rows,
             key_columns=list(_OBSERVATION_KEYS),
             update_columns=["country", "value", "unit", "quality_score", "ingest_job_id"],
         )
+        self._append_vintages(rows)
+        return count
+
+    def _append_vintages(self, rows: Iterable[Dict[str, Any]]) -> None:
+        from datetime import datetime, timezone
+
+        published_at = datetime.now(timezone.utc)
+        vintages = [
+            IndicatorVintageLog(
+                source_code=row["source_code"],
+                indicator_code=row["indicator_code"],
+                region=row.get("region") or "GLOBAL",
+                time=row["time"],
+                value=row["value"],
+                published_at=published_at,
+                ingest_job_id=row.get("ingest_job_id"),
+            )
+            for row in rows
+        ]
+        if vintages:
+            self.session.add_all(vintages)
+            self.session.commit()
+
+    def observations_as_of(
+        self,
+        source_code: str,
+        indicator_code: str,
+        as_of,
+        region: Optional[str] = None,
+    ):
+        """The series as it was believed at ``as_of``.
+
+        For each period, the newest vintage published at or before ``as_of``:
+        exactly the values a decision made at that instant could have seen.
+        Restatements published later are invisible here by construction.
+        """
+        query = self.session.query(IndicatorVintageLog).filter(
+            IndicatorVintageLog.source_code == source_code,
+            IndicatorVintageLog.indicator_code == indicator_code,
+            IndicatorVintageLog.published_at <= as_of,
+        )
+        if region:
+            query = query.filter(IndicatorVintageLog.region == region)
+        rows = query.order_by(
+            IndicatorVintageLog.time, IndicatorVintageLog.published_at
+        ).all()
+        latest: Dict[Any, Any] = {}
+        for row in rows:
+            latest[row.time] = row
+        return [latest[key] for key in sorted(latest)]
 
     def record_risk_scores(self, rows: Iterable[Dict[str, Any]]) -> int:
         """Upsert risk scores keyed by (time, entity_type, entity_id, model_version, horizon)."""

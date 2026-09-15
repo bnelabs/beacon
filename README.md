@@ -193,6 +193,10 @@ Two honesty rules govern every reported number:
 2. **Absence is reported as absence.** Missing measurements render as
    unavailable — in the API, the reports and the UI — never as zero, and
    never as a rescaled copy of something else.
+3. **Restatements leave tracks.** Every observation write appends to an
+   append-only vintage log, so any past number can be re-derived as of
+   any date; a revised figure never silently rewrites what yesterday's
+   decision could have seen.
 
 The calibration roadmap (event labelling, per-indicator semantics, conformal
 intervals) used to live in a round-by-round review narrative. That narrative

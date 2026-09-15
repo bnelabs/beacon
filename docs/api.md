@@ -157,6 +157,22 @@ group are `stats` (aggregate), `sources` (per-source freshness and score), and
 Freshness buckets are fixed: **fresh** ≤7 days, **stale** 7–30 days,
 **outdated** >30 days, **never_synced** for a source with no successful fetch.
 
+## Alerts that fire, and numbers that stay re-derivable
+
+Alert rules (`/api/v1/alert-rules`) are evaluated by the beat tick on each
+rule's own `evaluation_frequency_minutes`; a breach raises exactly one
+notification per `evaluation_window_minutes` cooldown, typed `alert`, with
+the measured value, the operator and the threshold in the message and in
+`extra_data`. A rule whose metric has no measurement in its window is skipped
+and says so in the tick summary -- silence is never ambiguous with health.
+
+Indicator observations keep an append-only vintage log
+(`indicator_vintage_log`): every write records the value as written and the
+instant it was published here, so `TimeSeriesStore.observations_as_of(source,
+indicator, as_of)` re-derives the series exactly as it stood at any past date.
+Restatements update the latest-value store without rewriting history, which
+is what keeps a backtest from "knowing" in May what was published in June.
+
 ## Notifications
 
 `/api/v1/notifications` is a read-mostly feed with a mutation per interaction.

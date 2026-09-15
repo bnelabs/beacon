@@ -10,6 +10,23 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **Alert rules now evaluate.** The beat tick runs `evaluate_alert_rules`:
+  each enabled rule is measured on its own frequency over its own window
+  (success_rate, execution_time, quality_score, rmse), compared with its
+  operator, and a breach raises one notification per cooldown window -- typed
+  `alert`, with the measured value, operator and threshold in the message and
+  `extra_data`. An unmeasurable metric or an unknown operator is a visible
+  skip, never a guess. Rules carried full CRUD and no evaluator before this:
+  a monitoring platform whose alerts never fire is quieter, and therefore
+  worse, than one with no alert feature.
+- **Append-only vintage log for indicator observations**
+  (`indicator_vintage_log`, migration `vintage_log_001`, plus
+  `alert_evaluation_001` for the rules' evaluation memory). Official series
+  are restated; the latest-value store keeps what is currently believed and
+  the log keeps what was believed when, so
+  `TimeSeriesStore.observations_as_of(source, indicator, as_of)` re-derives
+  any past series exactly as it stood at that date. The hypertable's primary
+  key stays as it is -- vintages are the audit half, stored beside it.
 - **Scheduled collection, per source.** `data_sources.sync_interval_minutes`
   (null = manual-only) plus a `celery-beat` service on the shared backend
   image: beat ticks every five minutes and enqueues whichever sources are due

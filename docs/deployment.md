@@ -186,6 +186,12 @@ schedule is a decision, not a default). Three behaviours are deliberate:
   enqueues it too -- 202 and a job, not a timestamp. An open collection for a
   source blocks a second enqueue, from beat or from a human.
 
+The same tick evaluates **alert rules** on each rule's own frequency
+(`evaluate_alert_rules`): a breached rule raises one notification per cooldown
+window -- a monitoring platform whose alerts never fire is quieter, and
+therefore worse, than one with no alert feature at all. Rules whose metric is
+not measurable over their window are skipped visibly rather than guessed.
+
 `GET /api/v1/data-sources/health` is the operator's view: cadence, backoff
 factor, last start/duration/rows, next due date, and `overdue`. The Data
 Sources page renders it per card (schedule selector, last run, next refresh,
