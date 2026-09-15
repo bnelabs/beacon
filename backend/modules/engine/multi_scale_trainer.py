@@ -366,7 +366,7 @@ class MultiScaleTrainer:
         # loader used to make `_validate` report 0.0 forever, which froze model
         # selection at the epoch-0 checkpoint while the job "completed
         # successfully" -- the production defect reproduced in
-        # docs/QUANT_REVIEW_2026-09.md finding F2.
+        # backend/tests/test_trainer_composition.py.
         if len(train_dataset) == 0:
             raise ValueError("Training dataset is empty - no valid sequences created")
         if len(val_dataset) == 0:

@@ -7,7 +7,7 @@ import { cn } from '../../utils/cn'
  *
  * `uncalibrated` exists because the engine now reports it (a standardized
  * model score is not a risk level until calibration exists — see
- * docs/QUANT_REVIEW_2026-09.md). It renders deliberately quieter, with a
+ * README.md §Scoring and validation). It renders deliberately quieter, with a
  * dashed rule: absence of calibration should be visible, not dressed up.
  */
 const variants = {

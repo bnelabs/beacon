@@ -9,7 +9,6 @@ import { useJobs, useModels, useDataSources } from '../hooks/useApi'
 import { useDataQualityStats } from '../hooks/useDataQuality'
 import { useSystemStatus } from '../hooks/useApi'
 import JobCreationModal from '../components/jobs/JobCreationModal'
-import WelcomeBanner from '../components/WelcomeBanner'
 
 const DAY_MS = 86_400_000
 
@@ -276,8 +275,6 @@ export default function Dashboard() {
         }
       >
         <div className="space-y-5">
-          <WelcomeBanner />
-
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             {jobsLoading ? (
               <Card><Skeleton className="h-16 w-full" /></Card>

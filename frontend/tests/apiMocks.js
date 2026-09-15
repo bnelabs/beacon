@@ -569,13 +569,6 @@ const notificationStats = {
   urgent: 0
 }
 
-// 1x1 transparent PNG used to stub the CARTO/OSM raster basemap so the risk
-// map renders deterministically without reaching the public tile CDN.
-const TRANSPARENT_PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
-  'base64'
-)
-
 /**
  * Provenance disclosure, as served by `GET /api/v1/data-sources/disclosure`.
  *
@@ -687,16 +680,6 @@ const dataDisclosure = {
   orphaned_configurations: []
 }
 
-async function registerBasemapTileMocks(page) {
-  await page.route(/basemaps\.cartocdn\.com/, (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'image/png',
-      body: TRANSPARENT_PNG
-    })
-  )
-}
-
 /**
  * Serve the webfonts locally instead of fetching them.
  *
@@ -724,8 +707,8 @@ async function registerWebfontMocks(page) {
   })
 }
 
+
 export async function registerApiMocks(page) {
-  await registerBasemapTileMocks(page)
   await registerWebfontMocks(page)
 
   await page.addInitScript(() => {

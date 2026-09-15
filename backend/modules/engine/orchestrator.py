@@ -106,7 +106,7 @@ class RiskScores:
     #: emits standardized one-step-ahead indicator predictions, which are not
     #: a calibrated risk scale; until calibration exists, ``risk_level`` is
     #: ``"uncalibrated"`` and this field carries the units and provenance so
-    #: no consumer has to guess. See docs/QUANT_REVIEW_2026-09.md (finding F6).
+    #: no consumer has to guess. See README.md §Scoring and validation.
     score_semantics: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -567,7 +567,7 @@ class EngineOrchestrator:
         mean at 30/60/80 and banded it low/medium/high/critical -- compared a
         standardized regression output against a percentage scale. Until a
         calibrated mapping from model output to risk exists (see
-        docs/QUANT_REVIEW_2026-09.md, Phase 2), the honest risk level is
+        README.md, Scoring and validation), the honest risk level is
         "uncalibrated" and the score is reported in the model's own units with
         its semantics attached.
         """
@@ -616,7 +616,7 @@ class EngineOrchestrator:
                 "risk_level_note": (
                     "no calibrated mapping from model output to a risk level exists; "
                     "risk_level is reported as 'uncalibrated' rather than banded "
-                    "(docs/QUANT_REVIEW_2026-09.md, findings F4/F6)"
+                    "(README.md, Scoring and validation)"
                 ),
                 "stats_provenance": dict(predictions.get("stats_provenance") or {}),
             },

@@ -4,7 +4,6 @@ import Card, { CardHeader, CardTitle, CardContent, CardFooter } from '../compone
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import { cn } from '../utils/cn'
-import { useOnboarding } from '../hooks/useOnboarding'
 import { useSystemStatus } from '../hooks/useApi'
 
 const PREFERENCES_KEY = 'beacon.preferences.v1'
@@ -57,7 +56,6 @@ function PreferenceToggle({ label, description, value, onChange }) {
 }
 
 export default function Settings() {
-  const { hasCompletedOnboarding, startOnboarding, resetOnboarding } = useOnboarding()
   const { data: systemStatus } = useSystemStatus()
   const [preferences, setPreferences] = useState(loadPreferences)
 
@@ -257,59 +255,6 @@ export default function Settings() {
           </CardContent>
         </Card>
       </div>
-
-      <Card className="border-bne-pine/30 bg-bne-paper-dim">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <svg className="w-5 h-5 text-bne-pine" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-            </svg>
-            Getting Started
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-bne-pine flex items-center justify-center">
-              <svg className="w-5 h-5 text-bne-chalk" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </div>
-            <div className="flex-1">
-              <h4 className="text-sm font-semibold text-bne-ink mb-1">Interactive Tour</h4>
-              <p className="text-sm text-bne-muted mb-3">
-                {hasCompletedOnboarding
-                  ? "Want to review the basics? Restart the guided tour to explore BEACON's key features again."
-                  : "New to BEACON? Take a quick tour to learn about the platform's key features and capabilities."}
-              </p>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={startOnboarding}
-              >
-                <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                {hasCompletedOnboarding ? 'Restart Tour' : 'Start Tour'}
-              </Button>
-            </div>
-          </div>
-
-          <div className="pt-4 border-t border-bne-line/50">
-            <div className="flex items-start gap-3 text-sm">
-              <svg className="w-5 h-5 text-bne-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <div>
-                <p className="text-bne-muted">
-                  Press <kbd className="px-2 py-1 mx-1 text-xs font-mono bg-bne-card rounded border border-bne-line">⌘K</kbd> anytime to open global search.
-                  Navigate to the <span className="font-medium text-bne-ink">Help</span> for detailed documentation.
-                </p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </PageContainer>
   )
 }

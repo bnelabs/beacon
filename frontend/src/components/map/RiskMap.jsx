@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import DeckGL from '@deck.gl/react'
 import { MapView } from '@deck.gl/core'
-import { ArcLayer, BitmapLayer, GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers'
-import { TileLayer } from '@deck.gl/geo-layers'
+import { ArcLayer, GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers'
 import { HeatmapLayer } from '@deck.gl/aggregation-layers'
 import MapLegend from './MapLegend'
 import { getRiskColor, networkConnections } from '../../data/network-connections'
@@ -10,8 +9,14 @@ import { normalizeNetworkGraph, useNetworkGraph } from '../../hooks/useApi'
 import { regions } from '../../data/regions'
 import regionBoundaries from '../../data/region-boundaries.json'
 
-// Warm-light basemap: the identity is paper, ink and clay — no dark chrome.
-const BASEMAP_URL = 'https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'
+// Bundled Natural Earth land instead of a raster tile service. The keyless
+// CARTO endpoint this map used to read now answers with tiles watermarked
+// "API KEY REQUIRED" diagonally across the map, and any tile CDN is a
+// third-party runtime dependency plus an offline failure mode -- an earlier
+// README capture showed exactly that: a blank sea where the basemap never
+// loaded. Natural Earth is public domain; at 1:110m it is context, not
+// detail. The markers, heat and arcs are the content of this map.
+import worldCountries from '../../data/world-countries.json'
 
 // Visual placeholder for a region with no scored corridor. It is a colour input,
 // not a financial figure: a risk score is never invented for an exposure that
@@ -32,7 +37,7 @@ const INITIAL_VIEW_STATE = {
   pitch: 0,
   bearing: 0,
   minZoom: 0.6,
-  maxZoom: 12
+  maxZoom: 6
 }
 
 const HEAT_COLOR_RANGE = [
@@ -85,9 +90,7 @@ export default function RiskMap({
   const {
     data: networkPayload,
     isLoading: networkLoading,
-    isError: networkIsError,
-    error: networkError,
-    refetch: refetchNetwork
+    isError: networkIsError
   } = useNetworkGraph()
 
   const network = useMemo(() => normalizeNetworkGraph(networkPayload), [networkPayload])
@@ -206,8 +209,6 @@ export default function RiskMap({
     [connections]
   )
 
-  const unplacedEdges = connections.length - arcs.length
-
   const heatPoints = useMemo(() => {
     if (!bankPoints.length) return regionPoints
     return [
@@ -223,22 +224,16 @@ export default function RiskMap({
 
   const baseLayer = useMemo(
     () =>
-      new TileLayer({
-        id: 'basemap',
-        data: BASEMAP_URL,
-        minZoom: 0,
-        maxZoom: 19,
-        tileSize: 256,
-        // Tile errors are expected when offline; keep them out of the console.
-        onTileError: () => {},
-        renderSubLayers: (props) => {
-          const { west, south, east, north } = props.tile.bbox
-          return new BitmapLayer(props, {
-            data: null,
-            image: props.data,
-            bounds: [west, south, east, north]
-          })
-        }
+      new GeoJsonLayer({
+        id: 'world-land',
+        data: worldCountries,
+        stroked: true,
+        filled: true,
+        pickable: false,
+        getFillColor: [246, 242, 233],
+        getLineColor: [211, 203, 182],
+        getLineWidth: 0.6,
+        lineWidthUnits: 'pixels'
       }),
     []
   )
@@ -422,26 +417,6 @@ export default function RiskMap({
     setViewState((previous) => ({ ...previous, ...next }))
   }, [])
 
-  // Explicit, visible states for the live network. The map must never look the
-  // same when the backend failed as when it legitimately has no network yet.
-  let networkStatus = null
-  if (networkLoading) {
-    networkStatus = 'Loading interbank exposures…'
-  } else if (fallbackActive) {
-    networkStatus =
-      'DEMO NETWORK — the backend has no exposure matrix; showing the bundled sample file. Not live data; do not use for decisions.'
-  } else if (networkIsError) {
-    networkStatus = `Interbank exposures unavailable: ${networkError?.message ?? 'request failed'}.`
-  } else if (network.status === 'unavailable') {
-    networkStatus = `No interbank exposure network available. ${network.reason ?? ''}`.trim()
-  } else {
-    const vintage = network.asOf ? `as of ${network.asOf}` : 'vintage unknown'
-    const unplaced = unplacedEdges
-      ? ` ${unplacedEdges} edge(s) could not be placed (no region reference for an endpoint).`
-      : ''
-    networkStatus = `Live interbank network, ${vintage} — ${network.edges.length} edge(s), ${network.nodes.length} institution(s).${unplaced}`
-  }
-
   return (
     <div
       data-testid="risk-map"
@@ -458,38 +433,13 @@ export default function RiskMap({
         getCursor={({ isDragging, isHovering }) => (isDragging ? 'grabbing' : isHovering ? 'pointer' : 'grab')}
       />
 
-      {showNetwork && (
-        <div
-          data-testid="network-status"
-          className={[
-            'absolute left-4 top-4 z-10 max-w-xs rounded-lg px-3 py-2 text-xs',
-            fallbackActive
-              ? 'bg-bne-ochre-50/95 text-bne-ochre-600 border border-bne-ochre/40'
-              : networkIsError
-              ? 'bg-bne-clay-50/95 text-bne-clay-600 border border-bne-clay/40'
-              : 'bg-bne-card/95 text-bne-ink-soft border border-bne-line'
-          ].join(' ')}
-        >
-          <p>{networkStatus}</p>
-          {networkIsError && !fallbackActive && (
-            <button
-              type="button"
-              onClick={() => refetchNetwork()}
-              className="mt-1 underline underline-offset-2"
-            >
-              Retry
-            </button>
-          )}
-        </div>
-      )}
-
       <MapLegend showNetwork={showNetwork} className="absolute right-4 top-4 z-10" />
 
       <div
         data-testid="map-attribution"
         className="pointer-events-none absolute bottom-0 left-0 z-10 rounded-tr-md bg-bne-card/85 border-r border-t border-bne-line px-2 py-1 text-[10px] text-bne-faint"
       >
-        © OpenStreetMap contributors © CARTO
+        Boundaries: Natural Earth (public domain)
       </div>
     </div>
   )

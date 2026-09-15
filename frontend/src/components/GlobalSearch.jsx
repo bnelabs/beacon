@@ -92,8 +92,7 @@ export default function GlobalSearch() {
       { id: 'datasources', title: 'Data Sources', category: 'Page', page: 'datasources', icon: 'DS' },
       { id: 'countries', title: 'Country Profiles', category: 'Page', page: 'countries', icon: 'CP' },
       { id: 'results', title: 'Results', category: 'Page', page: 'results', icon: 'RS' },
-      { id: 'settings', title: 'Settings', category: 'Page', page: 'settings', icon: 'ST' },
-      { id: 'help', title: 'Help', category: 'Page', page: 'help', icon: 'HP' }
+      { id: 'settings', title: 'Settings', category: 'Page', page: 'settings', icon: 'ST' }
     )
 
     // Jobs — GET /api/v1/jobs answers with a bare array of JobResponse.

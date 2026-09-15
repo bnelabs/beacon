@@ -59,7 +59,7 @@ _UNCERTAINTY_NOT_CALIBRATED = {
         "(split conformal). Until then the confidence fields are null rather "
         "than an interval from a method that described a different network."
     ),
-    "roadmap": "docs/QUANT_REVIEW_2026-09.md (Phase 2)",
+    "roadmap": "README.md, Scoring and validation: known limitations",
 }
 
 
@@ -164,7 +164,8 @@ async def get_bank_risks(
             "bank_id": bid,
             "bank_name": profile.get("bank_name"),
             # The analyzer's score, in its own units, with the band it
-            # assigned. Not a percentage: see docs/QUANT_REVIEW_2026-09.md F6.
+            # assigned. Not a percentage: uncalibrated, see README.md
+            # §Scoring and validation.
             "risk_score": profile.get("risk_score"),
             "risk_level": profile.get("risk_level"),
             "score_units": "standardized one-step-ahead indicator prediction",
@@ -188,7 +189,7 @@ async def get_bank_risks(
             "risk_score": (
                 "standardized model output; the band is the analyzer's "
                 "thresholding of it, pending calibration (docs/"
-                "QUANT_REVIEW_2026-09.md, Phase 2)"
+                "README.md, Scoring and validation)"
             ),
             "confidence_bounds": "null until conformal calibration is wired",
         },

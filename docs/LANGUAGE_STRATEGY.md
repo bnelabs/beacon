@@ -175,9 +175,9 @@ tree and did not survive:
 Two further reasons are structural rather than factual. The proposal would port
 modules without checking whether anything calls them, which is the exact defect
 `test_reachability.py` exists to prevent and has caught three times. And it
-never mentions `QUANT_REVIEW_2026-09.md`, which reproduced five P0 defects in
-the live ML path the day before and concludes that the binding constraint is a
-**missing target definition** — *"risk of what, measured how, over what horizon,
+never mentions the fourth-round quant review, which reproduced five P0
+defects in the live ML path the day before and concludes that the binding
+constraint is a **missing target definition** — *"risk of what, measured how, over what horizon,
 labelled from which observable?"* Making an undefined target fast is not
 progress.
 

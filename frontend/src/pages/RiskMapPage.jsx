@@ -79,7 +79,9 @@ export default function RiskMapPage() {
   const {
     data: networkPayload,
     isLoading: networkLoading,
-    isError: networkIsError
+    isError: networkIsError,
+    error: networkError,
+    refetch: refetchNetwork
   } = useNetworkGraph()
 
   const network = useMemo(() => normalizeNetworkGraph(networkPayload), [networkPayload])
@@ -137,6 +139,34 @@ export default function RiskMapPage() {
 
   const getRegionName = (regionId) => regions.find((region) => region.id === regionId)?.name || regionId
 
+  // The live-network states are stated once, in a strip above the map rather
+  // than watermarked over it: a warning painted across the canvas read as part
+  // of the map itself. The map must still never look the same when the backend
+  // failed as when it legitimately has no network yet, so every state keeps its
+  // own wording and colour -- the strip is a placement change, not a mute.
+  const regionIds = useMemo(() => new Set(regions.map((region) => region.id)), [])
+  const unplacedEdges = connections.filter(
+    (connection) => !regionIds.has(connection.source) || !regionIds.has(connection.target)
+  ).length
+
+  let networkStatus = null
+  if (networkLoading) {
+    networkStatus = 'Loading interbank exposures…'
+  } else if (fallbackActive) {
+    networkStatus =
+      'DEMO NETWORK — the backend has no exposure matrix; showing the bundled sample file. Not live data; do not use for decisions.'
+  } else if (networkIsError) {
+    networkStatus = `Interbank exposures unavailable: ${networkError?.message ?? 'request failed'}.`
+  } else if (network.status === 'unavailable') {
+    networkStatus = `No interbank exposure network available. ${network.reason ?? ''}`.trim()
+  } else {
+    const vintage = network.asOf ? `as of ${network.asOf}` : 'vintage unknown'
+    const unplaced = unplacedEdges
+      ? ` ${unplacedEdges} edge(s) could not be placed (no region reference for an endpoint).`
+      : ''
+    networkStatus = `Live interbank network, ${vintage} — ${network.edges.length} edge(s), ${network.nodes.length} institution(s).${unplaced}`
+  }
+
   const handleConnectionClick = (connection) => {
     setSelectedConnection(connection)
     setSelectedRegion(null)
@@ -188,8 +218,32 @@ export default function RiskMapPage() {
       }
     >
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-12rem)]">
-        <div className="lg:col-span-2">
-          <Card className="h-full p-0 overflow-hidden">
+        <div className="lg:col-span-2 flex h-full min-h-0 flex-col gap-3">
+          {showNetwork && (
+            <div
+              data-testid="network-status"
+              className={cn(
+                'flex items-start gap-3 rounded-md border px-3 py-2 text-xs leading-relaxed shadow-bne-panel',
+                fallbackActive
+                  ? 'border-bne-ochre/40 bg-bne-ochre-50 text-bne-ochre-600'
+                  : networkIsError
+                  ? 'border-bne-clay/40 bg-bne-clay-50 text-bne-clay-600'
+                  : 'border-bne-line bg-bne-card text-bne-ink-soft'
+              )}
+            >
+              <p className="flex-1">{networkStatus}</p>
+              {networkIsError && !fallbackActive && (
+                <button
+                  type="button"
+                  onClick={() => refetchNetwork()}
+                  className="shrink-0 underline underline-offset-2"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
+          <Card className="flex-1 min-h-0 p-0 overflow-hidden">
             <RiskMap
               selectedRegion={selectedRegion}
               onRegionSelect={handleRegionSelect}

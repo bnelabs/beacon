@@ -65,7 +65,7 @@ never touches production state. A backup nobody has restored is a hypothesis.
 - It will not invent data: missing feeds raise typed errors; gaps stay gaps.
 - It will not present uncalibrated model output as a risk probability;
   levels read `uncalibrated` until the calibration roadmap lands
-  (`docs/QUANT_REVIEW_2026-09.md`, Phase 2).
+  (`README.md` §Scoring and validation, known limitations).
 - It will not clear a network it was not given: clearing and fire-sale runs
   require declared or uploaded balance sheets; maximum-entropy estimates
   (`network_estimation`) carry their prior-status caveat into every result.

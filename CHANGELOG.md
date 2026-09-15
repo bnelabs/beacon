@@ -62,6 +62,29 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   are deterministic (`derandomize=True`).
 
 ### Changed
+- **The risk map no longer reads a third-party tile service.** The keyless
+  CARTO basemap endpoint now serves tiles watermarked "API KEY REQUIRED"
+  diagonally across the map -- the "2d globe api required" watermark a
+  reviewer hit on the live deployment -- and a tile CDN is also a key
+  dependency and an offline failure mode (an earlier README capture showed a
+  blank sea where tiles never loaded). The basemap is now a bundled, trimmed
+  Natural Earth 1:110m land layer (`frontend/src/data/world-countries.json`,
+  public domain, 190 KB), drawn in the paper idiom, with zoom capped at 6 and
+  the attribution changed to Natural Earth. `@deck.gl/geo-layers` (TileLayer)
+  left with it, and the e2e basemap-tile mock is gone because no tiles are
+  fetched any more.
+- **Risk-map degraded states are stated above the map, not across it.** The
+  network status box (loading, unavailable, request failed with Retry, demo
+  fallback, live vintage) was an overlay watermarked on the map canvas; it is
+  now a slim status strip above the map card in `RiskMapPage.jsx`, one wording
+  and one colour per state. A warning painted over the map read as part of the
+  map; the legend and the OSM/CARTO attribution remain the only overlays.
+- **README screenshots and Interface section.** Four captioned screens
+  (Dashboard, Risk Map, Models, Results) captured from the shipped UI against
+  the mocked API replace the two-image table whose risk-map capture showed a
+  blank basemap; each caption says what the screen is for. The page list drops
+  Help and the guided tour, and says plainly that guided help is absent until
+  the system matures.
 - `GaussianHMM._fit_once` no longer runs a **second forward pass after every M-step**. It did so only to record the updated parameters' likelihood, but `_forward` already returns the per-step normalisers and their sum is `log p(X)` under the parameters that produced them -- the identity was sitting in `_forward`'s own docstring. The parameters are now scored once, after the loop, which is the only place the `history[-1] == log_likelihood(returned parameters)` invariant needs it. Measured with `scripts/bench_systemic.py --reps 6`: the production regime nowcast (`StudentTHMM(n_states=2)`, T=1 000) **5.264 s -> 3.349 s (1.57x)**, T=250 **1.401 s -> 0.842 s (1.67x)**, and the HMM/Student-t/property-based suite **76.3 s -> 44.3 s**. The final log-likelihood is **bit-identical** (-3618.940508 before and after) and so are the returned parameters. `history[:-1]` now records the likelihoods *entering* each M-step, a one-iteration lag that leaves `np.diff(history)` the same sequence of EM improvements the monotonicity tests assert on; the improvement that trips the convergence test is recorded before the break rather than discarded by it.
 - The EM convergence test is **scaled to the objective** (`tolerance * max(1, |log-likelihood|)`) instead of absolute. The objective is summed over `T` observations, so a fixed 1e-6 means a relative tolerance of ~1e-9 at T=1 000 and tightens further with series length and with the units the data is expressed in. **Recorded honestly as a latent defect closed, not as a speedup:** on every dataset tried -- Gaussian and Student-t, T=250 to T=20 000, random walks and well-separated mixtures -- the absolute test also converged, so this changes no measured number. What it removes is a scale-dependence that would bite on a longer series or a change of units.
 - `docs/LANGUAGE_STRATEGY.md` **restored**. It was deleted by `0ecd76f` ("Document language strategy and migration plans"), a commit whose entire diff was 85 deletions of this file, while `docs/README.md` kept indexing it and `scripts/bench_systemic.py` -- added by `8dff9e2` so the document's numbers could be re-measured rather than trusted -- was left in the tree with nothing pointing at it. Restored from `8dff9e2`, re-benchmarked, and extended with the regime-nowcast measurement and with the record of an external four-language migration proposal that was declined on evidence.
@@ -75,6 +98,28 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   documents the variable.
 
 ### Removed
+- **Guided help, while the platform is still maturing.** `pages/Help.jsx`, the
+  driver.js onboarding tour (`hooks/useOnboarding.js`), `WelcomeBanner`,
+  `styles/onboarding.css` and every navigation entry that led to them
+  (sidebar, header menu, the global-search palette, breadcrumbs), plus the
+  `driver.js` dependency and its `onboarding` vite chunk. Reviewer feedback:
+  guided help for a system that is still moving documents behaviour faster
+  than it can be written, and reads as confidence the product does not claim
+  yet. The e2e suite asserts the tour button, the Help entries and the old
+  Help copy stay absent, census-style: a removal is a decision, and decisions
+  get tests. `docs/frontend.md` records where guided help returns from when
+  the system matures.
+- **`docs/QUANT_REVIEW_2026-09.md`.** The fourth-round quant review was a
+  round-by-round development narrative -- what broke, what was fixed in that
+  round, what the next round queued -- and reviewer feedback was that users
+  need the limitations, not the saga. Its findings merged long ago with
+  dispositions; its still-open items (no calibrated risk scale, no event
+  target, no per-indicator semantics registry) now live as a three-bullet
+  register in `README.md` §Scoring and validation, and every pointer to the
+  document -- API payloads in `explainability.py` and `orchestrator.py`,
+  docstrings, `RUNBOOK.md`, `LANGUAGE_STRATEGY.md`, the docs index -- was
+  repointed there. `docs/README.md` keeps the deletion in its Removed table
+  with the reason, so the absence stays discoverable.
 - The dead Toto-2.0 weights mount from `docker-compose.yml`
   (`BEACON_MODEL_HOST_DIR` with a one-developer machine as its default,
   `BEACON_MODEL_DIR`, and the read-only `/models` bind). The encoder stack
