@@ -1,7 +1,8 @@
 """Data Analyzer - Statistical analysis and reporting."""
 
 import logging
-from typing import Dict
+from typing import Dict, Optional
+
 from dataclasses import dataclass, field
 import pandas as pd
 import numpy as np
@@ -10,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AnalysisReport:
-    accuracy_score: float = 0.0
+    accuracy_score: Optional[float] = None
+    integrity_anomalies: int = 0
     statistics: Dict = field(default_factory=dict)
 
 class DataAnalyzer:
@@ -32,32 +34,21 @@ class DataAnalyzer:
             "memory_mb": float(data.memory_usage(deep=True).sum() / 1024**2)
         }
 
-        # Compute data quality score based on validation and cleaning
-        quality_factors = []
+        # Round seven (R2): the previous "accuracy" was a hand-rolled
+        # 0.4/0.3/0.3 blend whose validation term was a binary step, whose
+        # cleaning term rewarded fixes the cleaner deliberately no longer
+        # makes, and whose name described nothing measured. Accuracy at this
+        # stage is not measurable; the gate renormalises its weights over the
+        # components that ARE present, so absence is the honest value.
+        report.accuracy_score = None
 
-        # Factor 1: Validation results (40% weight)
-        if validation_report and hasattr(validation_report, 'critical_errors'):
-            validation_score = 1.0 if validation_report.critical_errors == 0 else 0.0
-            quality_factors.append(validation_score * 0.4)
-
-        # Factor 2: Data completeness (30% weight)
-        value_col = 'value' if 'value' in data.columns else 'Value' if 'Value' in data.columns else None
-
-        if value_col:
-            value_series = pd.to_numeric(data[value_col], errors='coerce')
-            completeness = 1.0 - (value_series.isnull().sum() / len(data))
-            quality_factors.append(completeness * 0.3)
-
-        # Factor 3: Cleaning success (30% weight)
-        if cleaning_report and hasattr(cleaning_report, 'fixed_issues'):
-            # Reward successful cleaning, penalize if many issues
-            cleaning_score = 1.0 / (1.0 + cleaning_report.fixed_issues / len(data))
-            quality_factors.append(cleaning_score * 0.3)
-
-        # Overall accuracy score
-        report.accuracy_score = float(sum(quality_factors)) if quality_factors else 0.5
+        # What IS measured here: structural anomalies the validator found,
+        # carried per row-count so downstream reports can rate them.
+        if validation_report is not None:
+            report.integrity_anomalies = int(getattr(validation_report, "anomalies_count", 0) or 0)
 
         # Additional statistics
+        value_col = 'value' if 'value' in data.columns else 'Value' if 'Value' in data.columns else None
         if value_col:
             values = pd.to_numeric(data[value_col], errors='coerce').dropna()
             if len(values) > 0:
@@ -69,6 +60,6 @@ class DataAnalyzer:
                     "completeness": float(len(values) / len(data))
                 })
 
-        logger.info(f"[{self.job_id}] Data quality score: {report.accuracy_score:.2f}")
+        logger.info("[%s] Data quality accuracy: %s", self.job_id, "unmeasured" if report.accuracy_score is None else f"{report.accuracy_score:.2f}")
 
         return report
