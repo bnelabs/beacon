@@ -242,21 +242,28 @@ row `t+1` of the same source. Available via
 
 ---
 
-## Database migrations
+## Database Migrations
 
-Alembic is configured at the repository root:
+Alembic is the single source of truth for schema. Containers run
+`alembic upgrade head` from `backend/entrypoint.sh` before the API or worker
+starts (retry-looped for first-boot races; `BEACON_RUN_MIGRATIONS=0` opts
+out), so deployments receive hypertables and continuous aggregates rather
+than silently running on the base-table fallback. The baseline migration
+`baseline_core_001` reconciles tables that historically came from
+`Base.metadata.create_all`; every change after it is an explicit migration.
 
 ```bash
 export DATABASE_URL=postgresql://beacon_user:beacon_password@localhost:5432/beacon_db
-alembic upgrade head        # apply migrations
+alembic upgrade head        # apply migrations (idempotent; inspector-guarded)
+alembic history             # revision chain
 alembic upgrade head --sql  # render SQL for review without touching a database
 ```
 
 Time-series tables become TimescaleDB hypertables with continuous aggregates
-via migration `timescale_001`; without TimescaleDB the migration creates plain
-tables and the store falls back to base-table aggregation.
-
----
+via `timescale_001`; without TimescaleDB the migration creates plain tables
+and logs a warning, and `TimeSeriesStore` falls back to base-table
+aggregation. `configs/timescaledb/timescale_setup.sql` applies the same DDL
+manually for DBAs.
 
 ## CI/CD
 

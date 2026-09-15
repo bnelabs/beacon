@@ -55,56 +55,21 @@ docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi -L
 
 ---
 
-## 3. Model weights live in visible folders, not a hidden cache
+## 3. Model weights: none ship, none are fetched
 
-The Toto 2.0 checkpoints were moved **out** of `~/.cache/huggingface` into:
+The Toto 2.0 foundation-encoder stack was **removed** in the 2026-09 hygiene
+round (see the REMOVED register in `backend/tests/test_reachability.py`): it
+was implemented and tested but never constructed by a production path, while
+every image paid gigabytes for it. There is therefore **no weights folder to
+mount and no `BEACON_MODEL_DIR` to set** in current deployments. Older
+ revisions of this document described `/home/komedi/models/beacon/toto/`;
+that path was one developer's machine and is not part of this platform.
 
-```
-/home/komedi/models/beacon/toto/
-├── Toto-2.0-313m/   1.2 GB   config.json  model.safetensors  README.md
-├── Toto-2.0-1B/     3.9 GB
-└── Toto-2.0-2.5B/   9.2 GB
-          total      ~14 GB
-```
+If a foundation encoder returns, it returns together with the engine path
+that embeds nodes with it -- and this section returns with it.
 
-Each is a plain folder holding the real files (symlinks dereferenced), not a
-cache tree of blobs.
 
-`backend/modules/engine/foundation_encoders.py` loads them by **path**:
-
-* `resolve_model_dir()` consults `BEACON_MODEL_DIR` only. **`HF_HOME` is
-  deliberately ignored** — pointing the load path at a cache is what was removed.
-* `local_model_path(model_id)` resolves `Datadog/Toto-2.0-313m` to
-  `<root>/Toto-2.0-313m` and requires `config.json` plus at least one weight file,
-  so a half-copied directory fails where the message can name the folder.
-* The folder is passed to `from_pretrained` **as the model path, never as
-  `cache_dir=`**. There is no cache in the load path, so nothing can be fetched
-  and nothing can be hidden. A test asserts the string `cache_dir=` never appears
-  in the module.
-
-`TOTO_REPO_DEFAULT` is `Datadog/Toto-2.0-313m`. The 1B and 2.5B checkpoints remain
-on disk because the size comparison was measured with them; 313m is the model in
-use.
-
-### Inside containers
-
-The tree is bind-mounted **read-only** and never copied into an image:
-
-```yaml
-volumes:
-  - ${BEACON_MODEL_HOST_DIR:-/home/komedi/models/beacon/toto}:/models:ro
-environment:
-  BEACON_MODEL_DIR: /models
-```
-
-Read-only for two reasons: copying ~14 GB into every image (and every rebuild) is
-waste, and a mount no container can write to cannot corrupt a checkpoint.
-
-To point elsewhere: `BEACON_MODEL_HOST_DIR=/other/tree docker compose up -d`.
-
----
-
-## 4. Reaching it from your local network
+## 4. Reaching the stack from other machines
 
 The host is `192.168.68.57` on `wlo1` (Wi-Fi). All published ports bind `0.0.0.0`,
 so anything on `192.168.68.0/22` can reach them:

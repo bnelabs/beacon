@@ -77,6 +77,7 @@ services:
       FRED_API_KEY: ${FRED_API_KEY:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       SEC_API_KEY: ${SEC_API_KEY:-}
+      FMP_API_KEY: ${FMP_API_KEY:-}
       # Path to the model tree *inside the container*. The weights are
       # bind-mounted read-only from the host below, never baked into the image and
       # never re-downloaded. See backend/modules/engine/foundation_encoders.py.
@@ -121,6 +122,7 @@ services:
       FRED_API_KEY: ${FRED_API_KEY:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       SEC_API_KEY: ${SEC_API_KEY:-}
+      FMP_API_KEY: ${FMP_API_KEY:-}
       # Path to the model tree *inside the container*. The weights are
       # bind-mounted read-only from the host below, never baked into the image and
       # never re-downloaded. See backend/modules/engine/foundation_encoders.py.
