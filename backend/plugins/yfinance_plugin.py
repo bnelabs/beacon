@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional
 import logging
 
 from .base import DataSourcePlugin, register_plugin
+from .http_client import retry_call
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,10 @@ class YFinancePlugin(DataSourcePlugin):
         try:
             # Try fetching a well-known ticker
             test_ticker = yf.Ticker("AAPL")
-            info = test_ticker.info
+            # yfinance hides its own transport, so the plugin-wide exponential
+            # backoff policy is applied around the opaque SDK call rather than
+            # at the HTTP layer.
+            info = retry_call(lambda: test_ticker.info, retries=2)
 
             if info and 'symbol' in info:
                 return {
@@ -61,14 +65,18 @@ class YFinancePlugin(DataSourcePlugin):
             DataFrame with standardized columns
         """
         try:
-            # Download data
-            data = yf.download(
-                symbols,
-                start=start_date.strftime("%Y-%m-%d"),
-                end=end_date.strftime("%Y-%m-%d"),
-                group_by='ticker',
-                auto_adjust=False,
-                progress=False
+            # Download data (wrapped in the shared backoff policy; yfinance does
+            # its own HTTP so retries belong around the call, not the socket).
+            data = retry_call(
+                lambda: yf.download(
+                    symbols,
+                    start=start_date.strftime("%Y-%m-%d"),
+                    end=end_date.strftime("%Y-%m-%d"),
+                    group_by='ticker',
+                    auto_adjust=False,
+                    progress=False
+                ),
+                retries=2,
             )
 
             if data.empty:

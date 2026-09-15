@@ -1,8 +1,10 @@
 """RESULTS Module Generator - Comprehensive reporting and visualization."""
 
+from __future__ import annotations
+
 import logging
 import os
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, TYPE_CHECKING
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from enum import Enum
@@ -11,7 +13,14 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-from backend.modules.engine.orchestrator import EngineResult, RiskScores
+# EngineResult / RiskScores are referenced only in annotations below. With PEP
+# 563 string annotations (the __future__ import above) they never need to exist
+# at runtime, so the import lives under TYPE_CHECKING. This matters because
+# results.py imports this module at API startup and orchestrator imports torch:
+# a runtime import here would pull the torch runtime into the base web container
+# just to build reports. Static type checkers still see the real types.
+if TYPE_CHECKING:
+    from backend.modules.engine.orchestrator import EngineResult, RiskScores
 
 logger = logging.getLogger(__name__)
 

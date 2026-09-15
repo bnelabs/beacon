@@ -7,16 +7,18 @@ import MapLegend from './MapLegend'
 import { getRiskColor, networkConnections } from '../../data/network-connections'
 import { normalizeNetworkGraph, useNetworkGraph } from '../../hooks/useApi'
 import { regions } from '../../data/regions'
-import regionBoundaries from '../../data/region-boundaries.json'
 
-// Bundled Natural Earth land instead of a raster tile service. The keyless
-// CARTO endpoint this map used to read now answers with tiles watermarked
-// "API KEY REQUIRED" diagonally across the map, and any tile CDN is a
-// third-party runtime dependency plus an offline failure mode -- an earlier
-// README capture showed exactly that: a blank sea where the basemap never
-// loaded. Natural Earth is public domain; at 1:110m it is context, not
-// detail. The markers, heat and arcs are the content of this map.
-import worldCountries from '../../data/world-countries.json'
+// The Natural Earth basemap (world-countries.json) and the region boundaries
+// (region-boundaries.json) are ~190 KB static GeoJSON payloads each. They are
+// lazy-loaded with dynamic import() inside the component (see the geo effect
+// below) so Vite splits them into separate on-demand chunks instead of inlining
+// ~370 KB of geography into the primary dashboard bundle. Natural Earth is
+// public domain; at 1:110m it is context, not detail -- the markers, heat and
+// arcs are the content of this map. A raster tile service was rejected: the
+// keyless CARTO endpoint now answers with tiles watermarked "API KEY REQUIRED"
+// diagonally across the map, and any tile CDN is a third-party runtime
+// dependency plus an offline failure mode (an earlier README capture showed a
+// blank sea where the basemap never loaded).
 
 // Visual placeholder for a region with no scored corridor. It is a colour input,
 // not a financial figure: a risk score is never invented for an exposure that
@@ -86,6 +88,35 @@ export default function RiskMap({
   useEffect(() => {
     setViewState(INITIAL_VIEW_STATE)
   }, [resetToken])
+
+  // Static geography lives in two large JSON files that are code-split into
+  // their own chunks and fetched on mount rather than shipped in the main
+  // bundle. Until they resolve the map renders markers/heat/arcs over a plain
+  // background, so first paint is not blocked on ~370 KB of polygons.
+  const [geo, setGeo] = useState({ worldCountries: null, regionBoundaries: null })
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      import('../../data/world-countries.json'),
+      import('../../data/region-boundaries.json')
+    ])
+      .then(([world, bounds]) => {
+        if (!cancelled) {
+          setGeo({ worldCountries: world.default, regionBoundaries: bounds.default })
+        }
+      })
+      .catch(() => {
+        // Geography is context, not content: if a chunk fails to load the map
+        // still renders its data layers; the basemap simply stays absent.
+        if (!cancelled) {
+          setGeo((current) => current)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const {
     data: networkPayload,
@@ -222,46 +253,48 @@ export default function RiskMap({
     return regionPoints.filter((point) => point.regionId !== selectedRegion?.id)
   }, [bankPoints, regionPoints, selectedRegion])
 
-  const baseLayer = useMemo(
-    () =>
-      new GeoJsonLayer({
-        id: 'world-land',
-        data: worldCountries,
-        stroked: true,
-        filled: true,
-        pickable: false,
-        getFillColor: [246, 242, 233],
-        getLineColor: [211, 203, 182],
-        getLineWidth: 0.6,
-        lineWidthUnits: 'pixels'
-      }),
-    []
-  )
+  const baseLayer = useMemo(() => {
+    if (!geo.worldCountries) return null
+    return new GeoJsonLayer({
+      id: 'world-land',
+      data: geo.worldCountries,
+      stroked: true,
+      filled: true,
+      pickable: false,
+      getFillColor: [246, 242, 233],
+      getLineColor: [211, 203, 182],
+      getLineWidth: 0.6,
+      lineWidthUnits: 'pixels'
+    })
+  }, [geo.worldCountries])
 
   const selectedIso3 = selectedRegion?.iso3
 
   const layers = useMemo(() => {
-    const stack = [
-      baseLayer,
-      new GeoJsonLayer({
-        id: 'region-boundaries',
-        data: regionBoundaries,
-        stroked: true,
-        filled: true,
-        pickable: true,
-        getFillColor: (feature) =>
-          feature.properties.iso3 === selectedIso3 ? [44, 85, 69, 46] : [110, 102, 83, 14],
-        getLineColor: (feature) =>
-          feature.properties.iso3 === selectedIso3 ? [44, 85, 69, 255] : [110, 102, 83, 105],
-        getLineWidth: (feature) => (feature.properties.iso3 === selectedIso3 ? 2 : 1),
-        lineWidthUnits: 'pixels',
-        updateTriggers: {
-          getFillColor: selectedIso3,
-          getLineColor: selectedIso3,
-          getLineWidth: selectedIso3
-        }
-      })
-    ]
+    const stack = []
+    if (baseLayer) stack.push(baseLayer)
+    if (geo.regionBoundaries) {
+      stack.push(
+        new GeoJsonLayer({
+          id: 'region-boundaries',
+          data: geo.regionBoundaries,
+          stroked: true,
+          filled: true,
+          pickable: true,
+          getFillColor: (feature) =>
+            feature.properties.iso3 === selectedIso3 ? [44, 85, 69, 46] : [110, 102, 83, 14],
+          getLineColor: (feature) =>
+            feature.properties.iso3 === selectedIso3 ? [44, 85, 69, 255] : [110, 102, 83, 105],
+          getLineWidth: (feature) => (feature.properties.iso3 === selectedIso3 ? 2 : 1),
+          lineWidthUnits: 'pixels',
+          updateTriggers: {
+            getFillColor: selectedIso3,
+            getLineColor: selectedIso3,
+            getLineWidth: selectedIso3
+          }
+        })
+      )
+    }
 
     if (showHeatmap) {
       stack.push(
@@ -383,6 +416,7 @@ export default function RiskMap({
     arcs,
     bankPoints,
     baseLayer,
+    geo.regionBoundaries,
     heatPoints,
     maxExposure,
     riskByRegion,

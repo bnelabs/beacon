@@ -17,7 +17,6 @@ Data includes:
 
 import os
 import pandas as pd
-import requests
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import logging
@@ -56,7 +55,7 @@ class FMPPlugin(DataSourcePlugin):
         try:
             endpoint = f"{self.base_url}/profile/JPM"
             params = {"apikey": self.api_key}
-            response = requests.get(endpoint, params=params, timeout=10)
+            response = self.http.get(endpoint, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
             if data and isinstance(data, list) and len(data) > 0:
@@ -170,7 +169,7 @@ class FMPPlugin(DataSourcePlugin):
             "limit": 40  # Get enough history
         }
 
-        response = requests.get(endpoint, params=params, timeout=30)
+        response = self.http.get(endpoint, params=params, timeout=30)
         response.raise_for_status()
 
         data = response.json()
@@ -233,7 +232,7 @@ class FMPPlugin(DataSourcePlugin):
             "limit": 40
         }
 
-        response = requests.get(endpoint, params=params, timeout=30)
+        response = self.http.get(endpoint, params=params, timeout=30)
         response.raise_for_status()
 
         data = response.json()
@@ -278,7 +277,7 @@ class FMPPlugin(DataSourcePlugin):
             "limit": 40
         }
 
-        response = requests.get(endpoint, params=params, timeout=30)
+        response = self.http.get(endpoint, params=params, timeout=30)
         response.raise_for_status()
 
         data = response.json()
@@ -324,7 +323,7 @@ class FMPPlugin(DataSourcePlugin):
             "limit": 40
         }
 
-        response = requests.get(endpoint, params=params, timeout=30)
+        response = self.http.get(endpoint, params=params, timeout=30)
         response.raise_for_status()
 
         data = response.json()
@@ -366,7 +365,7 @@ class FMPPlugin(DataSourcePlugin):
             "limit": 40
         }
 
-        response = requests.get(endpoint, params=params, timeout=30)
+        response = self.http.get(endpoint, params=params, timeout=30)
         response.raise_for_status()
 
         data = response.json()
@@ -400,7 +399,7 @@ class FMPPlugin(DataSourcePlugin):
             "apikey": self.api_key
         }
 
-        response = requests.get(endpoint, params=params, timeout=30)
+        response = self.http.get(endpoint, params=params, timeout=30)
         response.raise_for_status()
 
         data = response.json()

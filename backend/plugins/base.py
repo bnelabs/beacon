@@ -24,7 +24,35 @@ class DataSourcePlugin(ABC):
             config: Plugin-specific configuration dictionary
         """
         self.config = config
+        self._resilient_session = None
         self.validate_config()
+
+    @property
+    def http(self):
+        """Lazily-built resilient HTTP session shared by this plugin's calls.
+
+        Opt-in: a plugin that replaces its raw ``requests.get(...)`` with
+        ``self.http.get(...)`` gains unified exponential-backoff retries, a
+        bounded TTL response cache with stale-on-outage fallback, and per-host
+        rate limiting -- without bespoke code. See
+        :mod:`backend.plugins.http_client`.
+
+        Configuration keys honoured (all optional):
+          * ``timeout``      -- per-request timeout in seconds (default 30).
+          * ``rate_limit``   -- minimum seconds between calls to the same host.
+          * ``cache_ttl``    -- seconds a response stays fresh; ``0`` disables
+                                caching and the stale fallback (default 300).
+        """
+        if getattr(self, "_resilient_session", None) is None:
+            from backend.plugins.http_client import ResilientSession
+
+            config = getattr(self, "config", {}) or {}
+            self._resilient_session = ResilientSession(
+                timeout=float(config.get("timeout", 30) or 30),
+                min_interval=float(config.get("rate_limit", 0) or 0),
+                cache_ttl=float(config.get("cache_ttl", 300) or 0),
+            )
+        return self._resilient_session
 
     @abstractmethod
     def validate_config(self) -> None:

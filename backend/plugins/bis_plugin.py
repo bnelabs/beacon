@@ -3,7 +3,6 @@
 from typing import Dict, Any, List, Optional
 import pandas as pd
 from datetime import datetime
-import requests
 import logging
 from .base import DataSourcePlugin, register_plugin
 
@@ -68,7 +67,7 @@ class BISPlugin(DataSourcePlugin):
         try:
             # Test with a simple query to BIS Statistics API
             url = "https://stats.bis.org/api/v1/data"
-            response = requests.get(url, timeout=10)
+            response = self.http.get(url, timeout=10)
 
             if response.status_code == 200:
                 return {
@@ -189,7 +188,7 @@ class BISPlugin(DataSourcePlugin):
                 "User-Agent": "BEACON/2.0"
             }
 
-            response = requests.get(full_url, headers=headers, params=params, timeout=30)
+            response = self.http.get(full_url, headers=headers, params=params, timeout=30)
             response.raise_for_status()
 
             # Parse XML response

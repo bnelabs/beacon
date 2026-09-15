@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional
 import pandas as pd
 from datetime import datetime, timedelta
 from .base import DataSourcePlugin, register_plugin
+from .http_client import retry_call
 import logging
 
 logger = logging.getLogger(__name__)
@@ -214,8 +215,9 @@ class SECPlugin(DataSourcePlugin):
                     "sort": [{"filedAt": {"order": "desc"}}]
                 }
 
-                # Execute query
-                response = self.query_api.get_filings(query)
+                # Execute query. The sec_api SDK owns its transport, so the
+                # plugin-wide backoff wraps the call.
+                response = retry_call(lambda: self.query_api.get_filings(query), retries=2)
                 filings = response.get("filings", [])
 
                 for filing in filings:
@@ -279,7 +281,7 @@ class SECPlugin(DataSourcePlugin):
                 "from": "0",
                 "size": "1"
             }
-            self.query_api.get_filings(test_query)
+            retry_call(lambda: self.query_api.get_filings(test_query), retries=2)
             logger.info("SEC API key validation successful")
         except Exception as e:
             logger.error(f"SEC API key validation failed: {e}")
