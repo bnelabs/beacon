@@ -1,23 +1,131 @@
-"""Custom API plugin for flexible integrations."""
+"""Custom API plugin for flexible integrations.
+
+Security contract (round seven, finding B2)
+-------------------------------------------
+
+``base_url`` is operator- or GUI-supplied configuration, and this plugin is
+the one place where such a URL is fetched from inside the container. Left
+unchecked that is a server-side request forgery surface: a data-source
+config pointing at ``http://169.254.169.254/`` (cloud metadata), loopback
+or RFC1918 addresses would be fetched by the platform, with responses
+flowing into collection payloads and error messages.
+
+Every composed URL therefore passes :func:`assert_url_fetchable` before any
+request:
+
+* scheme must be ``https`` (an operator may opt into ``http`` for on-prem
+  endpoints with ``BEACON_CUSTOM_API_ALLOW_HTTP=1``; the default is closed);
+* literal IP hosts in loopback / private / link-local / reserved ranges are
+  refused, as are ``localhost``-style and ``.local``/``.internal`` names;
+* hostnames are resolved and every address inspected -- if any resolution
+  lands in a refused range the URL is refused (DNS-rebinding TOCTOU is
+  documented, not solved: strict deployments should egress through a proxy);
+* an operator allowlist (``BEACON_CUSTOM_API_HOST_ALLOWLIST``, comma-separated
+  exact hosts) restricts fetching entirely when set.
+"""
+
+import ipaddress
+import os
+import socket
+import logging
+from datetime import datetime
+from typing import Dict, Any, List, Optional
+from urllib.parse import urlparse
 
 import requests
 import pandas as pd
-from datetime import datetime
-from typing import Dict, Any, List, Optional
-import logging
 
 from .base import DataSourcePlugin, register_plugin
 
 logger = logging.getLogger(__name__)
+
+_TRUTHY = {"1", "true", "yes", "on"}
+_REFUSED_SUFFIXES = (".local", ".internal", ".localhost")
+
+
+class URLPolicyViolation(ValueError):
+    """A configured URL fails the fetch policy. Typed so callers can branch."""
+
+
+def _http_allowed() -> bool:
+    return os.getenv("BEACON_CUSTOM_API_ALLOW_HTTP", "").strip().lower() in _TRUTHY
+
+
+def _allowlist() -> List[str]:
+    raw = os.getenv("BEACON_CUSTOM_API_HOST_ALLOWLIST", "")
+    return [host.strip().lower() for host in raw.split(",") if host.strip()]
+
+
+def _refused_ip(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return (
+        address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    )
+
+
+def assert_url_fetchable(url: str) -> None:
+    """Raise :class:`URLPolicyViolation` unless ``url`` may leave the container."""
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme == "https":
+        pass
+    elif scheme == "http":
+        if not _http_allowed():
+            raise URLPolicyViolation(
+                "http is refused for custom API sources (set "
+                "BEACON_CUSTOM_API_ALLOW_HTTP=1 to permit on-prem http endpoints)"
+            )
+    else:
+        raise URLPolicyViolation(f"unsupported URL scheme {scheme!r}; only https is allowed")
+
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise URLPolicyViolation("URL carries no host")
+
+    allowlist = _allowlist()
+    if allowlist and host not in allowlist:
+        raise URLPolicyViolation(
+            f"host {host!r} is not in BEACON_CUSTOM_API_HOST_ALLOWLIST"
+        )
+
+    if host.endswith(_REFUSED_SUFFIXES) or host == "localhost":
+        raise URLPolicyViolation(f"host {host!r} resolves to a non-public namespace")
+
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        if _refused_ip(literal):
+            raise URLPolicyViolation(f"literal IP {host} is in a refused range")
+        return
+
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or (443 if scheme == "https" else 80))
+    except socket.gaierror as exc:
+        raise URLPolicyViolation(f"host {host!r} does not resolve: {exc}") from exc
+    for info in infos:
+        address = ipaddress.ip_address(info[4][0])
+        if _refused_ip(address):
+            raise URLPolicyViolation(
+                f"host {host!r} resolves into a refused range ({info[4][0]}); "
+                "DNS-rebinding TOCTOU is documented, not solved -- strict "
+                "deployments should egress through a proxy"
+            )
 
 
 class CustomAPIPlugin(DataSourcePlugin):
     """Plugin for custom REST API integrations."""
 
     def validate_config(self) -> None:
-        """Validate custom API configuration."""
+        """Validate custom API configuration, including the fetch policy."""
         if not self.config.get('base_url'):
             raise ValueError("API base URL is required")
+        assert_url_fetchable(self.config['base_url'])
 
         # Optional authentication
         auth_type = self.config.get('auth_type', 'none')
@@ -32,6 +140,7 @@ class CustomAPIPlugin(DataSourcePlugin):
             base_url = self.config['base_url']
             test_endpoint = self.config.get('test_endpoint', '/health')
             url = f"{base_url.rstrip('/')}{test_endpoint}"
+            assert_url_fetchable(url)
 
             headers = self._get_headers()
 
@@ -52,6 +161,11 @@ class CustomAPIPlugin(DataSourcePlugin):
                     "message": f"API returned status code {response.status_code}"
                 }
 
+        except URLPolicyViolation as exc:
+            return {
+                "success": False,
+                "message": f"URL policy refusal: {exc}"
+            }
         except requests.exceptions.Timeout:
             return {
                 "success": False,
@@ -113,6 +227,7 @@ class CustomAPIPlugin(DataSourcePlugin):
             base_url = self.config['base_url']
             asset_endpoint = self.config.get('asset_endpoint', '/assets')
             url = f"{base_url.rstrip('/')}{asset_endpoint}"
+            assert_url_fetchable(url)
 
             headers = self._get_headers()
 
@@ -200,6 +315,7 @@ class CustomAPIPlugin(DataSourcePlugin):
             base_url = self.config['base_url']
             indicator_endpoint = self.config.get('indicator_endpoint', '/indicators')
             url = f"{base_url.rstrip('/')}{indicator_endpoint}/{indicator_id}"
+            assert_url_fetchable(url)
 
             headers = self._get_headers()
 
