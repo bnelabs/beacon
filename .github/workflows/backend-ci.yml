@@ -52,23 +52,38 @@ jobs:
       # test_migrations_live.py creates and drops throwaway databases on this
       # server. Without it the live migration tests skip, and a skip is not a
       # pass -- which is the whole point of naming the variable here.
-      MIGRATION_TEST_DATABASE_URL: postgresql://beacon_user:beacon_password@127.0.0.1:5432/postgres
+      #
+      # No password, because the service below uses trust auth; see its comment.
+      MIGRATION_TEST_DATABASE_URL: postgresql://beacon_user@127.0.0.1:5432/postgres
     services:
       # Same image and major version as docker-compose.yml, so the migrations are
       # validated against what deployments actually run.
+      #
+      # `POSTGRES_HOST_AUTH_METHOD: trust` is deliberate. The first version of
+      # this set POSTGRES_USER/POSTGRES_PASSWORD and connected with them, and
+      # every migration test failed with
+      #   FATAL: password authentication failed for user "beacon_user"
+      # even though the credentials matched the service env -- so the image did
+      # not initialise the role the way the stock postgres image does, and the
+      # job's own healthcheck could not tell, because `pg_isready` only checks
+      # that the server accepts connections, not that it authenticates anyone.
+      # Debugging an image's auth setup is not what this job is for. This is an
+      # ephemeral container on the runner's loopback, discarded when the job ends,
+      # so trust is the right trade: it removes a variable rather than hiding a
+      # failure, and nothing here holds data.
       postgres:
         image: timescale/timescaledb:2.15.2-pg15
         env:
           POSTGRES_USER: beacon_user
-          POSTGRES_PASSWORD: beacon_password
           POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U beacon_user -d postgres"
-          --health-interval 10s
+          --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 12
 
     steps:
       - name: Check out repository

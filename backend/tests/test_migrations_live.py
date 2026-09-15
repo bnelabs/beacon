@@ -67,12 +67,19 @@ import sqlalchemy as sa
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: Read from the environment in CI; falls back to a local cluster for
-#: development. Never a production URL -- every database this creates is dropped.
+#: development. Never a production URL -- every database this creates is dropped,
+#: and the fixture asserts nothing else is on the server worth keeping.
+#:
+#: The passwordless entries match the trust-auth service Backend CI declares, and
+#: the last three are common local setups. They are tried in order and the first
+#: that answers wins, so a developer with a password-protected local cluster can
+#: still run these without setting the variable.
 _CANDIDATE_URLS = (
     os.getenv("MIGRATION_TEST_DATABASE_URL"),
     os.getenv("POSTGRES_MIGRATION_TEST_URL"),
-    "postgresql://beacon_user:beacon_password@127.0.0.1:5432/postgres",
+    "postgresql://beacon_user@127.0.0.1:5432/postgres",
     "postgresql://postgres@127.0.0.1:5432/postgres",
+    "postgresql://beacon_user:beacon_password@127.0.0.1:5432/postgres",
     "postgresql://postgres@localhost:5432/postgres",
 )
 
