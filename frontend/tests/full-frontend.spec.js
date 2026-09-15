@@ -268,9 +268,25 @@ test('navigates the application and exercises primary interactions', async ({ pa
 
   // Help interactions
   await page.getByRole('button', { name: 'Help' }).click()
-  await expect(page.getByRole('heading', { name: 'Help Center' })).toBeVisible()
-  await expect(page.getByText('Popular walkthroughs')).toBeVisible()
-  await expect(page.getByText('Ask Beacon Support')).toBeVisible()
+  // 46ea089 rewrote this page and left three assertions here describing the old
+  // one: the title changed from "Help Center" to "Help", and "Popular
+  // walkthroughs" and "Ask Beacon Support" were deleted with the marketing
+  // content they belonged to. Nothing caught it because the change shipped with
+  // this suite already failing for the same reason -- frontend-ci has been red on
+  // every run since that merge, on main and on every branch cut from it.
+  //
+  // Asserted against what the page now says, including the part that is the
+  // point of the rewrite: it documents the platform's own limits and points at
+  // the in-repo registers that hold them.
+  await expect(page.getByRole('heading', { name: 'Help', exact: true })).toBeVisible()
+  await expect(page.getByText('what it refuses to measure')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'How BEACON reads risk' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Known limitations' })).toBeVisible()
+  await expect(page.getByText('docs/QUANT_REVIEW_2026-09.md')).toBeVisible()
+  // And the content that was removed stays removed, so it cannot come back
+  // without someone deciding to.
+  await expect(page.getByText('Ask Beacon Support')).toHaveCount(0)
+  await expect(page.getByText('Popular walkthroughs')).toHaveCount(0)
 })
 
 // Regression guard for the global search palette. The previous version read

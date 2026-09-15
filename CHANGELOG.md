@@ -79,6 +79,31 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   `docker-compose.simple.yml`) with the precondition each waits on.
 
 ### Fixed
+- **Frontend CI has been red on every run since `46ea089`**, on `main` and on every
+  branch cut from it — including #53, #54, #55 and #56, which all merged with the
+  check failing. That commit rewrote `Help.jsx` and left three assertions in
+  `full-frontend.spec.js` describing the page it replaced: the title changed from
+  "Help Center" to "Help", and "Popular walkthroughs" and "Ask Beacon Support"
+  were deleted with the marketing content they belonged to. The spec now asserts
+  what the page actually says — including "Known limitations" and its pointer at
+  `docs/QUANT_REVIEW_2026-09.md`, which is the point of the rewrite — and asserts
+  the removed content stays removed.
+- **"Help Center" survived the Help rewrite in four places** -- the Header menu,
+  `Breadcrumbs`, the onboarding tour and the Settings pointer -- while the
+  Sidebar and the page itself said "Help". Aligned on "Help", the page's actual
+  title, so the breadcrumb and the nav no longer disagree with the heading they
+  lead to. Found while verifying the e2e fix rather than by looking for it.
+
+- **The e2e suite depended on the network.** `index.html` links a Google Fonts
+  stylesheet and `src/styles/index.css` `@import`s the same URL, so every page
+  load made live third-party requests that `apiMocks.js` did not cover — it
+  mocked `basemaps.cartocdn.com` and `**/api/**` and nothing else. Because the
+  spec fails the test on *any* console error, a font request that stalled or
+  failed turned an unrelated assertion red and reported the failure wherever the
+  test happened to be standing. Both hosts are now served locally: an empty
+  stylesheet and a 204 for the font files. No assertion in the suite measures
+  typography, so glyphs falling back to the local stack costs nothing.
+
 - **A fresh database could not be migrated at all.** `003` is the root revision
   and added columns to `data_sources`, which `baseline_core_001` creates five
   revisions later, so `alembic upgrade head` on an empty database failed with

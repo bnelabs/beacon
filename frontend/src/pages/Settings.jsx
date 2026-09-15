@@ -303,7 +303,7 @@ export default function Settings() {
               <div>
                 <p className="text-bne-muted">
                   Press <kbd className="px-2 py-1 mx-1 text-xs font-mono bg-bne-card rounded border border-bne-line">⌘K</kbd> anytime to open global search.
-                  Navigate to the <span className="font-medium text-bne-ink">Help Center</span> for detailed documentation.
+                  Navigate to the <span className="font-medium text-bne-ink">Help</span> for detailed documentation.
                 </p>
               </div>
             </div>
