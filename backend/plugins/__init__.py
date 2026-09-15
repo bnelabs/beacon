@@ -48,6 +48,14 @@ def _load_plugins() -> Dict[str, str]:
         (".fmp_plugin", "FMPPlugin"),
         (".kaggle_plugin", "KagglePlugin"),
         (".ai4risk_plugin", "AI4RiskInterbankPlugin"),
+        # Registered 2026-09: these three existed in the tree but were absent
+        # from this list, so they never reached the runtime registry and no
+        # data source could select them (fdic was additionally unimportable:
+        # it referenced a base_plugin module that never existed; it has been
+        # rewritten against the live BankFind Suite API).
+        (".fdic_plugin", "FDICPlugin"),
+        (".cftc_cot_plugin", "CFTCCotPlugin"),
+        (".nyfed_plugin", "NYFedPlugin"),
     )
 
     loaded: Dict[str, str] = {}

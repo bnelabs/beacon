@@ -42,6 +42,15 @@ archived narratives:
 - **Deferred with reasons:** copula dependence (the clearing engine already
   propagates joint stress), generalized-hyperbolic tails (the Student-t HMM
   covers the regime-variance channel first).
+- **Rejected on evidence: Stooq as a keyless price feed.** Its CSV download
+  endpoint answers an anti-bot challenge page (HTTP 200 carrying HTML) rather
+  than data as of 2026-09-15, so a plugin against it would be dead on arrival.
+  The registry-integrity test (`test_keyless_feeds.py`) exists precisely
+  because the previous FDIC plugin was exactly that: a file referencing a base
+  module that never existed, advertised by the UI as enabled. FDIC has been
+  rewritten against the live BankFind Suite API with only field names verified
+  by probe; interbank marginal fields are declared only once verified the same
+  way.
 - **No hand-maintained endpoint documentation.** The inventory is generated
   (`api-endpoints.md`, guard test) after a hand-written one documented seven
   endpoints that did not exist.
