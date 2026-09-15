@@ -1,104 +1,113 @@
 import PageContainer from '../components/ui/PageContainer'
 import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card'
+import Badge from '../components/ui/Badge'
 
-const knowledgeBaseArticles = [
-  {
-    title: 'Connecting data sources',
-    blurb: 'Bring in central bank, balance sheet, and transaction datasets so Beacon can orchestrate pipelines end-to-end.'
-  },
-  {
-    title: 'Training risk models',
-    blurb: 'Walk through building your first credit risk scenario model, including feature engineering templates.'
-  },
-  {
-    title: 'Reading simulation results',
-    blurb: 'Learn how Beacon scores contagion paths and how to interpret stress-test outputs with stakeholders.'
-  }
-]
+function Section({ title, badge, children }) {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle>{title}</CardTitle>
+          {badge && <Badge size="sm">{badge}</Badge>}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-2 text-[13.5px] leading-relaxed text-bne-muted">
+        {children}
+      </CardContent>
+    </Card>
+  )
+}
 
 export default function Help() {
   return (
-    <PageContainer title="Help Center" className="space-y-6">
-      <p className="text-sm text-bne-muted">
-        Explore guides, best practices, and support options for the Beacon banking network engine. Everything here is kept concise so you can keep momentum while investigating portfolios.
-      </p>
+    <PageContainer
+      eyebrow="Reference"
+      title="Help"
+      subtitle="What BEACON measures, what it refuses to measure, and where each answer lives."
+    >
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <Section title="How BEACON reads risk" badge="semantics">
+          <p>
+            The forecasting model emits a <strong className="text-bne-ink">standardized
+            one-step-ahead prediction</strong> per monitored series. It is not a
+            probability and not a 0–100 score; until calibration lands, risk levels
+            are reported as <em>uncalibrated</em> rather than banded against an
+            invented scale.
+          </p>
+          <p>
+            Prediction jobs attach <strong className="text-bne-ink">split-conformal
+            intervals</strong> (held-out rolling residuals per source) and a
+            Student-t HMM <strong className="text-bne-ink">regime nowcast</strong>
+            (calm/stress). Absence of either is reported as absence.
+          </p>
+        </Section>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Popular walkthroughs</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {knowledgeBaseArticles.map((article) => (
-              <div key={article.title} className="rounded-md border border-bne-line px-4 py-3">
-                <h3 className="text-sm font-semibold text-bne-ink">{article.title}</h3>
-                <p className="mt-2 text-xs text-bne-muted">{article.blurb}</p>
-                <a
-                  href="https://docs.usebeacon.ai"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-bne-pine hover:underline"
-                >
-                  Open guide
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5h10M19 5v10m0-10L5 19" />
-                  </svg>
-                </a>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+        <Section title="Data governance" badge="fail-closed">
+          <p>
+            Every dataset passes a six-stage pipeline ending in a quality gate:
+            row counts, required columns, missing ratios, freshness and a minimum
+            score. Nothing is certified — and no prediction or backtest runs —
+            without a verified attestation.
+          </p>
+          <p>
+            Missing data is never invented: no synthetic fallbacks, no
+            forward-filling, no zero-fills. Gaps stay gaps and are reported per
+            source; the validator flags duplicates, future timestamps, outliers,
+            gap runs, scale breaks and stale feeds.
+          </p>
+        </Section>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>System status</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm text-bne-muted">
-            <div className="flex items-center justify-between rounded-md border border-bne-line px-4 py-3">
-              <div>
-                <p className="text-sm font-semibold text-bne-ink">Beacon Cloud</p>
-                <p className="text-xs text-bne-muted">API latency and job execution queues</p>
-              </div>
-              <span className="rounded-full bg-bne-moss/10 px-3 py-1 text-xs font-semibold text-bne-moss">Operational</span>
-            </div>
-            <p>
-              Incident history and uptime reports are available at{' '}
-              <a href="https://status.usebeacon.ai" target="_blank" rel="noreferrer" className="font-medium text-bne-pine hover:underline">
-                status.usebeacon.ai
-              </a>.
-            </p>
-          </CardContent>
-        </Card>
+        <Section title="Jobs and validation" badge="walk-forward">
+          <p>
+            Training and backtesting run chronologically with embargoed
+            walk-forward folds or CPCV, folded <em>within</em> each source so no
+            fold trains on one indicator and tests on another. Metrics are
+            seam-aware: direction is never scored across a source boundary.
+          </p>
+          <p>
+            Every trained model is priced against persistence and AR(1) baselines
+            that refit per fold while the model stays frozen — the conservative
+            direction for a complexity claim.
+          </p>
+        </Section>
+
+        <Section title="Systemic scenarios" badge="declared inputs">
+          <p>
+            Contagion analysis (Eisenberg–Noe clearing, coupled fire sales,
+            liquidity spirals, Basel III translation) runs on
+            <strong className="text-bne-ink"> declared balance sheets</strong>:
+            exposures, endowments, holdings and margins you supply or upload
+            (point-in-time vintaged). The platform never invents a balance sheet.
+          </p>
+          <p>
+            Results state which inputs were present and which were absent; an
+            absent channel renders as <em>not measured</em>, never as zero.
+          </p>
+        </Section>
+
+        <Section title="Where things live">
+          <ul className="list-disc space-y-1 pl-4">
+            <li><strong className="text-bne-ink">Dashboard</strong> — activity, host status, data quality at a glance.</li>
+            <li><strong className="text-bne-ink">Risk Map</strong> — geographic heat, markers and exposure arcs.</li>
+            <li><strong className="text-bne-ink">Jobs / Results</strong> — every run, its metrics and its reports.</li>
+            <li><strong className="text-bne-ink">Data Sources / Data Quality</strong> — feeds, certifications, anomalies.</li>
+            <li><strong className="text-bne-ink">Models / Performance</strong> — catalogue, lift over baselines.</li>
+          </ul>
+        </Section>
+
+        <Section title="Known limitations" badge="honest by design">
+          <p>
+            BEACON documents what it does not do in-repo: the reachability census
+            lists every implemented-but-unwired module with its blocker and next
+            step; the quant review records model limitations (symmetric tails, no
+            jump diffusion, uncalibrated SDE) and the calibration roadmap.
+          </p>
+          <p>
+            See <span className="font-mono text-xs">docs/QUANT_REVIEW_2026-09.md</span> and
+            the census in <span className="font-mono text-xs">backend/tests/test_reachability.py</span>.
+          </p>
+        </Section>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Need more help?</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3 text-sm text-bne-muted">
-          <div className="rounded-md border border-bne-line p-4">
-            <p className="text-sm font-semibold text-bne-ink">Ask Beacon Support</p>
-            <p className="mt-2 text-xs text-bne-muted">Weekdays 8:00&ndash;18:00 GMT</p>
-            <a href="mailto:support@usebeacon.ai" className="mt-3 inline-flex text-sm font-medium text-bne-pine hover:underline">
-              support@usebeacon.ai
-            </a>
-          </div>
-          <div className="rounded-md border border-bne-line p-4">
-            <p className="text-sm font-semibold text-bne-ink">Join the community</p>
-            <p className="mt-2 text-xs text-bne-muted">Share strategies and learn from other risk teams.</p>
-            <a href="https://community.usebeacon.ai" target="_blank" rel="noreferrer" className="mt-3 inline-flex text-sm font-medium text-bne-pine hover:underline">
-              Community hub
-            </a>
-          </div>
-          <div className="rounded-md border border-bne-line p-4">
-            <p className="text-sm font-semibold text-bne-ink">Schedule a workshop</p>
-            <p className="mt-2 text-xs text-bne-muted">Hands-on sessions to review models, data gaps, and governance.</p>
-            <a href="https://cal.usebeacon.ai" target="_blank" rel="noreferrer" className="mt-3 inline-flex text-sm font-medium text-bne-pine hover:underline">
-              Book time
-            </a>
-          </div>
-        </CardContent>
-      </Card>
     </PageContainer>
   )
 }
