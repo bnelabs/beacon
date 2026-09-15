@@ -21,6 +21,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = ROOT / "VERSION"
@@ -31,7 +32,7 @@ PACKAGE_LOCK = ROOT / "frontend" / "package-lock.json"
 SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$")
 
 
-def fail(message: str) -> "NoReturn":  # type: ignore[name-defined]
+def fail(message: str) -> NoReturn:
     print(f"release: {message}", file=sys.stderr)
     raise SystemExit(1)
 
