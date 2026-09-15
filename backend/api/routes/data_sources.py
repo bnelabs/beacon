@@ -2,7 +2,8 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 from backend.database import get_db
 from backend.models.data_source import DataSource
@@ -15,6 +16,13 @@ from backend.schemas.data_source import (
 )
 from backend.services.data_source_service import DataSourceService
 from backend.services.error_logger import ErrorLogger
+from backend.services.scheduling import (
+    backoff_factor,
+    enqueue_collection,
+    has_open_collection,
+    next_due_at,
+)
+from backend.schemas.job import JobResponse
 
 router = APIRouter()
 
@@ -74,6 +82,51 @@ async def get_provenance_disclosure(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
+
+
+@router.get("/health", response_model=Dict[str, Any])
+async def data_source_health(db: Session = Depends(get_db)):
+    """Feed health: cadence, last outcome, and what is overdue, per source.
+
+    **For non-technical users:** one row per connected feed answering "when
+    did it last succeed, how long did it take, how many rows arrived, and is
+    the next refresh due or late". A feed that keeps failing shows a growing
+    retry interval (the backoff), so "quiet" never silently means "broken".
+    """
+    now = datetime.now(timezone.utc)
+    sources = []
+    for source in db.query(DataSource).order_by(DataSource.name).all():
+        due = next_due_at(source, now)
+        sources.append(
+            {
+                "id": source.id,
+                "name": source.name,
+                "plugin_type": source.plugin_type,
+                "enabled": bool(source.enabled),
+                "status": source.status,
+                "error_message": source.error_message,
+                "sync_interval_minutes": source.sync_interval_minutes,
+                "scheduled": source.sync_interval_minutes is not None,
+                "backoff_factor": backoff_factor(source.consecutive_failures),
+                "consecutive_failures": int(source.consecutive_failures or 0),
+                "last_successful_fetch": (
+                    source.last_successful_fetch.isoformat()
+                    if source.last_successful_fetch
+                    else None
+                ),
+                "last_sync_started_at": (
+                    source.last_sync_started_at.isoformat()
+                    if source.last_sync_started_at
+                    else None
+                ),
+                "last_sync_duration_ms": source.last_sync_duration_ms,
+                "last_sync_rows": source.last_sync_rows,
+                "collection_running": has_open_collection(db, source.id),
+                "next_due_at": due.isoformat() if due else None,
+                "overdue": bool(due is not None and now >= due),
+            }
+        )
+    return {"generated_at": now.isoformat(), "sources": sources}
 
 
 @router.get("/{data_source_id}", response_model=DataSourceResponse)
@@ -176,36 +229,50 @@ async def update_data_source(
         )
 
 
-@router.post("/{data_source_id}/sync", response_model=DataSourceResponse)
+@router.post("/{data_source_id}/sync", response_model=JobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def sync_data_source(
     data_source_id: int,
     db: Session = Depends(get_db)
 ):
-    """
-    Mark a data source as freshly synced.
+    """Queue a real collection job for this source.
 
-    **For non-technical users:** This records the time we last refreshed data
-    from the selected provider. Connect your automated pipelines here later.
+    **For non-technical users:** "Sync now" used to stamp a time and do
+    nothing else; the refresh you expected never happened. It now queues the
+    same collection job the scheduler queues -- watch it under Jobs, with
+    progress, results and failures like any other run.
     """
+    source = db.get(DataSource, data_source_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "technical": f"Data source {data_source_id} not found",
+                "user_friendly": "We couldn't locate that data source. It may have been removed."
+            }
+        )
+    if not source.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "technical": f"Data source {data_source_id} is disabled",
+                "user_friendly": "That data source is disabled. Enable it before syncing."
+            }
+        )
+    if has_open_collection(db, data_source_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "technical": f"A collection for data source {data_source_id} is already running",
+                "user_friendly": "A collection for this source is already running. Wait for it to finish."
+            }
+        )
     try:
-        service = DataSourceService(db)
-        synced = service.mark_data_source_synced(data_source_id)
-        if not synced:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    "technical": f"Data source {data_source_id} not found",
-                    "user_friendly": "We couldn't locate that data source. It may have been removed."
-                }
-            )
-        return synced
-    except HTTPException:
-        raise
+        return enqueue_collection(db, source, origin="manual")
     except Exception as e:
         error_logger = ErrorLogger(db)
         error_log = error_logger.log_error(
             e,
-            context="syncing data source",
+            context="queueing data source collection",
             endpoint=f"/api/v1/data-sources/{data_source_id}/sync",
             method="POST"
         )
@@ -213,6 +280,37 @@ async def sync_data_source(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
         )
+
+
+@router.post("/{data_source_id}/probe", response_model=DataSourceTestResponse)
+async def probe_data_source(
+    data_source_id: int,
+    db: Session = Depends(get_db)
+):
+    """Test the saved configuration of one source against its live provider.
+
+    **For non-technical users:** "Can we actually reach this feed, right now,
+    with the settings we have?" -- answered without waiting for a scheduled
+    collection to fail. Environment-held API keys are injected exactly as the
+    collector injects them, so a keyed feed probes the same way it runs.
+    """
+    source = db.get(DataSource, data_source_id)
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "technical": f"Data source {data_source_id} not found",
+                "user_friendly": "We couldn't locate that data source. It may have been removed."
+            }
+        )
+    from backend.plugins import config_with_env_keys
+
+    service = DataSourceService(db)
+    request = DataSourceTestRequest(
+        plugin_type=source.plugin_type,
+        config=config_with_env_keys(source.plugin_type, source.config),
+    )
+    return service.test_data_source(request)
 
 
 @router.delete("/{data_source_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -208,6 +208,16 @@ test('navigates the application and exercises primary interactions', async ({ pa
   await expect(dataSourceDetailsHeading).toBeVisible()
   await page.getByRole('button', { name: 'Close' }).last().click()
 
+  // Control room: the schedule selector, the scheduler's health view and the
+  // live probe. The overdue feed (ECB, two consecutive failures) must show its
+  // backoff rather than silently looking idle, and the manual feed must not
+  // claim to be overdue.
+  await expect(page.getByLabel('Collection schedule for FDIC Call Reports')).toBeVisible()
+  await page.getByLabel('Collection schedule for FDIC Call Reports').selectOption('60')
+  await expect(page.getByText('overdue · retry ×4')).toBeVisible()
+  await page.getByRole('button', { name: 'Test connection' }).first().click()
+  await expect(page.getByText('Reachable: provider answered 200')).toBeVisible()
+
   // Country Profiles interactions
   await page.getByRole('button', { name: 'Country Profiles' }).click()
   await expect(page.getByRole('heading', { name: 'Country Profiles' })).toBeVisible()
@@ -241,6 +251,10 @@ test('navigates the application and exercises primary interactions', async ({ pa
   await expect(page.getByRole('heading', { name: 'Data Quality Monitoring' })).toBeVisible()
   await expect(page.getByText('Overall Health')).toBeVisible()
   await expect(page.getByText('Data Source Details')).toBeVisible()
+  // The cadence panel states the scheduler's promise versus reality; the
+  // backing-off feed says so, and the manual-only feed shows no false alarm.
+  await expect(page.getByRole('heading', { name: 'Refresh Cadence' })).toBeVisible()
+  await expect(page.getByText('backing off ×4')).toBeVisible()
   await expect(page.getByText('FDIC Call Reports')).toBeVisible()
 
   // Analytics interactions

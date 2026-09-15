@@ -7,7 +7,9 @@ import ErrorMessage from '../components/ui/ErrorMessage'
 import {
   useCreateDataSource,
   useDataDisclosure,
+  useDataSourceHealth,
   useDataSources,
+  useProbeDataSource,
   useSyncDataSource,
   useUpdateDataSource
 } from '../hooks/useApi'
@@ -30,7 +32,18 @@ const PROVENANCE_CLASS_META = {
   undisclosed: { label: 'Undisclosed', variant: 'danger' }
 }
 
-function DataSourceCard({ source, onSync, onConfigure, onView, isSyncing = false }) {
+function DataSourceCard({
+  source,
+  onSync,
+  onConfigure,
+  onView,
+  isSyncing = false,
+  health = null,
+  onProbe,
+  onSchedule,
+  probePending = false,
+  probeResult = null
+}) {
   const statusVariants = {
     active: 'success',
     inactive: 'default',
@@ -78,6 +91,73 @@ function DataSourceCard({ source, onSync, onConfigure, onView, isSyncing = false
             <span className="text-bne-muted">Records</span>
             <span className="font-medium text-bne-ink">{source.record_count?.toLocaleString() || '-'}</span>
           </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-bne-muted">Schedule</span>
+            <select
+              aria-label={`Collection schedule for ${source.name}`}
+              className="rounded-md border border-bne-line bg-bne-card px-2 py-1 text-xs font-medium text-bne-ink focus:border-bne-pine focus:outline-none"
+              value={source.sync_interval_minutes ?? ''}
+              onChange={(event) =>
+                onSchedule?.(source, event.target.value === '' ? null : Number(event.target.value))
+              }
+            >
+              <option value="">Manual only</option>
+              <option value="15">Every 15 minutes</option>
+              <option value="60">Hourly</option>
+              <option value="360">Every 6 hours</option>
+              <option value="1440">Daily</option>
+            </select>
+          </div>
+          {health && (
+            <>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-bne-muted">Last run</span>
+                <span className="font-medium text-bne-ink">
+                  {health.last_sync_started_at
+                    ? `${new Date(health.last_sync_started_at).toLocaleString()}${
+                        health.last_sync_duration_ms != null
+                          ? ` · ${(health.last_sync_duration_ms / 1000).toFixed(1)}s`
+                          : ''
+                      }${
+                        health.last_sync_rows != null
+                          ? ` · ${health.last_sync_rows.toLocaleString()} rows`
+                          : ''
+                      }`
+                    : 'Never'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-bne-muted">Next refresh</span>
+                {health.scheduled ? (
+                  health.collection_running ? (
+                    <Badge variant="primary" size="sm">running now</Badge>
+                  ) : health.overdue ? (
+                    <Badge variant="warning" size="sm">
+                      {health.consecutive_failures > 0
+                        ? `overdue · retry ×${health.backoff_factor}`
+                        : 'due'}
+                    </Badge>
+                  ) : (
+                    <span className="font-medium text-bne-ink">
+                      {new Date(health.next_due_at).toLocaleString()}
+                    </span>
+                  )
+                ) : (
+                  <span className="font-medium text-bne-muted">manual</span>
+                )}
+              </div>
+              {health.consecutive_failures > 0 && health.error_message && (
+                <p className="text-xs text-bne-clay">
+                  {health.consecutive_failures} consecutive failure(s): {health.error_message}
+                </p>
+              )}
+            </>
+          )}
+          {probeResult && (
+            <p className={`text-xs ${probeResult.success ? 'text-bne-pine' : 'text-bne-clay'}`}>
+              {probeResult.success ? 'Reachable:' : 'Unreachable:'} {probeResult.message}
+            </p>
+          )}
           {source.api_endpoint && (
             <div className="flex items-center justify-between text-sm">
               <span className="text-bne-muted">Endpoint</span>
@@ -104,6 +184,14 @@ function DataSourceCard({ source, onSync, onConfigure, onView, isSyncing = false
         >
           Sync Now
         </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onProbe?.(source)}
+          loading={probePending}
+        >
+          Test connection
+        </Button>
         <Button variant="outline" size="sm" onClick={() => onConfigure?.(source)}>
           Configure
         </Button>
@@ -121,6 +209,36 @@ export default function DataSources() {
   const syncMutation = useSyncDataSource()
   const createMutation = useCreateDataSource()
   const updateMutation = useUpdateDataSource()
+  const { data: healthPayload } = useDataSourceHealth()
+  const probeMutation = useProbeDataSource()
+  const [probeResults, setProbeResults] = useState({})
+
+  // The health payload is the scheduler's view of each feed: cadence, last
+  // outcome, next due date and the backoff factor while a feed fails.
+  const healthById = useMemo(() => {
+    const map = new Map()
+    ;(healthPayload?.sources || []).forEach((row) => map.set(row.id, row))
+    return map
+  }, [healthPayload])
+
+  const handleProbe = (source) => {
+    const id = source.id || source.source_id
+    probeMutation.mutate(id, {
+      onSuccess: (result) => setProbeResults((prev) => ({ ...prev, [id]: result })),
+      onError: (error) =>
+        setProbeResults((prev) => ({
+          ...prev,
+          [id]: { success: false, message: error?.message || 'probe failed' }
+        }))
+    })
+  }
+
+  const handleSchedule = (source, minutes) => {
+    updateMutation.mutate({
+      sourceId: source.id || source.source_id,
+      sync_interval_minutes: minutes
+    })
+  }
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [formMode, setFormMode] = useState('create')
   const [formSource, setFormSource] = useState(null)
@@ -388,6 +506,14 @@ export default function DataSources() {
                   onConfigure={handleConfigure}
                   onView={handleView}
                   isSyncing={currentSyncingId === (source.id || source.source_id)}
+                  health={healthById.get(source.id || source.source_id)}
+                  onProbe={handleProbe}
+                  onSchedule={handleSchedule}
+                  probePending={
+                    probeMutation.isPending &&
+                    probeMutation.variables === (source.id || source.source_id)
+                  }
+                  probeResult={probeResults[source.id || source.source_id]}
                 />
               ))}
             </div>
@@ -406,6 +532,14 @@ export default function DataSources() {
                   onConfigure={handleConfigure}
                   onView={handleView}
                   isSyncing={currentSyncingId === (source.id || source.source_id)}
+                  health={healthById.get(source.id || source.source_id)}
+                  onProbe={handleProbe}
+                  onSchedule={handleSchedule}
+                  probePending={
+                    probeMutation.isPending &&
+                    probeMutation.variables === (source.id || source.source_id)
+                  }
+                  probeResult={probeResults[source.id || source.source_id]}
                 />
               ))}
             </div>

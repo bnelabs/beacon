@@ -122,6 +122,22 @@ construction, so the override cannot be smuggled into a production process.
 Elsewhere it logs a warning. Either way the bypass is **not** recorded in the
 API response — the log is the only trace.
 
+## Data-source connectivity
+
+Three endpoints turn "configured" into "connected":
+
+| Endpoint | Meaning |
+|---|---|
+| `GET /api/v1/data-sources/health` | Per feed: cadence (`sync_interval_minutes`, null means manual-only), backoff factor, consecutive failures with the last reason, last start/duration/rows, next due date, `overdue`, `collection_running`. |
+| `POST /api/v1/data-sources/{id}/sync` | **202** and a queued `data_collection` job scoped to the source's enabled catalogue items -- the same job the scheduler queues. **409** while a collection for that source is open or the source is disabled. |
+| `POST /api/v1/data-sources/{id}/probe` | Runs the plugin's own `test_connection` against the live provider with the saved config; environment-held API keys are injected exactly as the collector injects them. Answers `{success, message, details}`. |
+
+Celery beat ticks every five minutes and enqueues whichever scheduled sources
+are due (interval, doubled per consecutive failure up to eight intervals, plus
+a stable per-source jitter). `PUT /api/v1/data-sources/{id}` with
+`sync_interval_minutes` sets or clears (`null`) the cadence. The operator view
+of all of this is `docs/deployment.md` §5.
+
 ## Data-quality score
 
 `GET /api/v1/data-quality/stats` reports a composite score built by

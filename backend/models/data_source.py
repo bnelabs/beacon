@@ -34,6 +34,15 @@ class DataSource(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_successful_fetch = Column(DateTime(timezone=True))
 
+    # Scheduling and sync telemetry (source_sync_schedule_001). A null
+    # interval means manual-only: the absence of a schedule is a decision,
+    # not a default waiting to be invented.
+    sync_interval_minutes = Column(Integer, nullable=True)
+    consecutive_failures = Column(Integer, nullable=False, default=0, server_default="0")
+    last_sync_started_at = Column(DateTime(timezone=True))
+    last_sync_duration_ms = Column(Integer)
+    last_sync_rows = Column(Integer)
+
     # Status tracking
     status = Column(String(20), default="active")  # active, error, disabled
     error_message = Column(Text)

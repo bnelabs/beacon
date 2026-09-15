@@ -1,7 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchApi } from '../utils/apiClient'
 
-
 function buildQueryString(params = {}) {
   const query = new URLSearchParams()
 
@@ -62,6 +61,44 @@ export function useDataDisclosure() {
     queryKey: ['dataSources', 'disclosure'],
     queryFn: () => fetchApi('/v1/data-sources/disclosure'),
     staleTime: 300_000
+  })
+}
+
+export function useDataSourceHealth() {
+  return useQuery({
+    queryKey: ['dataSources', 'health'],
+    queryFn: () => fetchApi('/v1/data-sources/health'),
+    staleTime: 60_000,
+    refetchInterval: 60_000
+  })
+}
+
+export function useProbeDataSource() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (sourceId) =>
+      fetchApi(`/v1/data-sources/${sourceId}/probe`, { method: 'POST' }),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['dataSources'] })
+      queryClient.invalidateQueries({ queryKey: ['dataSources', 'health'] })
+    }
+  })
+}
+
+export function useUpdateDataSource() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ sourceId, ...body }) =>
+      fetchApi(`/v1/data-sources/${sourceId}`, {
+        method: 'PUT',
+        body: JSON.stringify(body)
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dataSources'] })
+      queryClient.invalidateQueries({ queryKey: ['dataSources', 'health'] })
+    }
   })
 }
 
@@ -179,25 +216,6 @@ export function useCreateDataSource() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['dataSources'] })
-    }
-  })
-}
-
-export function useUpdateDataSource() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: ({ sourceId, data }) =>
-      fetchApi(`/v1/data-sources/${sourceId}`, {
-        method: 'PUT',
-        body: JSON.stringify(data)
-      }),
-    onSuccess: (_data, variables) => {
-      const sourceId = variables?.sourceId
-      queryClient.invalidateQueries({ queryKey: ['dataSources'] })
-      if (sourceId) {
-        queryClient.invalidateQueries({ queryKey: ['dataSources', sourceId] })
-      }
     }
   })
 }

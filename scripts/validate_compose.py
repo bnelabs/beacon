@@ -52,11 +52,12 @@ EXPECTED_SERVICES = {
     "migrate",
     "backend",
     "celery-worker",
+    "celery-beat",
     "frontend",
 }
 
 #: Services that run the backend image and therefore must not build their own.
-BACKEND_SERVICES = ("migrate", "backend", "celery-worker")
+BACKEND_SERVICES = ("migrate", "backend", "celery-worker", "celery-beat")
 
 VALID_CONDITIONS = {
     "service_started",

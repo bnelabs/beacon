@@ -11,7 +11,7 @@ celery_app = Celery(
     "beacon",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["backend.tasks.job_tasks"]
+    include=["backend.tasks.job_tasks", "backend.tasks.schedule_tasks"]
 )
 
 # Celery configuration
@@ -27,6 +27,17 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,  # Process one task at a time
     worker_max_tasks_per_child=50,  # Restart worker after 50 tasks (memory cleanup)
     broker_connection_retry_on_startup=True,  # Retry broker connection on startup
+    # The clock side of collection: one tick every five minutes asks
+    # backend.services.scheduling which sources are due (interval, backoff on
+    # failure, stable per-source jitter) and enqueues the same job a human
+    # would. Five minutes is the tick, not the cadence -- cadences live per
+    # source in data_sources.sync_interval_minutes.
+    beat_schedule={
+        "dispatch-due-collections": {
+            "task": "dispatch_due_collections",
+            "schedule": 300.0,
+        },
+    },
 )
 
 

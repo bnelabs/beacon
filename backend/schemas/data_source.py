@@ -30,6 +30,11 @@ class DataSourceUpdate(BaseModel):
     config: Optional[Dict[str, Any]] = None
     description: Optional[str] = None
     enabled: Optional[bool] = None
+    sync_interval_minutes: Optional[int] = Field(
+        None,
+        ge=5,
+        description="Collection cadence in minutes; null means manual-only",
+    )
 
 
 class DataSourceResponse(DataSourceConfigBase):
@@ -40,6 +45,11 @@ class DataSourceResponse(DataSourceConfigBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     last_successful_fetch: Optional[datetime] = None
+    sync_interval_minutes: Optional[int] = None
+    consecutive_failures: int = 0
+    last_sync_started_at: Optional[datetime] = None
+    last_sync_duration_ms: Optional[int] = None
+    last_sync_rows: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 
