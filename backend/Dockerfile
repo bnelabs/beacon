@@ -33,7 +33,10 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+# The build context is the repository root (see docker-compose.yml),
+# not ./backend: alembic.ini lives at the root and the entrypoint runs
+# `alembic upgrade head`, so it has to be in the image.
+COPY backend/requirements.txt .
 
 #: Wheel index for torch. ``cu130`` here; the CPU image uses ``cpu``.
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu130
@@ -51,7 +54,21 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Same layout as the CPU image, so ``backend.api.main`` resolves identically and
 # docker-compose can use one command for both.
-COPY . backend/
+COPY backend/ backend/
+# alembic reads its config from `alembic.ini` relative to the working
+# directory, and its script_location is `backend/alembic` -- also relative
+# to that directory. With WORKDIR /app both resolve correctly, and neither
+# did when the build context was ./backend: alembic.ini sits at the
+# repository root, so it was never in the image at all.
+COPY alembic.ini /app/alembic.ini
+
+# entrypoint.sh arrived with the `COPY backend/ backend/` above and the copy
+# preserves its mode bit, so this is belt-and-braces rather than a fix. It runs
+# here, while the build is still root, instead of after `USER beacon` where the
+# previous `COPY backend/entrypoint.sh /app/backend/entrypoint.sh` sat: that line
+# could never have worked, because under the old ./backend context its source
+# path resolved to backend/backend/entrypoint.sh, which does not exist.
+RUN chmod 755 /app/backend/entrypoint.sh
 
 RUN mkdir -p /app/data /app/results /app/logs /app/saved_models
 
@@ -79,8 +96,10 @@ USER beacon
 
 EXPOSE 3456
 
-COPY backend/entrypoint.sh /app/backend/entrypoint.sh
-RUN chmod +x /app/backend/entrypoint.sh
-
+# entrypoint.sh arrived with `COPY backend/ backend/` above. The chmod is
+# here rather than there because it must survive the copy's permissions,
+# and the previous `COPY backend/entrypoint.sh ...` at this point in the
+# file could never have worked: under the old ./backend context that
+# source path was backend/backend/entrypoint.sh, which does not exist.
 ENTRYPOINT ["/app/backend/entrypoint.sh"]
 CMD ["uvicorn", "backend.api.main:app", "--host", "0.0.0.0", "--port", "3456"]

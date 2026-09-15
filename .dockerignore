@@ -1,0 +1,88 @@
+# Build context for backend/Dockerfile and backend/Dockerfile.cpu is the
+# repository root (see docker-compose.yml), because alembic.ini lives at the root
+# and the entrypoint runs `alembic upgrade head`.
+#
+# Deliberately a deny list rather than `*` plus negations. An allowlist that
+# starts with `*` has to re-include every path the build needs, and getting that
+# wrong fails as a missing file deep inside a multi-minute image build. A deny
+# list fails loudly and early if something needed is excluded, and keeps the two
+# things the build actually copies -- alembic.ini and backend/ -- included by
+# default.
+#
+# Everything below is excluded because it is either not read by the runtime, or
+# must never ship: secrets, caches, other services' dependency trees, local
+# databases and model weights.
+
+# --- version control and CI ---------------------------------------------------
+.git/
+.gitignore
+.github/
+
+# --- other services -----------------------------------------------------------
+# The frontend has its own image and its own context (./frontend), so none of it
+# belongs in the backend build. node_modules alone is hundreds of MB.
+frontend/
+
+# A .dockerignore is read from the *context root*, and BuildKit prefers
+# `<dockerfile>.dockerignore` over it. frontend/.dockerignore therefore governs
+# the frontend build (context ./frontend) and this file governs the backend build
+# (context .). The frontend/node_modules pattern below is not redundant with
+# `frontend/` above: it is what keeps the host dependency tree out of the context
+# if the frontend build is ever moved to the repository root, which is where it
+# would have to move to share a layer cache with the backend.
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+
+# --- local state that must not be baked into an image -------------------------
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+data/
+logs/
+results/
+models/
+saved_models/
+
+# --- model weights ------------------------------------------------------------
+# No foundation encoder ships (see the REMOVED register in
+# backend/tests/test_reachability.py and docs/deployment.md §3). A stray
+# multi-GB checkpoint in the working tree must not become an image layer.
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.bin
+
+# --- caches and build artefacts -----------------------------------------------
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+
+# --- test-only artefacts ------------------------------------------------------
+# backend/tests/ itself is kept: it is a few hundred KB, and pruning by directory
+# here risks more than it saves. Test *output* is excluded above.
+playwright-report/
+test-results/
+
+# Documents (docs/, README, CHANGELOG) are left in the context on purpose. They
+# cost a few hundred kilobytes, and a `*.md` deny pattern is the kind of rule
+# that silently excludes something a later change turns out to need. The things
+# worth excluding are the ones measured in gigabytes: .git, frontend/, weights,
+# local data directories and caches.
