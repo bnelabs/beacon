@@ -9,6 +9,33 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Removed
+- Four closed review logs: `docs/G_SIB_BUILD.md`,
+  `docs/EXECUTIVE_REVIEW_REMEDIATION.md`, `docs/data_connectors.md`,
+  `docs/FIFTH_ROUND_RESPONSE.md`. Every item in them is merged; the still-true
+  facts live in the reachability census and the `QUANT_REVIEW_2026-09.md`
+  register, and the reasoning that still governs decisions is summarised in
+  `docs/README.md` ("Audit history and standing decisions").
+- `configs/timescaledb/timescale_setup.sql`: a drifted second copy of the
+  migration DDL (it lacked the three baseline tables). The Alembic migrations
+  are the only source of schema truth; the migration's own error messages now
+  state the manual step instead of pointing at the copy.
+- `configs/scenario_library.json`: zero references from any code, test,
+  workflow or document.
+
+### Changed
+- `docs/api.md` authentication section: the stale "there is none" claim
+  replaced with the actual optional `BEACON_API_TOKEN` bearer gate, its scope
+  and its limits.
+- `docs/README.md`: index rebuilt around the live set (RUNBOOK, VERSIONING and
+  LANGUAGE_STRATEGY were missing from it); dead logs moved to the Removed
+  table with reasons.
+- Dead cross-references to the deleted logs removed from `README.md`,
+  `docs/api.md`, the `federated.py` docstring and the reachability census
+  docstring; the census now cites only itself.
+- `docs/images/` screenshots audited and **kept**: regenerated after the
+  rebrand, they show the current UI.
+
 ## [3.1.0] - 2026-09-15
 
 ### Added

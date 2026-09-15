@@ -212,11 +212,16 @@ enforced. That is acceptable precisely because the polling fallback exists.
 
 ## Authentication
 
-**There is none.** Every endpoint is unauthenticated, CORS is configured by
-`ALLOWED_ORIGINS` (see `.env.example`), and there is no SSO. This is a known,
-open gap for any deployment reachable beyond a trusted network, and it is
-called out again in [`deployment.md`](deployment.md) and
-[`EXECUTIVE_REVIEW_REMEDIATION.md`](EXECUTIVE_REVIEW_REMEDIATION.md).
+**There is no user model.** If `BEACON_API_TOKEN` is set, every `/api/*` route
+requires `Authorization: Bearer <token>` (the Swagger/openapi endpoints stay
+open so the protocol remains browsable); the SPA prompts for the token once and
+stores it in `localStorage`. If the variable is unset the API is open, which
+is fine for a single-operator host and not fine beyond a trusted network —
+`deployment.md` and `RUNBOOK.md` say the same, and neither pretends this is
+multi-user auth: there is no SSO, no roles, no per-user state.
+`GET /api/v1/system/status` reports the live posture as `auth.mode`
+(`"none"` or `"bearer-gate"`, never the token itself) so the UI states what the
+deployment actually enforces instead of guessing.
 
 ## Regenerating the endpoint inventory
 

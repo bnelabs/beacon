@@ -50,3 +50,29 @@ class TestGateActive:
         monkeypatch.setenv("BEACON_API_TOKEN", "drill-token")
         assert client.get("/openapi.json").status_code == 200
         assert client.get("/docs").status_code == 200
+
+
+class TestStatusPosture:
+    """The gate's posture must be readable from the backend, so no UI can guess it.
+
+    Settings renders ``auth.mode`` from ``GET /api/v1/system/status``; a hard-coded
+    "no auth" string in the UI would be a lie the moment an operator sets
+    ``BEACON_API_TOKEN``, so the field itself gets a contract.
+    """
+
+    def test_status_reports_no_gate_by_default(self, client, monkeypatch):
+        monkeypatch.delenv("BEACON_API_TOKEN", raising=False)
+        response = client.get("/api/v1/system/status")
+        assert response.status_code == 200
+        assert response.json()["auth"] == {"mode": "none"}
+
+    def test_status_reports_bearer_gate_when_set(self, client, monkeypatch):
+        monkeypatch.setenv("BEACON_API_TOKEN", "posture-check-token")
+        response = client.get(
+            "/api/v1/system/status",
+            headers={"Authorization": "Bearer posture-check-token"},
+        )
+        assert response.status_code == 200
+        assert response.json()["auth"] == {"mode": "bearer-gate"}
+        # Posture only: the response must never echo, hash or length-leak the token.
+        assert "posture-check-token" not in response.text
