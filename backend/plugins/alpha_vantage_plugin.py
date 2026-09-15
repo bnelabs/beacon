@@ -32,7 +32,7 @@ class AlphaVantagePlugin(DataSourcePlugin):
                 'outputsize': 'compact'
             }
 
-            response = requests.get(self.BASE_URL, params=params, timeout=10)
+            response = self.http.get(self.BASE_URL, params=params, timeout=10)
             data = response.json()
 
             if "Error Message" in data:
@@ -101,7 +101,7 @@ class AlphaVantagePlugin(DataSourcePlugin):
                     'outputsize': 'full'
                 }
 
-                response = requests.get(self.BASE_URL, params=params, timeout=30)
+                response = self.http.get(self.BASE_URL, params=params, timeout=30)
                 data = response.json()
 
                 if "Error Message" in data:
@@ -181,7 +181,7 @@ class AlphaVantagePlugin(DataSourcePlugin):
                 'apikey': self.config['api_key']
             }
 
-            response = requests.get(self.BASE_URL, params=params, timeout=30)
+            response = self.http.get(self.BASE_URL, params=params, timeout=30)
             data = response.json()
 
             if "Error Message" in data or "data" not in data:

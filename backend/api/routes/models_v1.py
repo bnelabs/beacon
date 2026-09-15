@@ -12,7 +12,6 @@ from pathlib import Path
 import json
 import math
 import pandas as pd
-import torch
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -29,7 +28,14 @@ from backend.schemas.models_v1 import (
 )
 from backend.services.error_logger import ErrorLogger
 from backend.modules.data.quality_gate import DataQualityGate
-from backend.modules.engine.prediction_engine import RealPredictionEngine
+
+# torch and RealPredictionEngine are imported lazily inside ``simulate_model``
+# (the only endpoint that runs inference). This router is imported by
+# ``backend.api.main`` at startup, so importing the prediction engine -- which
+# pulls torch -- at module scope would load the heavy ML runtime into the base
+# API container just to serve the model *catalogue* (list/detail/scenario reads
+# that never touch a model). Deferring it keeps those reads cheap and confines
+# the torch footprint to the inference path.
 
 router = APIRouter()
 
@@ -272,6 +278,10 @@ async def simulate_model(
 
         base_df = _load_timeseries(data_job_id)
         adjusted_df = _apply_adjustments(base_df, scenario.adjustments, scenario.horizon_days)
+
+        # Heavy inference runtime, loaded only when a scenario is actually run.
+        import torch
+        from backend.modules.engine.prediction_engine import RealPredictionEngine
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         source_data_job = db.query(Job).filter(Job.id == data_job_id).first()

@@ -5,7 +5,11 @@ import yaml
 import os
 import logging
 import psutil
-import torch
+
+# torch is imported lazily inside get_system_config (the only GPU probe here).
+# backend.services.__init__ and the /config route both import this module at API
+# startup, so a top-level ``import torch`` would drag the torch runtime into the
+# base web container even though only a GPU-availability check needs it.
 
 from backend.schemas.config import (
     SystemConfigResponse,
@@ -54,6 +58,7 @@ class ConfigService:
         # Get system information
         memory = psutil.virtual_memory()
         cpu_count = psutil.cpu_count()
+        import torch  # lazy: only this GPU probe needs it (see module head)
         gpu_available = torch.cuda.is_available()
         gpu_count = torch.cuda.device_count() if gpu_available else 0
 

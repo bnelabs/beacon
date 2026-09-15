@@ -90,7 +90,12 @@ import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from backend.modules.engine.multiplex import build_interbank_exposure_layer
+# ``build_interbank_exposure_layer`` lives in backend.modules.engine.multiplex,
+# which imports torch at module scope. It is used only by ``_graph_from_frame``
+# below, so it is imported there rather than here: this router is loaded by
+# ``backend.api.main`` at startup, and a top-level engine import would drag torch
+# into the base API container just to serve the exposure upload/estimate routes.
+# ``network_estimation`` (below) is numpy-only and stays a top-level import.
 from backend.modules.risk.network_estimation import (
     EstimatedNetwork,
     estimate_bilateral_matrix,
@@ -229,6 +234,11 @@ def _graph_from_frame(
     declared_as_of = manifest.get("as_of")
     build_as_of = pd.Timestamp(declared_as_of) if declared_as_of else pd.Timestamp.now()
     build_frame = frame.drop(columns=["as_of"], errors="ignore")
+
+    # Imported here (not at module scope) so the torch-backed engine layer is
+    # only loaded when a stored matrix is actually rendered into a graph.
+    from backend.modules.engine.multiplex import build_interbank_exposure_layer
+
     layer = build_interbank_exposure_layer(
         build_frame, node_ids, as_of=build_as_of, name="interbank"
     )

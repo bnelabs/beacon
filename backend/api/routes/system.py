@@ -4,8 +4,13 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import psutil
-import torch
 
+# torch is imported lazily inside the handlers that report GPU state rather than
+# at module scope. This router is imported by ``backend.api.main`` at startup, so
+# a top-level ``import torch`` pulled the ~hundreds-of-MB CUDA/CPU torch runtime
+# into the base API container even though only these two GPU-introspection
+# endpoints ever touch it. Deferring the import keeps the web process light; the
+# heavy estimators stay the Celery workers' concern (see backend/tasks).
 from backend.database import get_db
 from backend.services.error_logger import ErrorLogger
 
@@ -31,7 +36,10 @@ async def get_system_status(db: Session = Depends(get_db)):
         memory_used_gb = memory.used / (1024 ** 3)
         memory_percent = memory.percent
 
-        # GPU usage (if available)
+        # GPU usage (if available). torch is imported here, on demand, so the
+        # base API process never loads it unless this endpoint is called.
+        import torch
+
         gpu_info = {}
         if torch.cuda.is_available():
             gpu_count = torch.cuda.device_count()
@@ -113,6 +121,9 @@ async def get_resource_recommendations(db: Session = Depends(get_db)):
     try:
         memory = psutil.virtual_memory()
         memory_total_gb = memory.total / (1024 ** 3)
+
+        # Lazy import: only this GPU-aware endpoint needs torch (see module head).
+        import torch
 
         gpu_memory_gb = 0
         if torch.cuda.is_available():
