@@ -110,7 +110,7 @@ export default function Header() {
                   role="menuitem"
                   aria-disabled="true"
                 >
-                  Sign out (coming soon)
+                  Sign out — auth not configured
                 </button>
               </div>
             )}
