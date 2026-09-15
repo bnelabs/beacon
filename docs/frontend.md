@@ -312,3 +312,38 @@ npx playwright test
 ```
 
 Container build and deployment are covered in [`deployment.md`](deployment.md).
+
+## Dashboard and panel (round six)
+
+The dashboard is an operations brief, not a widget dump. Contract:
+
+- **Every widget has a designed absence.** `ui/EmptyState.jsx` renders empty
+  and degraded states in neutral paper tones: an operator with no API keys
+  sees what to do next ("create the first job"), never a provider error
+  message and never a red wall. Genuine typed failures still surface through
+  `ErrorMessage` where a human must act.
+- **KPI row** (`pages/Dashboard.jsx`): total jobs with a 14-day sparkline
+  (`ui/Sparkline.jsx`, dependency-free SVG), completion rate meter, active
+  models, enabled sources. Figures are serif tabular numerals; loading states
+  are skeletons, not spinners-in-voids.
+- **Job Activity**: stacked SVG bars per day (completed/active/failed) with a
+  hairline baseline; recent jobs as monospace-id rows with status badges and
+  relative times.
+- **System Status** reads `GET /api/v1/system/status` (30 s poll): measured
+  CPU/memory/disk meters, GPU badge, backend version + git revision. An
+  unreachable backend renders *Unreachable* — never green.
+- **Data Quality** reads `/api/v1/data-quality/stats`: overall health, the
+  freshness distribution (fresh/stale/outdated/never-synced) and the
+  validator's anomaly count (real since round six's validator rewrite).
+
+### Settings
+
+- Preference toggles persist to `localStorage` under `beacon.preferences.v1`
+  and are **labelled as browser-local** — BEACON ships without authentication,
+  and pretending otherwise would be a lie in the UI.
+- The Platform card states the truth about the deployment: frontend version
+  (`__APP_VERSION__`, stamped by Vite from `package.json`), build channel,
+  backend version/revision or "not reachable", and the auth posture
+  ("not configured — single-operator mode").
+- The profile menu's sign-out entry says "Sign out — auth not configured"
+  rather than promising a feature that does not exist.
