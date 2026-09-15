@@ -3,6 +3,7 @@ import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import { useDataQualityStats, useSourceQualityDetails, useQualityTrends } from '../hooks/useDataQuality'
+import { useDataSourceHealth } from '../hooks/useApi'
 
 function MetricCard({ title, value, subtitle, trend, status }) {
   const getStatusColor = () => {
@@ -342,6 +343,15 @@ export default function DataQuality() {
   const { data: stats, isLoading: statsLoading, error: statsError } = useDataQualityStats()
   const { data: sources, isLoading: sourcesLoading } = useSourceQualityDetails()
   const { data: trendsData, isLoading: trendsLoading } = useQualityTrends(30)
+  const { data: healthPayload } = useDataSourceHealth()
+
+  // Scheduled feeds only: a manual source has no cadence to keep, and showing
+  // "overdue" for a feed nobody promised to refresh would be a false alarm.
+  // (Above the early returns: hooks must run in the same order every render.)
+  const scheduledHealth = useMemo(
+    () => (healthPayload?.sources || []).filter((row) => row.scheduled),
+    [healthPayload]
+  )
 
   if (statsLoading || sourcesLoading || trendsLoading) {
     return (
@@ -419,6 +429,45 @@ export default function DataQuality() {
         <FreshnessIndicator freshness={freshness} />
         <AnomalyAlerts anomalies={anomalies} />
       </div>
+
+      {/* Refresh cadence: what the scheduler promised, versus what happened */}
+      {scheduledHealth.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Refresh Cadence</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {scheduledHealth.map((row) => (
+                <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                  <span className="font-medium text-bne-ink">{row.name}</span>
+                  <span className="text-bne-muted">
+                    every{' '}
+                    {row.sync_interval_minutes >= 1440
+                      ? `${Math.round(row.sync_interval_minutes / 1440)} d`
+                      : row.sync_interval_minutes >= 60
+                        ? `${Math.round(row.sync_interval_minutes / 60)} h`
+                        : `${row.sync_interval_minutes} min`}
+                    {row.backoff_factor > 1 ? ` · backing off ×${row.backoff_factor}` : ''}
+                  </span>
+                  <span className="text-bne-muted">
+                    {row.last_successful_fetch
+                      ? `last ok ${new Date(row.last_successful_fetch).toLocaleString()}`
+                      : 'never succeeded'}
+                  </span>
+                  {row.collection_running ? (
+                    <Badge variant="primary" size="sm">running</Badge>
+                  ) : row.overdue ? (
+                    <Badge variant="warning" size="sm">overdue</Badge>
+                  ) : (
+                    <Badge variant="success" size="sm">on cadence</Badge>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Quality Trends */}
       <Card>

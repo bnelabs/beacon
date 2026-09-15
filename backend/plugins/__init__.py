@@ -86,6 +86,31 @@ def _load_plugins() -> Dict[str, str]:
 _loaded_plugins = _load_plugins()
 
 
+#: Environment variables holding per-plugin API keys. Keys live in the
+#: environment rather than the database so configuration endpoints never
+#: return them; every place that instantiates a plugin from a saved config
+#: (the collector, the probe route) must inject them through
+#: ``config_with_env_keys`` or a keyed feed would test differently than it runs.
+ENV_API_KEY_VARS = {
+    "fred": "FRED_API_KEY",
+    "alpha_vantage": "ALPHA_VANTAGE_API_KEY",
+    "sec_edgar": "SEC_API_KEY",
+}
+
+
+def config_with_env_keys(plugin_type: str, config: dict) -> dict:
+    """``config`` with the plugin's environment API key injected when absent."""
+    import os
+
+    merged = dict(config or {})
+    env_var = ENV_API_KEY_VARS.get(plugin_type)
+    if env_var and not merged.get("api_key"):
+        value = os.getenv(env_var)
+        if value:
+            merged["api_key"] = value
+    return merged
+
+
 def available_plugins() -> List[str]:
     """Return the plugin class names that successfully imported."""
 

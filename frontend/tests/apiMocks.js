@@ -263,7 +263,9 @@ const dataSourcesList = [
     record_count: 128_000,
     last_successful_fetch: '2024-02-14T17:30:00Z',
     api_endpoint: 'https://api.fdic.gov/bank/find',
-    coverage_description: 'US Depository Institutions'
+    coverage_description: 'US Depository Institutions',
+    sync_interval_minutes: 360,
+    consecutive_failures: 0
   },
   {
     id: 402,
@@ -275,7 +277,9 @@ const dataSourcesList = [
     record_count: 54_000,
     last_successful_fetch: '2024-02-12T13:00:00Z',
     api_endpoint: 'https://data.ecb.europa.eu',
-    coverage_description: 'Eurozone banks'
+    coverage_description: 'Eurozone banks',
+    sync_interval_minutes: 60,
+    consecutive_failures: 2
   },
   {
     id: 403,
@@ -287,9 +291,79 @@ const dataSourcesList = [
     record_count: 0,
     last_successful_fetch: null,
     api_endpoint: 'https://api.worldbank.org',
-    coverage_description: 'Global'
+    coverage_description: 'Global',
+    sync_interval_minutes: null,
+    consecutive_failures: 0
   }
 ]
+
+// The scheduler's view of each feed, as GET /api/v1/data-sources/health
+// serves it: cadence, last outcome, next due date, and the backoff factor
+// while a feed fails. 402 is deliberately overdue-and-backing-off so the e2e
+// run exercises the warning path; 403 is manual-only, so it must never show
+// "overdue" -- a feed nobody promised to refresh is not late.
+const dataSourceHealth = {
+  generated_at: '2024-02-19T12:00:00Z',
+  sources: [
+    {
+      id: 401,
+      name: 'FDIC Call Reports',
+      plugin_type: 'fdic',
+      enabled: true,
+      status: 'active',
+      error_message: null,
+      sync_interval_minutes: 360,
+      scheduled: true,
+      backoff_factor: 1,
+      consecutive_failures: 0,
+      last_successful_fetch: '2024-02-14T17:30:00Z',
+      last_sync_started_at: '2024-02-14T17:29:12Z',
+      last_sync_duration_ms: 48_200,
+      last_sync_rows: 128_000,
+      collection_running: false,
+      next_due_at: '2024-02-19T18:00:00Z',
+      overdue: false
+    },
+    {
+      id: 402,
+      name: 'ECB Banking',
+      plugin_type: 'ecb_banking',
+      enabled: true,
+      status: 'error',
+      error_message: 'connection reset by peer',
+      sync_interval_minutes: 60,
+      scheduled: true,
+      backoff_factor: 4,
+      consecutive_failures: 2,
+      last_successful_fetch: '2024-02-12T13:00:00Z',
+      last_sync_started_at: '2024-02-12T14:05:03Z',
+      last_sync_duration_ms: 30_010,
+      last_sync_rows: null,
+      collection_running: false,
+      next_due_at: '2024-02-19T11:00:00Z',
+      overdue: true
+    },
+    {
+      id: 403,
+      name: 'World Bank Finance',
+      plugin_type: 'world_bank',
+      enabled: false,
+      status: 'disabled',
+      error_message: null,
+      sync_interval_minutes: null,
+      scheduled: false,
+      backoff_factor: 1,
+      consecutive_failures: 0,
+      last_successful_fetch: null,
+      last_sync_started_at: null,
+      last_sync_duration_ms: null,
+      last_sync_rows: null,
+      collection_running: false,
+      next_due_at: null,
+      overdue: false
+    }
+  ]
+}
 
 const catalogueItems = [
   {
@@ -792,6 +866,10 @@ export async function registerApiMocks(page) {
         return respond(dataDisclosure)
       }
 
+      if (normalizedPath === '/api/v1/data-sources/health') {
+        return respond(dataSourceHealth)
+      }
+
       if (normalizedPath === '/api/v1/data-sources') {
         return respond(dataSourcesList)
       }
@@ -936,7 +1014,27 @@ export async function registerApiMocks(page) {
       const syncMatch = normalizedPath.match(/\/api\/v1\/data-sources\/(\d+)\/sync$/)
       if (syncMatch) {
         const sourceId = Number(syncMatch[1])
-        return respond({ id: sourceId, status: 'syncing' })
+        // Sync now queues a real collection job (202), it no longer stamps a
+        // timestamp: the mock answers in the JobResponse shape the route returns.
+        return respond(
+          {
+            id: 901,
+            job_type: 'data_collection',
+            status: 'pending',
+            progress: 0.0,
+            parameters: { data_source_id: sourceId, catalogue_items: [], origin: 'manual' }
+          },
+          202
+        )
+      }
+
+      const probeMatch = normalizedPath.match(/\/api\/v1\/data-sources\/(\d+)\/probe$/)
+      if (probeMatch) {
+        return respond({
+          success: true,
+          message: 'reachable: provider answered 200',
+          details: { latency_ms: 120 }
+        })
       }
 
       if (normalizedPath === '/api/v1/countries/sync') {

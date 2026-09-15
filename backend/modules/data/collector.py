@@ -18,6 +18,7 @@ from backend.exceptions import (
 )
 from backend.models.data_catalogue import DataCatalogueItem
 from backend.models.data_source import DataSource
+from backend.plugins import config_with_env_keys
 from backend.plugins.base import get_plugin
 from .country_utils import CountryMatcher
 
@@ -248,21 +249,10 @@ class DataCollector:
                 context={"code": item.code, "plugin_type": data_source.plugin_type},
             )
 
-        config = dict(data_source.config or {})
-
         # API keys live in the environment rather than the database so they are
-        # never returned by the configuration endpoints.
-        env_keys = {
-            'fred': 'FRED_API_KEY',
-            'alpha_vantage': 'ALPHA_VANTAGE_API_KEY',
-            'sec_edgar': 'SEC_API_KEY',
-        }
-        env_var = env_keys.get(data_source.plugin_type)
-        if env_var and not config.get('api_key'):
-            value = os.getenv(env_var)
-            if value:
-                config['api_key'] = value
-                logger.info("Injected %s API key from environment", data_source.plugin_type)
+        # never returned by the configuration endpoints; the registry owns the
+        # plugin->env-var map so the probe route injects identically.
+        config = config_with_env_keys(data_source.plugin_type, data_source.config)
 
         plugin = plugin_class(config)
 

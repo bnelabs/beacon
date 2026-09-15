@@ -160,6 +160,21 @@ three pages render no breadcrumb.
   every 30 s, data-quality `stats` and `sources` every 60 s, `trends` every
   120 s.
 
+## Data Sources as a control room
+
+Each source card carries the scheduler's view of that feed, read from
+`GET /api/v1/data-sources/health`: a cadence selector (manual-only, 15 min,
+hourly, 6 h, daily) that writes `sync_interval_minutes`, the last run with its
+duration and row count, the next refresh (or `running now`, or `overdue ·
+retry ×N` while the feed fails and backs off), and the failure streak with the
+provider's last error. "Test connection" posts to
+`/api/v1/data-sources/{id}/probe` and prints the provider's own verdict under
+the card. "Sync Now" queues a real collection job and answers 202 -- it no
+longer stamps a timestamp and does nothing. The Data Quality page adds a
+"Refresh Cadence" panel: promise versus reality per scheduled feed, with
+`on cadence` / `overdue` / `running` badges, and no row at all for manual
+sources, because a feed nobody promised to refresh is not late.
+
 ## Global search (⌘K / Ctrl+K)
 
 `components/GlobalSearch.jsx` opens on ⌘K and searches a merged list, navigable

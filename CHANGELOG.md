@@ -10,6 +10,30 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **Scheduled collection, per source.** `data_sources.sync_interval_minutes`
+  (null = manual-only) plus a `celery-beat` service on the shared backend
+  image: beat ticks every five minutes and enqueues whichever sources are due
+  through the same `data_collection` job a human creates. Failures double the
+  interval up to eight times (one success restores it), a stable hash-of-id
+  jitter spreads sources that share a cadence, and an open collection blocks a
+  second enqueue. Migration `source_sync_schedule_001` adds the cadence and
+  telemetry columns, guarded like every revision that can meet a database it
+  did not create.
+- **Feed health and live probes.** `GET /api/v1/data-sources/health` answers
+  cadence, backoff factor, failure streak with the provider's last reason,
+  last start/duration/rows, next due date and `overdue` per feed;
+  `POST /api/v1/data-sources/{id}/probe` runs the plugin's own
+  `test_connection` with environment-held keys injected exactly as the
+  collector injects them (the plugin->env-var map moved to the registry so the
+  two cannot drift). The Data Sources page is now a control room -- cadence
+  selector, last run, next refresh, failure streak, test-connection verdict --
+  and Data Quality gains a "Refresh Cadence" panel: promise versus reality,
+  with no row for manual sources because a feed nobody promised to refresh is
+  not late.
+- **`Sync Now` queues a real collection** (202 + job, 409 while one is open or
+  the source is disabled) instead of stamping a timestamp while nothing
+  fetched. The docstring said "connect your automated pipelines here later";
+  this is that later.
 - `scripts/check_e2e_api_coverage.mjs`: runs `apiMocks.js`'s real `**/api/**`
   route handler against every `fetchApi` endpoint in `frontend/src`, by method,
   and names the ones that fall through to the 404 default. It evaluates the
@@ -62,6 +86,11 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   are deterministic (`derandomize=True`).
 
 ### Changed
+- Collection telemetry is written by the worker, not guessed: a success stamps
+  duration and row count and clears the failure streak (which is what ends the
+  backoff); a failure grows the streak and keeps the provider's reason, which
+  the card and the cadence panel show instead of letting a quiet feed look
+  healthy.
 - **The risk map no longer reads a third-party tile service.** The keyless
   CARTO basemap endpoint now serves tiles watermarked "API KEY REQUIRED"
   diagonally across the map -- the "2d globe api required" watermark a

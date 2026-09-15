@@ -210,6 +210,35 @@ services:
     restart: unless-stopped
     command: celery -A backend.tasks.celery_app worker --loglevel=info --concurrency=2
 
+  # The clock. Celery beat ticks every five minutes and enqueues whichever
+  # per-source collections are due (data_sources.sync_interval_minutes, with
+  # backoff while a feed fails and stable per-source jitter). Same image and
+  # same boot order as the worker, no volumes: it creates jobs, it never
+  # touches data files. One scheduler process -- two would double-enqueue.
+  celery-beat:
+    image: *backend-image
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-beacon_user}:${POSTGRES_PASSWORD:-beacon_password}@postgres:5432/${POSTGRES_DB:-beacon_db}?client_encoding=utf8
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      PYTHONPATH: /app
+      BEACON_RUN_MIGRATIONS: "0"
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      PYTHONIOENCODING: utf-8
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - beacon-network
+    restart: unless-stopped
+    command: celery -A backend.tasks.celery_app beat --loglevel=info
+
   # Frontend (React 18 + Vite + Deck.gl 2D risk map)
   frontend:
     build:

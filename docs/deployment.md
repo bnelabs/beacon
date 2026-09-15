@@ -112,10 +112,12 @@ Six services, of which one is a one-shot:
 | `migrate` | `alembic upgrade head`, exactly once | **exits 0** |
 | `backend` | FastAPI on :3456 | long-running |
 | `celery-worker` | the four job tasks | long-running |
+| `celery-beat` | the clock: enqueues due per-source collections | long-running |
 | `frontend` | nginx serving the SPA on :9876, proxying `/api/` | long-running |
 
-`migrate`, `backend` and `celery-worker` are **one image**. Only `backend`
-carries a `build:` block; the other two declare the same `image:` tag
+`migrate`, `backend`, `celery-worker` and `celery-beat` are **one image**.
+Only `backend` carries a `build:` block; the others declare the same `image:`
+tag
 (`${BEACON_BACKEND_IMAGE:-beacon-backend:latest}`) and no build of their own, so
 the CUDA torch wheel is downloaded once rather than twice and the worker cannot
 drift from the API it takes jobs from.
@@ -142,12 +144,12 @@ CPU-only hosts substitute `docker-compose.cpu.yml` for the GPU overlay.
 ### Boot order, and why it is enforced rather than hoped for
 
 ```
-postgres healthy ──> migrate runs once ──> migrate exits 0 ──> backend + celery-worker start
+postgres healthy ──> migrate runs once ──> migrate exits 0 ──> backend + worker + beat start
                                                                       │
                                             backend healthy ──────────┴──> frontend starts
 ```
 
-`backend` and `celery-worker` depend on `migrate` with
+`backend`, `celery-worker` and `celery-beat` depend on `migrate` with
 `condition: service_completed_successfully`, and `frontend` depends on `backend`
 with `condition: service_healthy`. Both are deliberate:
 
@@ -164,6 +166,34 @@ with `condition: service_healthy`. Both are deliberate:
 A migration failure now stops the stack with `migrate` exited non-zero and its
 error in `docker compose logs migrate`, instead of presenting as a backend that
 will not answer.
+
+### Scheduled collections, and what "connected" means per feed
+
+Collection used to be entirely manual: a button that stamped a time. The
+`celery-beat` service now ticks every five minutes and asks
+`backend.services.scheduling` which sources are due; each source's cadence is
+its own `sync_interval_minutes` (null means manual-only -- the absence of a
+schedule is a decision, not a default). Three behaviours are deliberate:
+
+- **Backoff on failure.** The interval doubles per consecutive failure, capped
+  at eight intervals, and one success restores the healthy cadence. A feed
+  that is down is retried forever, gently.
+- **Stable per-source jitter**, a hash of the source id, so sources sharing a
+  cadence do not land on the same tick. Random jitter would make the next due
+  date unreadable in the health payload.
+- **One collection path.** The scheduler enqueues the same `data_collection`
+  job a human does, and `POST /api/v1/data-sources/{id}/sync` ("Sync Now")
+  enqueues it too -- 202 and a job, not a timestamp. An open collection for a
+  source blocks a second enqueue, from beat or from a human.
+
+`GET /api/v1/data-sources/health` is the operator's view: cadence, backoff
+factor, last start/duration/rows, next due date, and `overdue`. The Data
+Sources page renders it per card (schedule selector, last run, next refresh,
+failure streak with the reason), and the Data Quality page renders a
+"Refresh Cadence" panel for scheduled feeds. `POST
+/api/v1/data-sources/{id}/probe` runs the plugin's own `test_connection`
+against the live provider with environment-held keys injected exactly as the
+collector injects them, so a keyed feed probes the way it runs.
 
 ### "Up" is not "operational"
 

@@ -161,6 +161,7 @@ def run_data_collection(self, job_id: int, parameters: dict):
     db = SessionLocal()
     process = psutil.Process(os.getpid())
     start_memory = process.memory_info().rss / (1024 ** 2)  # MB
+    started_at = datetime.now(timezone.utc)
 
     try:
         service = JobService(db)
@@ -264,6 +265,21 @@ def run_data_collection(self, job_id: int, parameters: dict):
             db_job.peak_memory_mb = peak_memory
             db.commit()
 
+        # Sync telemetry for the source this collection belonged to, when it
+        # belonged to one: scheduled and manual runs both carry
+        # data_source_id, and the health payload reads exactly these columns.
+        # A success clears the failure streak, which is what ends the backoff.
+        source_id = parameters.get("data_source_id")
+        if source_id:
+            from backend.services.scheduling import record_sync_success
+
+            record_sync_success(
+                db,
+                int(source_id),
+                started_at,
+                rows=int(data_package.num_observations or 0),
+            )
+
         logger.info(f"Data collection completed for job {job_id}")
         return result
 
@@ -276,6 +292,14 @@ def run_data_collection(self, job_id: int, parameters: dict):
             error_message=str(e),
             user_friendly_error=error_details_to_json(user_friendly)
         )
+        # The failure streak is the backoff: scheduling.next_due_at doubles
+        # the interval per consecutive failure, so recording it here is what
+        # keeps a down feed from being hammered at its healthy cadence.
+        source_id = parameters.get("data_source_id")
+        if source_id:
+            from backend.services.scheduling import record_sync_failure
+
+            record_sync_failure(db, int(source_id), str(e))
         raise
     finally:
         db.close()

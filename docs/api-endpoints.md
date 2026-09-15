@@ -12,7 +12,7 @@ schema at `/openapi.json` or the Swagger UI at `/docs`.
 
 Application: **BEACON API - Banking Network Engine** v3.2.0
 
-**121 operations across 22 tags.**
+**123 operations across 22 tags.**
 
 
 ## Pipeline (DATA-ENGINE-RESULTS)
@@ -50,11 +50,13 @@ Application: **BEACON API - Banking Network Engine** v3.2.0
 | `GET` | `/api/v1/data-sources/` | untyped | List all configured data sources. |
 | `POST` | `/api/v1/data-sources/` | `DataSourceResponse` | Create a new data source. |
 | `GET` | `/api/v1/data-sources/disclosure` | untyped | Provenance disclosure: every feed, its publisher, and what is inferred. |
+| `GET` | `/api/v1/data-sources/health` | untyped | Feed health: cadence, last outcome, and what is overdue, per source. |
 | `POST` | `/api/v1/data-sources/test` | `DataSourceTestResponse` | Test a data source configuration before saving it. |
 | `GET` | `/api/v1/data-sources/{data_source_id}` | `DataSourceResponse` | Get details of a specific data source. |
 | `PUT` | `/api/v1/data-sources/{data_source_id}` | `DataSourceResponse` | Update an existing data source. |
 | `DELETE` | `/api/v1/data-sources/{data_source_id}` | — | Delete a data source. |
-| `POST` | `/api/v1/data-sources/{data_source_id}/sync` | `DataSourceResponse` | Mark a data source as freshly synced. |
+| `POST` | `/api/v1/data-sources/{data_source_id}/probe` | `DataSourceTestResponse` | Test the saved configuration of one source against its live provider. |
+| `POST` | `/api/v1/data-sources/{data_source_id}/sync` | `JobResponse` | Queue a real collection job for this source. |
 
 
 ## Data Catalogue
