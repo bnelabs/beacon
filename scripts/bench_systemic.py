@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Hot-path benchmarks for the language-strategy decision rule.
 
-Measures the three loops that would justify a systems language if they ever
-became bottlenecks:
+Measures the loops that would justify a systems language if they ever became
+bottlenecks:
 
   1. multiplex clearing (Eisenberg-Noe fixed point), per solve and as the
      n-solve loop the systemic-importance ranking runs;
   2. the coupled fire-sale fixed point (clearing inside a price-feedback loop);
-  3. batched sequence-model inference over rolling windows (the risk series).
+  3. batched sequence-model inference over rolling windows (the risk series);
+  4. the Student-t regime nowcast the prediction path runs once per source.
 
 Prints one JSON object per benchmark. The numbers are embedded in
 docs/LANGUAGE_STRATEGY.md; re-run after touching those loops and update the
@@ -129,6 +130,39 @@ def bench_inference(reps: int) -> None:
     print(json.dumps(result))
 
 
+def bench_regime_nowcast(reps: int) -> None:
+    """The Student-t regime nowcast the prediction path runs once per source.
+
+    ``RealPredictionEngine._regime_label`` fits a two-state Student-t HMM on the
+    standardized history of every source and reads the regime off the Viterbi
+    path. It is the only loop on the prediction path whose cost is seconds
+    rather than milliseconds, and it is paid once per source per job, so it is
+    the one that decides whether a monitoring cycle over the full catalogue
+    meets the decision rule in docs/LANGUAGE_STRATEGY.md.
+
+    Measured here at the production shape: ``n_states=2, seed=0``, default
+    ``max_iterations=100``, on a T=1000 standardized random walk.
+    """
+    from backend.modules.engine.hidden_markov import StudentTHMM
+
+    rng = np.random.default_rng(11)
+    for n_observations in (250, 1000):
+        values = np.cumsum(rng.standard_normal(n_observations))
+        standardized = ((values - values.mean()) / values.std()).reshape(-1, 1)
+
+        def nowcast(data=standardized):
+            model = StudentTHMM(n_states=2, seed=0)
+            model.fit(data)
+            model.viterbi(data)
+
+        result = _bench(nowcast, reps)
+        result.update(
+            benchmark="regime_nowcast_student_t_k2",
+            n_observations=n_observations,
+        )
+        print(json.dumps(result))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reps", type=int, default=10)
@@ -137,6 +171,8 @@ def main() -> None:
     bench_clearing(args.reps)
     bench_fire_sale(max(1, args.reps // 2))
     bench_inference(max(1, args.reps // 5))
+    # The nowcast is seconds per call, so it gets the fewest repetitions.
+    bench_regime_nowcast(max(1, args.reps // 10))
 
 
 if __name__ == "__main__":
