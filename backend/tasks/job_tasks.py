@@ -1252,7 +1252,18 @@ def run_backtest(self, job_id: int, parameters: dict):
                 if series_values.size < definition.horizon + definition.min_duration:
                     event_metrics_payload["by_source"][source_name] = {"skipped": "series_too_short"}
                     continue
-                labelling = label_events(series_values, definition)
+                from dataclasses import replace as _dc_replace
+
+                from backend.modules.data.semantics import event_direction
+
+                resolved_direction = definition.direction or event_direction(source_name)
+                if resolved_direction is None:
+                    event_metrics_payload["by_source"][source_name] = {
+                        "skipped": "no declared or registered stress direction for this series"
+                    }
+                    continue
+                source_definition = _dc_replace(definition, direction=resolved_direction)
+                labelling = label_events(series_values, source_definition)
                 events_aligned = labelling.events[: scores_block.size]
                 if events_aligned.size == 0 or not events_aligned.any():
                     event_metrics_payload["by_source"][source_name] = {"skipped": "no_events_in_window"}

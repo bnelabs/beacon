@@ -54,7 +54,10 @@ class EventDefinition:
     Attributes:
         direction: ``"up"`` when rising values are stress (e.g. a basis or a
             default rate), ``"down"`` when falling values are (e.g. an
-            index or a coverage ratio).
+            index or a coverage ratio). ``None`` defers to the per-series
+            orientation registered in ``backend.modules.data.semantics``;
+            a series with neither is skipped by consumers rather than
+            labelled with a guessed orientation.
         quantile: Quantile of the horizon-move distribution that defines the
             crossing. Must be in (0.5, 1) -- a median crossing is noise, not
             stress.
@@ -66,14 +69,14 @@ class EventDefinition:
             falls back under half the crossing level).
     """
 
-    direction: str = "up"
+    direction: Optional[str] = "up"
     quantile: float = 0.95
     horizon: int = 5
     min_duration: int = 2
     decay: float = 0.5
 
     def __post_init__(self) -> None:
-        if self.direction not in ("up", "down"):
+        if self.direction is not None and self.direction not in ("up", "down"):
             raise ValueError(f"direction must be 'up' or 'down', got {self.direction!r}")
         if not 0.5 < self.quantile < 1.0:
             raise ValueError(f"quantile must be in (0.5, 1), got {self.quantile}")
