@@ -5,7 +5,12 @@ Create Date: 2025-11-07 16:15:00
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+from backend.alembic.guards import (
+    create_index_if_missing,
+    create_table_if_missing,
+    drop_index_if_exists,
+    drop_table_if_exists,
+)
 
 # revision identifiers
 revision = '20251107_161500'
@@ -15,7 +20,7 @@ depends_on = None
 
 
 def upgrade():
-    op.create_table('alert_rules',
+    create_table_if_missing('alert_rules',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('name', sa.String(length=200), nullable=False),
         sa.Column('description', sa.Text(), nullable=True),
@@ -38,9 +43,9 @@ def upgrade():
         sa.Column('created_by', sa.String(length=100), nullable=True),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_alert_rules_id'), 'alert_rules', ['id'], unique=False)
+    create_index_if_missing(op.f('ix_alert_rules_id'), 'alert_rules', ['id'], unique=False)
 
 
 def downgrade():
-    op.drop_index(op.f('ix_alert_rules_id'), table_name='alert_rules')
-    op.drop_table('alert_rules')
+    drop_index_if_exists(op.f('ix_alert_rules_id'), 'alert_rules')
+    drop_table_if_exists('alert_rules')

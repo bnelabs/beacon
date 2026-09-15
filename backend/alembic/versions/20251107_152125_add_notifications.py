@@ -4,9 +4,14 @@ Revision ID: 20251107_152125
 Revises: add_country_profiles
 Create Date: 2025-11-07 15:21:25
 """
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSON
+from backend.alembic.guards import (
+    create_index_if_missing,
+    create_table_if_missing,
+    drop_index_if_exists,
+    drop_table_if_exists,
+)
 
 # revision identifiers, used by Alembic.
 revision = '20251107_152125'
@@ -16,7 +21,7 @@ depends_on = None
 
 
 def upgrade():
-    op.create_table(
+    create_table_if_missing(
         'notifications',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('title', sa.String(length=200), nullable=False),
@@ -32,7 +37,7 @@ def upgrade():
         sa.Column('action_label', sa.String(length=100), nullable=True),
         sa.Column('related_entity_type', sa.String(length=50), nullable=True),
         sa.Column('related_entity_id', sa.Integer(), nullable=True),
-        sa.Column('metadata', JSON, nullable=True),
+        sa.Column('extra_data', JSON, nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column('read_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('dismissed_at', sa.DateTime(timezone=True), nullable=True),
@@ -40,19 +45,19 @@ def upgrade():
         sa.PrimaryKeyConstraint('id')
     )
 
-    op.create_index('ix_notifications_id', 'notifications', ['id'])
-    op.create_index('ix_notifications_is_read', 'notifications', ['is_read'])
-    op.create_index('ix_notifications_priority', 'notifications', ['priority'])
-    op.create_index('ix_notifications_category', 'notifications', ['category'])
-    op.create_index('ix_notifications_created_at', 'notifications', ['created_at'])
-    op.create_index('ix_notifications_entity', 'notifications', ['related_entity_type', 'related_entity_id'])
+    create_index_if_missing('ix_notifications_id', 'notifications', ['id'])
+    create_index_if_missing('ix_notifications_is_read', 'notifications', ['is_read'])
+    create_index_if_missing('ix_notifications_priority', 'notifications', ['priority'])
+    create_index_if_missing('ix_notifications_category', 'notifications', ['category'])
+    create_index_if_missing('ix_notifications_created_at', 'notifications', ['created_at'])
+    create_index_if_missing('ix_notifications_entity', 'notifications', ['related_entity_type', 'related_entity_id'])
 
 
 def downgrade():
-    op.drop_index('ix_notifications_entity', table_name='notifications')
-    op.drop_index('ix_notifications_created_at', table_name='notifications')
-    op.drop_index('ix_notifications_category', table_name='notifications')
-    op.drop_index('ix_notifications_priority', table_name='notifications')
-    op.drop_index('ix_notifications_is_read', table_name='notifications')
-    op.drop_index('ix_notifications_id', table_name='notifications')
-    op.drop_table('notifications')
+    drop_index_if_exists('ix_notifications_entity', 'notifications')
+    drop_index_if_exists('ix_notifications_created_at', 'notifications')
+    drop_index_if_exists('ix_notifications_category', 'notifications')
+    drop_index_if_exists('ix_notifications_priority', 'notifications')
+    drop_index_if_exists('ix_notifications_is_read', 'notifications')
+    drop_index_if_exists('ix_notifications_id', 'notifications')
+    drop_table_if_exists('notifications')
