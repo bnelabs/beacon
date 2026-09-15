@@ -163,9 +163,13 @@ class TestEMMonotonicity:
         assert np.all(np.diff(history) >= -1e-9)
 
     def test_final_history_entry_matches_log_likelihood_of_returned_parameters(self):
-        # fit re-scores after every M-step, so the last entry must be the
-        # likelihood of exactly the parameters that were returned. If a future
-        # change moved the scoring before the M-step this would drift.
+        # _fit_once scores the returned parameters exactly once, after the EM
+        # loop, so the last entry must be the likelihood of precisely those
+        # parameters. The entries before it are the likelihoods that *entered*
+        # each M-step -- the E-step's own forward normalisers, which is what
+        # makes the second per-iteration forward pass unnecessary. If a future
+        # change dropped the final score, or scored a stale parameter set, this
+        # would drift.
         observations, _ = two_state_data(seed=5, n_observations=1000)
         model = GaussianHMM(2, seed=FIT_SEED)
         history = model.fit(observations, max_iterations=150, tolerance=1e-12)
@@ -663,3 +667,142 @@ class TestEndToEnd:
 
         assert series.shape == (observations.shape[0],)
         assert set(series.tolist()) <= {"quiet", "turbulent"}
+
+
+class TestEMIterationBookkeeping:
+    """The EM loop must not pay for its own bookkeeping.
+
+    ``_fit_once`` used to run a *second* forward pass after every M-step purely
+    to record the updated parameters' likelihood, which put two forward passes
+    and one backward pass in the innermost loop of the slowest module on the
+    prediction path. The E-step's forward pass already returns the per-step
+    normalisers, and their sum is ``log p(X)`` under the parameters that
+    produced them, so the recorded likelihood is now free and the parameters are
+    scored exactly once, after the loop.
+
+    These tests pin the two halves of that trade: the invariant that survived
+    (``history[-1]`` is the likelihood of the returned parameters) and the cost
+    that was removed (forward passes per iteration must not grow with ``T``).
+    """
+
+    def test_e_step_normalisers_are_the_likelihood_of_the_incoming_parameters(self):
+        # The identity the change rests on: sum(log_scale) from the E-step's own
+        # forward pass equals an independent forward pass under the same
+        # parameters. If this ever stops holding, the recorded history is no
+        # longer a likelihood and the monotonicity tests lose their meaning.
+        observations, _ = two_state_data(seed=17, n_observations=400)
+        model = GaussianHMM(2, seed=FIT_SEED)
+        model.fit(observations, max_iterations=10, tolerance=1e-12)
+
+        data = model._as_observations(observations)
+        log_emission = model._log_emission(data, model.means, model.variances)
+        _, log_scale = model._forward(log_emission, model.initial, model.transition)
+
+        assert float(np.sum(log_scale)) == pytest.approx(
+            model.log_likelihood(observations), rel=1e-12
+        )
+
+    def test_one_forward_pass_per_iteration_plus_one_final_score(self):
+        # The cost invariant, counted rather than timed so a loaded CI runner
+        # cannot flake it. The E-step's forward pass returns the per-step
+        # normalisers whose sum is log p(X) under the parameters that produced
+        # them, so scoring the iteration needs no second pass. With E E-steps
+        # the fit must call _forward exactly E + 1 times: once per E-step, plus
+        # the single post-loop score of the parameters being returned.
+        #
+        # This is a genuine regression test -- the pre-fix loop scored after
+        # every M-step as well and called _forward 2E + 1 times, so it fails on
+        # the old code by construction.
+        import types
+
+        observations, _ = two_state_data(seed=37, n_observations=300)
+        model = GaussianHMM(2, seed=FIT_SEED)
+
+        calls = {"forward": 0}
+        original = GaussianHMM._forward
+
+        def counting_forward(self, *args, **kwargs):
+            calls["forward"] += 1
+            return original(self, *args, **kwargs)
+
+        model._forward = types.MethodType(counting_forward, model)
+
+        # The cap is not reached -- a converged EM produces an improvement of
+        # exactly 0.0, which is below every positive tolerance -- so E is read
+        # from the returned history rather than assumed. The assertion is the
+        # relation between passes and E-steps, which is what actually regressed.
+        max_iterations = 12
+        history = model.fit(
+            observations, max_iterations=max_iterations, tolerance=1e-14
+        )
+        e_steps = len(history) - 1  # the post-loop score is not an E-step
+
+        assert 1 <= e_steps <= max_iterations
+        assert calls["forward"] == e_steps + 1, (
+            f"{calls['forward']} forward passes for {e_steps} E-steps; expected "
+            f"{e_steps + 1}: one per E-step, whose normalisers already sum to "
+            "log p(X), plus the single post-loop score of the parameters being "
+            f"returned. The pre-fix loop re-scored after every M-step and made "
+            f"{2 * e_steps + 1}."
+        )
+
+    def test_convergence_threshold_is_relative_to_the_objective_scale(self):
+        # The objective is a log-likelihood summed over T observations, so its
+        # magnitude grows with the series and with the units the data happens to
+        # be expressed in. A fixed absolute threshold therefore means a
+        # different stopping rule for every length and scale: on the production
+        # Student-t nowcast (T=1000, objective of order -800) a 1e-6 absolute
+        # test is a relative tolerance of ~1e-9, which the EM tail never
+        # reaches. The threshold is now scaled by the objective.
+        #
+        # Honest scope, because this repository does not accept a claim that was
+        # not reproduced: on every dataset tried the absolute test also
+        # converged, so this is a latent-defect fix and NOT the source of the
+        # measured speedup -- that is the forward pass above. What is asserted
+        # here is the property, not a win: the improvement that ends the loop
+        # must lie inside the scale-relative band, and the same data expressed
+        # in different units must not change the iteration count by more than
+        # the one-iteration lag the recorded trajectory can carry.
+        observations, _ = two_state_data(seed=23, n_observations=4000)
+
+        def fit_scaled(scale: float) -> tuple:
+            model = GaussianHMM(2, seed=FIT_SEED)
+            history = model.fit(
+                observations * scale, max_iterations=200, tolerance=1e-6
+            )
+            entering = np.asarray(history[:-1], dtype=float)
+            return len(entering), float(entering[-1] - entering[-2]), float(
+                entering[-1]
+            )
+
+        e_steps, improvement, objective = fit_scaled(1.0)
+        assert e_steps < 200, (
+            "the fit ran to the cap: the convergence test never fired"
+        )
+        assert improvement < 1e-6 * max(1.0, abs(objective)), (
+            f"the loop ended on an improvement of {improvement:.3e}, outside the "
+            f"scale-relative band {1e-6 * max(1.0, abs(objective)):.3e}"
+        )
+
+        # Same data, different units (e.g. percent vs basis points). Under an
+        # absolute threshold the objective grows by log(1000) * T and the
+        # stopping rule with it.
+        scaled_steps, _, _ = fit_scaled(1000.0)
+        assert abs(scaled_steps - e_steps) <= 1, (
+            f"rescaling the data changed the iteration count from {e_steps} to "
+            f"{scaled_steps}: the convergence test is still scale-dependent"
+        )
+
+    def test_a_converged_fit_stops_before_the_iteration_cap(self):
+        # The companion to the test above: with a tolerance the EM tail can
+        # actually reach, the cap is not the thing that ends the loop.
+        observations, _ = two_state_data(seed=29, n_observations=600)
+        model = GaussianHMM(2, seed=FIT_SEED)
+        history = model.fit(observations, max_iterations=500, tolerance=1e-4)
+
+        # One entry per iteration run, plus the single post-loop score.
+        assert len(history) < 500, "the fit ran to the cap despite a loose tolerance"
+        assert history[-1] == pytest.approx(
+            model.log_likelihood(observations), rel=1e-12
+        )
+        assert np.all(np.diff(history) >= -1e-9)

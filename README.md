@@ -71,25 +71,21 @@ Storage (TimescaleDB + Redis)
   └── Hypertables with compression and continuous aggregates for observations
   └── Point-in-time store for bilateral exposure vintages (as-of queries)
   └── Redis: Celery broker, result backend, WebSocket relay
+  └── The schema covers indicator observations, risk scores and model metrics,
+      but only observations have a writer — nothing calls `RiskScorePoint` or
+      `ModelMetricPoint`, so those hypertables stay empty *(not wired)*
 
 ML (PyTorch)
-  └── Temporal-attention and LSTM sequence models, per-source normalization
-  └── Walk-forward and CPCV validation with lift over persistence/AR/linear
-      baselines; seam-aware metrics that never difference across sources
-  └── TimescaleDB: PostgreSQL with hypertables, compression, and continuous
-      aggregates. The schema covers indicator observations, risk scores and model
-      metrics, but only observations have a writer — nothing calls the risk-score
-      or metric writer, so those hypertables stay empty *(not wired)*
-  └── Redis: Celery broker and result backend
-
-ML Stack (PyTorch)
-  └── Toto 2.0 foundation-model node encoder: loadable from a local model folder,
-      and constructed only by `backend/scripts/compare_encoder_sizes.py` — the
-      engine's inference path does not use it *(not wired)*
-  └── Temporal Attention Networks and continuous-time temporal graph memory
+  └── Temporal Attention Networks and LSTM sequence models, per-source
+      normalization, continuous-time temporal graph memory primitives
   └── Neural SDE latent dynamics, NOTEARS causal discovery with
       declared-structure validation
-  └── Gaussian and Student-t HMM regime detection *(not wired)*
+  └── Gaussian and Student-t HMM regime detection — **wired**: the Student-t fit
+      supplies the live per-source regime label in `prediction_engine.
+      _regime_label`, which is what the mixture-of-experts census entry was
+      waiting on
+  └── Walk-forward and CPCV validation with lift over persistence/AR/linear
+      baselines; seam-aware metrics that never difference across sources
   └── Systemic risk: Basel III LCR/NSFR/leverage translation, coupled fire-sale
       equilibrium, crowded-trade overlap, persistence-vector topology
   └── Metrics: MSE, MAE, RMSE, R², directional accuracy
@@ -100,6 +96,10 @@ ML Stack (PyTorch)
       SHAP values was removed rather than re-tuned, and SubgraphX, which replaced
       it, is implemented but not wired. Prediction results carry an empty
       `feature_importances` and no attention weights
+  └── No foundation-model encoder. The Toto 2.0 wrapper and its dependency train
+      were deleted in the 2026-09 hygiene round because no production path ever
+      embedded a node with them; the `REMOVED` register in
+      `backend/tests/test_reachability.py` records what returns with one
   └── CUDA + mixed precision training
 ```
 

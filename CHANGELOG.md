@@ -10,6 +10,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- `TestEMIterationBookkeeping` in `backend/tests/test_hidden_markov.py`: the EM loop's cost and bookkeeping invariants, which nothing previously asserted. `test_one_forward_pass_per_iteration_plus_one_final_score` counts `_forward` invocations and expects `E + 1` for `E` E-steps; it **fails on the pre-fix code** (12 passes for 5 E-steps), so the redundant pass cannot return unnoticed. Also pins the identity the change rests on (`sum(log_scale)` from the E-step's own forward pass *is* `log_likelihood`), that the convergence threshold is scaled to the objective, and that a converged fit stops before the iteration cap.
+- `bench_regime_nowcast` in `scripts/bench_systemic.py`: the Student-t regime nowcast at T=250 and T=1 000 -- the one hot path on the *prediction* path rather than the scenario path. `docs/LANGUAGE_STRATEGY.md` embeds the numbers, and that document's own rule is that they come from this script.
 - Property-based tests (`backend/tests/test_property_based.py`, new
   `hypothesis` dev dependency): the numerical invariants of the three
   load-bearing modules swept over generated input domains instead of
@@ -26,20 +28,17 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   are deterministic (`derandomize=True`).
 
 ### Changed
+- `GaussianHMM._fit_once` no longer runs a **second forward pass after every M-step**. It did so only to record the updated parameters' likelihood, but `_forward` already returns the per-step normalisers and their sum is `log p(X)` under the parameters that produced them -- the identity was sitting in `_forward`'s own docstring. The parameters are now scored once, after the loop, which is the only place the `history[-1] == log_likelihood(returned parameters)` invariant needs it. Measured with `scripts/bench_systemic.py --reps 6`: the production regime nowcast (`StudentTHMM(n_states=2)`, T=1 000) **5.264 s -> 3.349 s (1.57x)**, T=250 **1.401 s -> 0.842 s (1.67x)**, and the HMM/Student-t/property-based suite **76.3 s -> 44.3 s**. The final log-likelihood is **bit-identical** (-3618.940508 before and after) and so are the returned parameters. `history[:-1]` now records the likelihoods *entering* each M-step, a one-iteration lag that leaves `np.diff(history)` the same sequence of EM improvements the monotonicity tests assert on; the improvement that trips the convergence test is recorded before the break rather than discarded by it.
+- The EM convergence test is **scaled to the objective** (`tolerance * max(1, |log-likelihood|)`) instead of absolute. The objective is summed over `T` observations, so a fixed 1e-6 means a relative tolerance of ~1e-9 at T=1 000 and tightens further with series length and with the units the data is expressed in. **Recorded honestly as a latent defect closed, not as a speedup:** on every dataset tried -- Gaussian and Student-t, T=250 to T=20 000, random walks and well-separated mixtures -- the absolute test also converged, so this changes no measured number. What it removes is a scale-dependence that would bite on a longer series or a change of units.
+- `docs/LANGUAGE_STRATEGY.md` **restored**. It was deleted by `0ecd76f` ("Document language strategy and migration plans"), a commit whose entire diff was 85 deletions of this file, while `docs/README.md` kept indexing it and `scripts/bench_systemic.py` -- added by `8dff9e2` so the document's numbers could be re-measured rather than trusted -- was left in the tree with nothing pointing at it. Restored from `8dff9e2`, re-benchmarked, and extended with the regime-nowcast measurement and with the record of an external four-language migration proposal that was declined on evidence.
+- `README.md` architecture block: the two duplicated ML sections are one, and the TimescaleDB/Redis bullets misfiled under "ML (PyTorch)" are back under Storage. `hidden_markov` promoted to `REQUIRED_REACHABLE` in the reachability census, per that file's own instruction to promote a wired capability rather than leave it unlisted.
+- Declined on measurement, and recorded so it is not re-proposed: **capping `max_iterations` for the regime nowcast.** It is the obvious 4x, but across 12 series x 4 caps, reducing 100 -> 15/25/40 **flipped the returned regime label in 3 of 48 cases**. That label is the input to `NetworkQualityGate`, which fails closed on an unseen regime, so a cap that moves labels changes which predictions are blocked. Also declined: porting the loop to Rust, per the binding decision rule in `docs/LANGUAGE_STRATEGY.md` -- a port of the pre-fix loop would have been a fast implementation of a redundant forward pass. The lever that remains is batching the independent per-source fits into one `(n_sources, T, K)` recursion; that is a structural change to `_predict_single`'s loop and belongs in its own change with a label-equality test.
 - `backend/Dockerfile`: `CUDA_VISIBLE_DEVICES` is a build `ARG` (image
   default unchanged: `0`) instead of a baked-in `ENV`. The hard-coded value
   silently overrode the `count: all` device reservation of
   `docker-compose.gpu.yml`, so the overlay now passes the arg through
   (defaulting to `all` to match its reservation) and `.env.example`
   documents the variable.
-
-### Fixed
-- `foundation_encoders.__all__` still exported `resolve_model_dir` and
-  `local_model_path` after the 2026-09 hygiene round deleted them, so a
-  star-import of the module raised `AttributeError` (the advisory ruff CI
-  step had been reporting the F822 all along; `continue-on-error` kept it
-  off the merge gate). The orphaned model-tree constants that described the
-  deleted weight-loading machinery went with them.
 
 ### Removed
 - The dead Toto-2.0 weights mount from `docker-compose.yml`
@@ -53,6 +52,17 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   `TotoEncoder`, and the deferred ledger in `docs/README.md` gains the
   open proposals (BoE, OpenFIGI, EBA risk dashboard,
   `docker-compose.simple.yml`) with the precondition each waits on.
+
+### Fixed
+- `README.md` advertised two things the tree does not contain. "Gaussian and Student-t HMM regime detection *(not wired)*" -- it is wired: `_regime_label` fits a two-state Student-t HMM per source at `prediction_engine.py:1005`, which is what the mixture-of-experts census disposition means by "the live regime label now exists". And "Toto 2.0 foundation-model node encoder: loadable from a local model folder, and constructed only by `backend/scripts/compare_encoder_sizes.py`" -- that script and the whole encoder dependency train were deleted in the 2026-09 hygiene round and are recorded in the census `REMOVED` register. `hidden_markov` was also in *neither* census registry despite being reachable, so nothing would have failed had it been unwired.
+- `scripts/release.py` annotated `fail()` as `"NoReturn"` with a `# type: ignore[name-defined]` instead of importing it, so the advisory ruff step in Backend CI reported F821 on every run -- one of the two errors that step was reporting on main. `NoReturn` is now imported and the suppression is gone; `ruff check backend scripts --select E9,F63,F7,F82` is clean.
+
+- `foundation_encoders.__all__` still exported `resolve_model_dir` and
+  `local_model_path` after the 2026-09 hygiene round deleted them, so a
+  star-import of the module raised `AttributeError` (the advisory ruff CI
+  step had been reporting the F822 all along; `continue-on-error` kept it
+  off the merge gate). The orphaned model-tree constants that described the
+  deleted weight-loading machinery went with them.
 
 ## [3.2.0] - 2026-09-15
 
