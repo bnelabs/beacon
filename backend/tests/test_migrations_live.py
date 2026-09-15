@@ -217,6 +217,21 @@ class _Database:
         Base.metadata.create_all(self.engine)
 
 
+def _head_name(database_url: str) -> str:
+    """The single head revision, parsed from ``alembic heads``.
+
+    Assertions about "the database is still at head after a refused
+    downgrade" must follow the head rather than pin a revision name: pinning
+    turns every future migration into a failure here for no reason, while a
+    dynamic head keeps the assertion about exactly what it means.
+    """
+    heads = _alembic("heads", database_url=database_url)
+    assert heads.returncode == 0
+    listed = [line for line in heads.stdout.splitlines() if "(head)" in line]
+    assert len(listed) == 1, listed
+    return listed[0].split()[0]
+
+
 def _upgrade(db: _Database, revision: str = "head") -> None:
     result = _alembic("upgrade", revision, database_url=db.url)
     assert result.returncode == 0, (
@@ -394,7 +409,7 @@ class TestPartialHistory:
         assert "cannot be downgraded" in result.stderr, result.stderr[-1500:]
         # The refusal must leave the database usable, not half-migrated. A
         # downgrade runs in a transaction, so a failed one rolls back.
-        assert database.alembic_version() == "notifications_extra_data_001"
+        assert database.alembic_version() == _head_name(database.url)
         _upgrade(database)
         assert not (REQUIRED_TABLES - database.tables())
 

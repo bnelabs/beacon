@@ -69,3 +69,12 @@ def dispatch_job(self, job_id: int, job_type: str, parameters: dict = None):
 
     # Execute the appropriate task
     return task_func.apply_async(args=[job_id, parameters or {}])
+
+
+# Beat tasks bind to this app when their module executes. Celery's ``include``
+# resolves them by name inside the worker and beat processes; importing the
+# module here as well makes the edge explicit for the reachability census,
+# which walks import edges from this module and otherwise sees a beat task
+# living in nobody's graph -- the exact silence that once kept data/pit.py
+# invisible for months.
+from backend.tasks import schedule_tasks  # noqa: E402,F401
