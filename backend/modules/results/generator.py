@@ -62,9 +62,10 @@ class InstitutionalProfile:
     institution_id: str
     name: str
     
-    market_liquidity_score: float
-    funding_liquidity_score: float
-    systemic_importance: float
+    risk_score: Optional[float]
+    risk_level: Optional[str]
+    score_units: str
+    systemic_importance: Optional[float]
     
     vulnerabilities: List[str]
     strengths: List[str]
@@ -96,7 +97,7 @@ class ComprehensiveReport:
     geographic_analysis: GeographicAnalysis
     institutional_profiles: List[InstitutionalProfile]
     
-    market_liquidity_report: Dict[str, Any]
+    model_score_report: Dict[str, Any]
     funding_liquidity_report: Dict[str, Any]
     systemic_risk_report: Dict[str, Any]
     
@@ -179,7 +180,7 @@ class ResultsGenerator:
             
             # Section 4-6: Detailed Risk Reports
             logger.info(f"[{self.job_id}] Creating detailed risk reports")
-            market_liq = self._generate_market_liquidity_report(engine_result)
+            market_liq = self._generate_model_score_report(engine_result)
             funding_liq = self._generate_funding_liquidity_report(engine_result)
             systemic = self._generate_systemic_risk_report(engine_result)
             
@@ -196,7 +197,7 @@ class ResultsGenerator:
                 executive_summary=exec_summary,
                 geographic_analysis=geo_analysis,
                 institutional_profiles=inst_profiles,
-                market_liquidity_report=market_liq,
+                model_score_report=market_liq,
                 funding_liquidity_report=funding_liq,
                 systemic_risk_report=systemic,
                 recommendations=recommendations,
@@ -254,8 +255,8 @@ class ResultsGenerator:
                     key_findings.append(f"Mean prediction error: {errors_numeric.mean():.4f}")
 
         # Add fallbacks based on available risk scores
-        market_liq = risk_scores.market_liquidity
-        funding_liq = risk_scores.funding_liquidity
+        market_liq = risk_scores.model_score
+        funding_liq = {}  # no funding-specific measurement exists
         systemic = risk_scores.systemic_risk
 
         market_overall = self._safe_float(market_liq.get('overall', market_liq.get('current')))
@@ -390,128 +391,78 @@ class ResultsGenerator:
         )
     
     def _generate_institutional_profiles(self, engine_result: EngineResult) -> List[InstitutionalProfile]:
-        """Generate institution-level profiles from risk scores."""
+        """Per-entity profiles carrying only what was measured.
 
+        Round seven rewrite: the previous version synthesised per-channel
+        means (market/funding) from a single model score and thresholded them
+        into vulnerabilities, strengths and recommendations -- narrative
+        manufactured from one number. Profiles now carry the entity's model
+        score in its own units, the level band the analyzer assigned when one
+        exists, and empty (not invented) qualitative lists.
+        """
         predictions_df = self._load_predictions_dataframe(engine_result.predictions_path)
         profiles: List[InstitutionalProfile] = []
 
-        entity_columns = ['bank_id', 'institution_id', 'institution', 'source']
-        metric_candidates = ['prediction', 'predicted', 'risk_score', 'market_liquidity']
-        funding_candidates = ['funding_liquidity', 'funding_score']
-        systemic_candidates = ['systemic_risk', 'systemic_score']
+        semantics = getattr(engine_result.risk_scores, "score_semantics", {}) or {}
+        units = str(semantics.get("units", "standardized one-step-ahead indicator prediction"))
 
         if predictions_df is not None and not predictions_df.empty:
-            id_col = next((col for col in entity_columns if col in predictions_df.columns), None)
-            metric_col = next((col for col in metric_candidates if col in predictions_df.columns), None)
-
-            if id_col and metric_col:
-                funding_col = next((col for col in funding_candidates if col in predictions_df.columns), None)
-                systemic_col = next((col for col in systemic_candidates if col in predictions_df.columns), None)
-
-                grouped = predictions_df.groupby(id_col)
-
-                for entity_id, group in grouped:
-                    market_values = pd.to_numeric(group[metric_col], errors='coerce').dropna()
-                    if market_values.empty:
-                        continue
-
-                    funding_values = pd.to_numeric(group[funding_col], errors='coerce').dropna() if funding_col else market_values
-                    systemic_values = pd.to_numeric(group[systemic_col], errors='coerce').dropna() if systemic_col else market_values
-
-                    vulnerabilities: List[str] = []
-                    strengths: List[str] = []
-
-                    market_mean = float(market_values.mean())
-                    funding_mean = float(funding_values.mean())
-                    systemic_mean = float(systemic_values.mean())
-
-                    if market_mean > 70:
-                        vulnerabilities.append("Market liquidity risk above supervisory comfort zone")
-                    if funding_mean > 70:
-                        vulnerabilities.append("Sustained funding pressures detected")
-                    if systemic_mean > 70:
-                        vulnerabilities.append("High contagion centrality")
-
-                    if market_values.std() < 10:
-                        strengths.append("Stable market liquidity conditions")
-                    if funding_mean < 40:
-                        strengths.append("Resilient funding profile")
-                    if systemic_mean < 40:
-                        strengths.append("Low network contagion influence")
-
-                    recommendations: List[str] = []
-                    if market_mean > 60:
-                        recommendations.append("Deploy additional market-making capacity and pre-arranged funding lines")
-                    if funding_mean > 60:
-                        recommendations.append("Broaden tenor mix and diversify liability sources")
-                    if systemic_mean > 60:
-                        recommendations.append("Coordinate with peer institutions on joint liquidity drills")
-
+            entity_col = next(
+                (c for c in ('bank_id', 'institution_id', 'institution', 'source') if c in predictions_df.columns),
+                None,
+            )
+            score_col = next(
+                (c for c in ('risk_score', 'prediction', 'predicted') if c in predictions_df.columns),
+                None,
+            )
+            if entity_col and score_col:
+                for _, row in predictions_df.iterrows():
+                    score = pd.to_numeric(row.get(score_col), errors='coerce')
+                    level = row.get('risk_level') if 'risk_level' in predictions_df.columns else None
                     profiles.append(
                         InstitutionalProfile(
-                            institution_id=str(entity_id),
-                            name=str(entity_id),
-                            market_liquidity_score=market_mean,
-                            funding_liquidity_score=funding_mean,
-                            systemic_importance=systemic_mean,
-                            vulnerabilities=vulnerabilities or ["No acute vulnerabilities detected"],
-                            strengths=strengths or ["Maintain current liquidity governance"],
-                            recommendations=recommendations or ["Continue monitoring risk dashboards"]
+                            institution_id=str(row[entity_col]),
+                            name=str(row.get('bank_name', row[entity_col])),
+                            risk_score=None if pd.isna(score) else float(score),
+                            risk_level=None if level is None or (isinstance(level, float) and pd.isna(level)) else str(level),
+                            score_units=units,
+                            systemic_importance=(
+                                float(row['systemic_importance'])
+                                if 'systemic_importance' in predictions_df.columns
+                                and not pd.isna(pd.to_numeric(row['systemic_importance'], errors='coerce'))
+                                else None
+                            ),
+                            vulnerabilities=[],
+                            strengths=[],
+                            recommendations=[],
                         )
                     )
 
         if not profiles:
-            # Fallback to aggregate profile derived from risk scores
-            market_liq = engine_result.risk_scores.market_liquidity
-            funding_liq = engine_result.risk_scores.funding_liquidity
-            systemic_risk = engine_result.risk_scores.systemic_risk
-
-            market_score = float(market_liq.get('overall', market_liq.get('current', np.nan)))
-            funding_score = float(funding_liq.get('overall', funding_liq.get('current', np.nan)))
-            systemic_importance = float(systemic_risk.get('network_risk', systemic_risk.get('current', np.nan)))
-
-            vulnerabilities = []
-            if np.isfinite(market_score) and market_score > 70:
-                vulnerabilities.append("Elevated market liquidity stress")
-            if np.isfinite(funding_score) and funding_score > 70:
-                vulnerabilities.append("Intensifying funding outflows")
-            if np.isfinite(systemic_importance) and systemic_importance > 70:
-                vulnerabilities.append("High contagion sensitivity")
-
-            strengths = []
-            if np.isfinite(market_score) and market_score < 40:
-                strengths.append("Stable market-making conditions")
-            if np.isfinite(funding_score) and funding_score < 40:
-                strengths.append("Comfortable funding buffers")
-            if market_liq.get('trend', 0) < 0:
-                strengths.append("Improving market liquidity trajectory")
-
-            recommendations = []
-            if np.isfinite(market_score) and market_score > 60:
-                recommendations.append("Enhance secondary market liquidity provision")
-            if np.isfinite(funding_score) and funding_score > 60:
-                recommendations.append("Accelerate contingency funding planning")
-            if np.isfinite(systemic_importance) and systemic_importance > 60:
-                recommendations.append("Review interbank exposure limits")
-
+            overall = self._safe_float(engine_result.risk_scores.model_score.get('overall'))
             profiles.append(
                 InstitutionalProfile(
-                    institution_id="AGGREGATE",
-                    name="System Aggregate Profile",
-                    market_liquidity_score=market_score if np.isfinite(market_score) else 0.0,
-                    funding_liquidity_score=funding_score if np.isfinite(funding_score) else 0.0,
-                    systemic_importance=systemic_importance if np.isfinite(systemic_importance) else 0.0,
-                    vulnerabilities=vulnerabilities or ["No critical vulnerabilities detected"],
-                    strengths=strengths or ["Monitoring recommended"],
-                    recommendations=recommendations or ["Continue supervisory monitoring"]
+                    institution_id="portfolio",
+                    name="Aggregate (no per-entity payload)",
+                    risk_score=None if not np.isfinite(overall) else overall,
+                    risk_level=engine_result.risk_scores.risk_level,
+                    score_units=units,
+                    systemic_importance=None,
+                    vulnerabilities=[],
+                    strengths=[],
+                    recommendations=[],
                 )
             )
-
         return profiles
-    
-    def _generate_market_liquidity_report(self, engine_result: EngineResult) -> Dict[str, Any]:
-        """Generate market liquidity analysis."""
-        metrics = engine_result.risk_scores.market_liquidity
+
+    def _generate_model_score_report(self, engine_result: EngineResult) -> Dict[str, Any]:
+        """Report the model's own scores, in their own units, with semantics.
+
+        Renamed from "market liquidity" in round seven: the engine emits one
+        standardized one-step-ahead score per source, and calling it a market
+        liquidity channel misdescribed both the model and the channel.
+        """
+        metrics = engine_result.risk_scores.model_score
         predictions_df = self._load_predictions_dataframe(engine_result.predictions_path)
 
         report = {
@@ -526,7 +477,7 @@ class ResultsGenerator:
 
         if predictions_df is not None and not predictions_df.empty:
             metric_col = None
-            for candidate in ['market_liquidity', 'prediction', 'predicted']:
+            for candidate in ['prediction', 'predicted', 'risk_score']:
                 if candidate in predictions_df.columns:
                     metric_col = candidate
                     break
@@ -541,28 +492,26 @@ class ResultsGenerator:
         return report
     
     def _generate_funding_liquidity_report(self, engine_result: EngineResult) -> Dict[str, Any]:
-        """Generate funding liquidity analysis."""
-        metrics = engine_result.risk_scores.funding_liquidity
-        predictions_df = self._load_predictions_dataframe(engine_result.predictions_path)
+        """Funding liquidity is not measured by this platform.
 
-        report = {
-            "overall_score": self._safe_float(metrics.get('overall', metrics.get('current'))),
-            "current_score": self._safe_float(metrics.get('current', np.nan)),
-            "trend": self._safe_float(metrics.get('trend', 0.0)),
-            "volatility": self._safe_float(metrics.get('volatility', np.nan)),
-            "percentile_95": self._safe_float(metrics.get('percentile_95', np.nan)),
-            "data_points": 0
+        The previous version synthesised the channel from the model score via
+        a 0.95 multiplier (round-one finding) and later returned an empty
+        dict that reporters rendered as NaN factors. The honest report is an
+        explicit not-measured status: absence, visible as absence.
+        """
+        return {
+            "status": "not_measured",
+            "reason": (
+                "no funding-specific measurement exists in the platform; the "
+                "model emits one standardized liquidity-stress score per source"
+            ),
+            "overall_score": None,
+            "current_score": None,
+            "trend": None,
+            "data_points": 0,
+            "recent_observations": [],
         }
 
-        if predictions_df is not None and not predictions_df.empty:
-            if 'funding_liquidity' in predictions_df.columns:
-                series = pd.to_numeric(predictions_df['funding_liquidity'], errors='coerce').dropna()
-                report["data_points"] = int(len(series))
-                if not np.isfinite(report["overall_score"]) and not series.empty:
-                    report["overall_score"] = float(series.mean())
-
-        return report
-    
     def _generate_systemic_risk_report(self, engine_result: EngineResult) -> Dict[str, Any]:
         """Generate systemic risk analysis."""
         metrics = engine_result.risk_scores.systemic_risk

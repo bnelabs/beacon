@@ -109,26 +109,6 @@ class RiskScores:
     #: no consumer has to guess. See docs/QUANT_REVIEW_2026-09.md (finding F6).
     score_semantics: Dict[str, Any] = field(default_factory=dict)
 
-    @property
-    def market_liquidity(self) -> Dict[str, float]:
-        """Legacy alias for :attr:`model_score`.
-
-        Kept so the reporting layer keeps working. It is *not* a separate
-        market-liquidity measurement -- the model emits a single liquidity-stress
-        score and there is no second channel behind this name.
-        """
-        return self.model_score
-
-    @property
-    def funding_liquidity(self) -> Dict[str, float]:
-        """Empty: no funding-specific measurement exists.
-
-        Returns ``{}`` rather than a rescaled copy of the model score, so the
-        reporting layer reports absence instead of echoing the same number under
-        a second name.
-        """
-        return {}
-
 
 @dataclass
 class EngineResult:

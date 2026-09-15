@@ -51,7 +51,7 @@ class DataQualityReport:
     completeness: float  # % non-null
     consistency: float  # % passes validation
     timeliness: float  # % recent data
-    accuracy: float  # % within expected ranges
+    accuracy: Optional[float]  # % within expected ranges; None when unmeasured
 
     anomalies_detected: int
     anomalies_fixed: int
@@ -311,7 +311,10 @@ class DataOrchestrator:
             completeness=(1 - validation_report.missing_ratio) * 100,
             consistency=(1 - validation_report.inconsistency_ratio) * 100,
             timeliness=validation_report.timeliness_score * 100,
-            accuracy=analysis_report.accuracy_score * 100,
+            accuracy=(
+                None if analysis_report.accuracy_score is None
+                else analysis_report.accuracy_score * 100
+            ),
         )
 
         return DataQualityReport(
