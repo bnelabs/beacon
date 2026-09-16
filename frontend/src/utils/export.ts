@@ -1,4 +1,41 @@
-function normalizeValue(value) {
+/** Client-side export helpers (CSV / JSON download) and country flattening. */
+
+/** A CSV/JSON cell before stringification. */
+type CellValue = string | number | boolean | Date | null | undefined | object
+
+/** A row destined for CSV export: header keys map to primitive-ish cells. */
+export type ExportRow = Record<string, CellValue>
+
+/** The country profile shape `formatCountriesForExport` reads from. Fields are
+ *  optional because the API may omit any of them; each falls back to `''`. */
+export interface CountryExportInput {
+  country_name?: string | number | null
+  country_code?: string | number | null
+  region?: string | number | null
+  sub_region?: string | number | null
+  capital?: string | number | null
+  currency?: string | number | null
+  population?: string | number | null
+  gdp_usd?: string | number | null
+  gdp_per_capita?: string | number | null
+  gdp_growth_rate?: string | number | null
+  inflation_rate?: string | number | null
+  unemployment_rate?: string | number | null
+  credit_to_gdp?: string | number | null
+  debt_to_gdp?: string | number | null
+  fiscal_balance?: string | number | null
+  current_account_balance?: string | number | null
+  bank_count?: string | number | null
+  total_bank_assets_usd?: string | number | null
+  risk_level?: string | number | null
+  risk_score?: string | number | null
+  last_updated?: string | number | null
+}
+
+/** A flattened, human-headed country row for CSV/JSON export. */
+export type CountryExportRow = Record<string, string | number>
+
+function normalizeValue(value: CellValue): string | number {
   if (value === null || value === undefined) {
     return ''
   }
@@ -14,7 +51,7 @@ function normalizeValue(value) {
   return String(value)
 }
 
-function toCSVRow(headers, record) {
+function toCSVRow(headers: string[], record: ExportRow): string {
   return headers
     .map((header) => {
       const rawValue = normalizeValue(record[header])
@@ -27,7 +64,7 @@ function toCSVRow(headers, record) {
     .join(',')
 }
 
-export function downloadCSV(rows, filename) {
+export function downloadCSV(rows: ExportRow[], filename: string): void {
   if (!Array.isArray(rows) || rows.length === 0) {
     console.warn('downloadCSV called without data to export')
     return
@@ -47,7 +84,7 @@ export function downloadCSV(rows, filename) {
   URL.revokeObjectURL(url)
 }
 
-export function downloadJSON(data, filename) {
+export function downloadJSON(data: unknown, filename: string): void {
   if (!data) {
     console.warn('downloadJSON called without data to export')
     return
@@ -65,7 +102,7 @@ export function downloadJSON(data, filename) {
   URL.revokeObjectURL(url)
 }
 
-export function formatCountriesForExport(countries) {
+export function formatCountriesForExport(countries: CountryExportInput[]): CountryExportRow[] {
   if (!Array.isArray(countries)) {
     return []
   }

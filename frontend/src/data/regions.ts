@@ -1,4 +1,24 @@
-export const regions = [
+/**
+ * Static reference table of scored geographic regions.
+ *
+ * This is reference geography (region centroids, ISO codes, display colour),
+ * not live data -- exposure/risk figures come from the API. It is the canonical
+ * home of the `Region` shape consumed across the dashboard and the risk map.
+ */
+
+/** A scored geographic region: the selection unit shared across the app. */
+export interface Region {
+  id: string
+  name: string
+  country: string
+  iso3: string
+  lat: number
+  lon: number
+  color: string
+  bankCount: number
+}
+
+export const regions: Region[] = [
   {
     id: 'us-northeast',
     name: 'US Northeast',
@@ -141,10 +161,10 @@ export const regions = [
   }
 ]
 
-export function getRegionById(id) {
-  return regions.find(r => r.id === id)
+export function getRegionById(id: string): Region | undefined {
+  return regions.find((r) => r.id === id)
 }
 
-export function getRegionsByCountry(country) {
-  return regions.filter(r => r.country === country)
+export function getRegionsByCountry(country: string): Region[] {
+  return regions.filter((r) => r.country === country)
 }

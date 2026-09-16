@@ -1,23 +1,10 @@
 import { create } from 'zustand'
+import type { Region } from '../data/regions'
 
-/**
- * A scored geographic region: the selection unit shared across the dashboard
- * and the risk map. Mirrors the static reference table in
- * `src/data/regions.js`. Typed here so every consumer of the store gets a
- * strict contract for this analytical payload instead of an `any` blob —
- * this is the kind of complex shared state the TypeScript migration is meant
- * to pin down.
- */
-export interface Region {
-  id: string
-  name: string
-  country: string
-  iso3: string
-  lat: number
-  lon: number
-  color: string
-  bankCount: number
-}
+// The canonical `Region` shape lives with the region reference data
+// (`data/regions.ts`). Re-exported here so existing
+// `import { type Region } from '.../store/useStore'` keeps working.
+export type { Region }
 
 /** Identifier of a configured data source (e.g. `'fdic'`, `'fred'`). */
 export type DataSourceId = string
