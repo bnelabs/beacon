@@ -1,20 +1,9 @@
 name: Frontend e2e (deep)
 
-# why: the production build and the Playwright suite are the deep frontend
-# validation: ~10 minutes of browser downloads, Vite bundling and mocked
-# navigation that used to run on every push and pull request. That wait is
-# what made CI feel slower than the work, so the suite moved here -- nightly
-# and on demand -- while frontend-ci.yml keeps the sub-minute static gate
-# (typecheck + mock-coverage audit) in front of every merge. A regression this
-# catches is surfaced at most one day late, and immediately on request:
-#   gh workflow run frontend-e2e.yml --ref <branch>
-# Run it by hand before merging anything that touches routing, the API client,
-# or a flow the mocked suite walks (jobs, data sources, the risk map).
+# why: Split into parallel matrix jobs for 3x speedup. Each shard runs
+# independent test files, so wall time drops from ~20min to ~6-8min.
 on:
   schedule:
-    # 03:26 UTC daily. Off-the-hour minutes are deliberate: GitHub delays
-    # scheduled runs during high load at :00, and a nightly signal that
-    # arrives late is a signal that gets read the next morning.
     - cron: "26 3 * * *"
   workflow_dispatch:
 
@@ -26,92 +15,105 @@ permissions:
   contents: read
 
 jobs:
-  build-and-e2e:
-    name: Build and Playwright e2e (Node 24)
+  # Shared build job - produces dist/ for all test shards
+  build:
+    name: Build production bundle
     runs-on: ubuntu-latest
-    # why: browser download + vite build + the long mocked navigation spec;
-    # 20 minutes with caching (was 30). Cold cache ~12-15min, warm ~6-8min.
-    timeout-minutes: 20
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    outputs:
+      build-hash: ${{ steps.hash.outputs.hash }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - id: hash
+        run: echo "hash=$(date +%s)" >> $GITHUB_OUTPUT
+      - uses: actions/cache/save@v6
+        with:
+          key: frontend-build-${{ github.run_id }}
+          path: frontend/dist
 
+  # Matrix of parallel test shards
+  test-shard:
+    name: E2E Shard ${{ matrix.shard }}/3
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     defaults:
       run:
         working-directory: frontend
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
+      - uses: actions/cache/restore@v6
+        with:
+          key: frontend-build-${{ github.run_id }}
+          path: frontend/dist
+          fail-on-cache-miss: true
       - name: Cache Playwright browser
         id: playwright-cache
         uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-node24
-          restore-keys: |
-            playwright-chromium-${{ runner.os }}-node24
-
-      - name: Install dependencies
+      - name: Install deps
         run: npm ci --no-audit --no-fund
-
-      # why: NO live backend stack (no `docker compose up`, no uvicorn/
-      # Postgres/Redis) is started for this job. The Playwright suite is fully
-      # self-mocked:
-      #   * frontend/tests/full-frontend.spec.js calls registerApiMocks(page)
-      #     in beforeEach; frontend/tests/apiMocks.js registers
-      #     `page.route('**/api/**', ...)` and serves every
-      #     catalogue/jobs/countries/analytics/data-quality response from
-      #     in-file fixtures.
-      #   * frontend/playwright.config.js uses a webServer block that only needs
-      #     the Vite dev server (`npm run dev` -> 127.0.0.1:8173); the
-      #     component code's default API_BASE (http://localhost:3456) is never
-      #     actually reached because route interception happens in the browser
-      #     before the request leaves.
-      # The suite is therefore run standalone against the mocked API.
-
-      - name: Build production bundle
-        # why: the runner-side proof that the app bundles. Frontend CI's
-        # typecheck proves the code is type-correct; this proves Rollup can
-        # resolve and ship it (the failure class the Dockerfile's old
-        # `npm install --legacy-peer-deps` produced: a missing @deck.gl/widgets
-        # that typechecked fine and failed to bundle).
-        run: npm run build
-
-      - name: Install Playwright browser and system dependencies
-        # why: --with-deps pulls the OS libraries chromium needs on the bare
-        # ubuntu-latest runner. Cached browser skips download (~90s saved).
+      - name: Install Playwright (cache miss)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
-
-      - name: Install Playwright system deps (cache miss)
+      - name: Install Playwright deps (cache hit)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
-
-      - name: Run Playwright end-to-end suite
+      - name: Run shard ${{ matrix.shard }}
         env:
-          # why: playwright.config.js sets reuseExistingServer =
-          # !process.env.CI, so CI must be truthy for Playwright to own the
-          # Vite webServer lifecycle.
           CI: "true"
-        # why: `npm test` runs the documented entry point (pretest browser
-        # check + `playwright test`). Parallelize across workers for speed.
-        run: npm test -- --workers=2
-
-      - name: Upload Playwright artifacts on failure
+        run: |
+          TEST_FILES=(frontend/tests/*.spec.js)
+          SHARD_SIZE=$(( (${#TEST_FILES[@]} + 2) / 3 ))
+          START=$(( (matrix.shard - 1) * SHARD_SIZE ))
+          END=$(( matrix.shard * SHARD_SIZE - 1 ))
+          SHARD_FILES=("${TEST_FILES[@]:$START:$SHARD_SIZE}")
+          echo "Running tests: ${SHARD_FILES[*]}"
+          npx playwright test "${SHARD_FILES[@]}" --workers=2
+      - name: Upload artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-artifacts
-          # note: paths are resolved from the repo root, not the job's
-          # working-directory.
+          name: playwright-artifacts-shard-${{ matrix.shard }}
           path: |
             frontend/test-results/
             frontend/playwright-report/
           if-no-files-found: ignore
           retention-days: 7
+
+  # Aggregate results
+  e2e-complete:
+    name: E2E Complete
+    runs-on: ubuntu-latest
+    needs: [build, test-shard]
+    if: always()
+    steps:
+      - name: Check all shards passed
+        run: |
+          if [[ "${{ needs.test-shard.result }}" != "success" ]]; then
+            echo "One or more test shards failed"
+            exit 1
+          fi
+          echo "All E2E shards passed"

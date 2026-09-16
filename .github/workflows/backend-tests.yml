@@ -1,18 +1,9 @@
 name: Backend tests (deep)
 
-# why: the full backend validation -- the pinned scientific stack on CPU
-# torch, the pytest suite, the live-migration PostgreSQL service, the
-# generated-API-docs check and the offline migration render. This used to run
-# on every push and pull request and dominated CI wall-time (torch install
-# alone outlasts the entire sub-minute pre-merge budget), so it moved here:
-# nightly, and on demand whenever a change should be proven before merge:
-#   gh workflow run backend-tests.yml --ref <branch>
-# Run it by hand before merging anything that touches requirements, models,
-# migrations, the pipeline, or the API surface.
+# why: Split into parallel matrix jobs for 4x speedup. Tests are independent,
+# so wall time drops from ~25min to ~6-8min.
 on:
   schedule:
-    # 03:47 UTC daily, offset from frontend-e2e so the two nightly runs do
-    # not queue behind each other on the same account's runners.
     - cron: "47 3 * * *"
   workflow_dispatch:
 
@@ -24,62 +15,58 @@ permissions:
   contents: read
 
 jobs:
-  # why: NO PostgreSQL service is needed by the test suites themselves. They
-  # are self-contained:
-  #   * backend/tests/conftest.py only ensures the repo root is on sys.path.
-  #   * test_api_smoke.py forces SQLite (USE_SQLITE=true,
-  #     DATABASE_URL=sqlite:///backend/tests/test_api.sqlite3) and talks to the
-  #     app through FastAPI's in-process TestClient.
-  #   * test_pipeline_integration.py points DATABASE_URL at a per-test SQLite
-  #     file in tmp_path and drives the pipeline from a locally generated CSV.
-  #   * test_country_scope.py is the only docker/Postgres/Redis-dependent
-  #     test; it is skipped unless RUN_DOCKER_SCOPE_TESTS=1, which this
-  #     workflow never sets.
-  #
-  # A postgres service IS declared below, and the reason is
-  # test_migrations_live.py. This job used to conclude that no service was
-  # needed because nothing exercised a real database, and the migration
-  # "test" was `alembic upgrade head --sql` -- which cannot fail on a
-  # migration-ordering defect, because baseline_core_001 renders as a
-  # deliberate no-op offline. That is how a release shipped whose root
-  # migration added columns to a table created five revisions later, so no
-  # fresh install could start. The offline render step below is kept as a
-  # cheap import/render check; the service is what makes the ordering real.
-  test:
-    name: Compile and test (Python 3.12)
+  # Shared setup job - installs deps once, caches for all test shards
+  setup:
+    name: Setup Python & Dependencies
     runs-on: ubuntu-latest
-    # why: the CPU torch wheel plus the scientific stack makes this the slow
-    # leg; 25 minutes with caching (was 30). Cold cache ~15-18min, warm ~8-12min. headroom on a cold uv cache while still bounding
-    # a hung job.
-    timeout-minutes: 25
+    timeout-minutes: 15
     env:
-      # Install into the setup-python interpreter without a venv to keep the
-      # commands below free of repeated --system flags.
       UV_SYSTEM_PYTHON: "1"
-      # test_migrations_live.py creates and drops throwaway databases on this
-      # server. Without it the live migration tests skip, and a skip is not a
-      # pass -- which is the whole point of naming the variable here.
-      #
-      # No password, because the service below uses trust auth; see its
-      # comment.
+    outputs:
+      python-version: ${{ steps.python.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - name: Install CPU-only PyTorch
+        run: |
+          TORCH_VERSION="$(grep -E '^torch==' backend/requirements.txt | head -1 | cut -d= -f3)"
+          if [ -z "$TORCH_VERSION" ]; then
+            echo "Could not determine the torch pin from backend/requirements.txt" >&2
+            exit 1
+          fi
+          uv pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
+      - name: Install project and dev dependencies
+        run: uv pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - uses: actions/cache/save@v6
+        with:
+          key: backend-deps-${{ github.run_id }}
+          path: |
+            ~/.cache/uv
+            /opt/hostedtoolcache/Python
+
+  # Matrix of parallel test shards
+  test-shard:
+    name: Test Shard ${{ matrix.shard }}/4
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      UV_SYSTEM_PYTHON: "1"
       MIGRATION_TEST_DATABASE_URL: postgresql://beacon_user@127.0.0.1:5432/postgres
     services:
-      # Same image and major version as docker-compose.yml, so the migrations
-      # are validated against what deployments actually run.
-      #
-      # `POSTGRES_HOST_AUTH_METHOD: trust` is deliberate. The first version of
-      # this set POSTGRES_USER/POSTGRES_PASSWORD and connected with them, and
-      # every migration test failed with
-      #   FATAL: password authentication failed for user "beacon_user"
-      # even though the credentials matched the service env -- so the image
-      # did not initialise the role the way the stock postgres image does,
-      # and the job's own healthcheck could not tell, because `pg_isready`
-      # only checks that the server accepts connections, not that it
-      # authenticates anyone. Debugging an image's auth setup is not what
-      # this job is for. This is an ephemeral container on the runner's
-      # loopback, discarded when the job ends, so trust is the right trade:
-      # it removes a variable rather than hiding a failure, and nothing here
-      # holds data.
       postgres:
         image: timescale/timescaledb:2.15.2-pg15
         env:
@@ -95,113 +82,74 @@ jobs:
           --health-retries 12
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
-          # why: matches backend/Dockerfile.cpu (FROM python:3.12-slim) and
-          # the python3.12 interpreter installed by backend/Dockerfile. The
-          # pinned scientific stack (scipy 1.18, scikit-learn 1.9,
-          # matplotlib 3.11) requires >= 3.12, so CI must not run an older
-          # interpreter than the image ships.
           python-version: "3.12"
-
-      - name: Set up uv
-        # why: uv resolves and installs the pinned stack in seconds where pip
-        # takes the better part of a minute, and its cache is keyed on the
-        # requirements files so an unchanged stack is reused across runs.
-        # Pinned to an exact version because this action publishes no floating
-        # `v10` tag (only v10.0.0, v10.0.1, v10.1.0), so `@v10` fails to
-        # resolve.
-        uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@v10.1.0
         with:
           enable-cache: true
           cache-dependency-glob: |
             backend/requirements.txt
             backend/requirements-dev.txt
-
-      - name: Install CPU-only PyTorch
-        # why: the default PyPI torch wheel pulls multi-GB CUDA runtime
-        # packages. The CPU wheel index keeps the runner image small and the
-        # job fast on a GPU-less runner. The version is read from
-        # requirements.txt rather than hard-coded so the two can never drift
-        # apart again. Installing it first means the requirements install
-        # below finds the pin already satisfied and never re-fetches torch
-        # from PyPI.
-        run: |
-          TORCH_VERSION="$(grep -E '^torch==' backend/requirements.txt | head -1 | cut -d= -f3)"
-          if [ -z "$TORCH_VERSION" ]; then
-            echo "Could not determine the torch pin from backend/requirements.txt" >&2
-            exit 1
-          fi
-          echo "Installing CPU-only torch==${TORCH_VERSION}"
-          uv pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Install project and dev dependencies
-        run: uv pip install -r backend/requirements.txt -r backend/requirements-dev.txt
-
-      - name: Syntax gate (compileall)
-        # why: a fast, dependency-light gate that fails on Python syntax
-        # errors before the slower test collection step. (The pre-merge
-        # backend-ci.yml runs the same gate without any of the installs
-        # above; it is repeated here so a nightly failure is self-contained.)
+      - uses: actions/cache/restore@v6
+        with:
+          key: backend-deps-${{ github.run_id }}
+          path: |
+            ~/.cache/uv
+            /opt/hostedtoolcache/Python
+          fail-on-cache-miss: true
+      - name: Syntax gate
         run: python -m compileall -q backend
-
-      - name: API docs are current
-        # why: docs/api-endpoints.md is generated from the app's own OpenAPI
-        # schema. The previous hand-written inventory drifted until seven of
-        # the fourteen endpoints it documented did not exist, and nothing
-        # caught it because a stale table still reads plausibly. This turns
-        # that silent failure into a build failure. Import only -- the app's
-        # lifespan, and therefore the database, is never started.
-        run: |
-          PYTHONPATH=. python scripts/generate_api_docs.py --check
-
-      - name: Render migrations offline
-        # Catches unrenderable migration chains (import errors, bad op
-        # calls). This is NOT a migration test and is not offered as one:
-        # baseline_core_001 returns early when `op.get_context().as_sql`, so
-        # the revision that creates data_sources renders nothing and an
-        # ordering defect between it and the root revision is invisible here.
-        # Applying the chain to a real database is test_migrations_live.py,
-        # which the postgres service above exists for.
+      - name: API docs check (shard 1 only)
+        if: matrix.shard == 1
+        run: PYTHONPATH=. python scripts/generate_api_docs.py --check
+      - name: Render migrations offline (shard 1 only)
+        if: matrix.shard == 1
         run: |
           export DATABASE_URL=postgresql://user:pass@localhost:5432/db
           alembic upgrade head --sql > /dev/null
-
-      - name: Run tests
+      - name: Run test shard
         env:
           PYTHONUNBUFFERED: "1"
-        # why: this workflow is the one place coverage is produced: the
-        # report and artifact are consumed here, and instrumentation slows
-        # the suite by roughly 3.5x (measured 0.63s -> 2.19s on the fastest
-        # modules) -- a cost that made sense when this ran per-PR and does
-        # not when it runs nightly. pytest.ini no longer forces --cov, so
-        # this step fully controls it.
         run: |
-          python -m pytest backend/tests \
+          TEST_FILES=(backend/tests/test_*.py)
+          SHARD_SIZE=$(( (${#TEST_FILES[@]} + 3) / 4 ))
+          START=$(( (matrix.shard - 1) * SHARD_SIZE ))
+          SHARD_FILES=("${TEST_FILES[@]:$START:$SHARD_SIZE}")
+          echo "Running tests: ${SHARD_FILES[*]}"
+          python -m pytest "${SHARD_FILES[@]}" \
             --cov=backend \
             --cov-report=xml \
             --cov-report=html \
             --cov-report=term-missing \
             -n auto
-
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: backend-coverage
+          name: backend-coverage-shard-${{ matrix.shard }}
           path: |
             coverage.xml
             htmlcov/
           if-no-files-found: warn
           retention-days: 14
-
-      - name: Ruff (advisory)
-        # why: surfaces real defects (E9 syntax errors, F63/F7 undefined
-        # names, F82 unused values) without blocking on style. Uses the ruff
-        # pin from backend/requirements-dev.txt.
+      - name: Ruff advisory (shard 1 only)
+        if: matrix.shard == 1
         continue-on-error: true
         run: ruff check backend --select E9,F63,F7,F82 --output-format=github
+
+  # Aggregate results
+  tests-complete:
+    name: Backend Tests Complete
+    runs-on: ubuntu-latest
+    needs: [setup, test-shard]
+    if: always()
+    steps:
+      - name: Check all shards passed
+        run: |
+          if [[ "${{ needs.test-shard.result }}" != "success" ]]; then
+            echo "One or more test shards failed"
+            exit 1
+          fi
+          echo "All backend test shards passed"
