@@ -228,11 +228,13 @@ Application: **BEACON API - Banking Network Engine** v3.2.0
 
 | Method | Path | Success model | Purpose |
 |---|---|---|---|
-| `GET` | `/api/v1/analytics/distribution/risk-scores` | untyped | Get risk score distribution across all predictions. |
 | `GET` | `/api/v1/analytics/insights/anomalies` | untyped | Detect and report anomalies in system behavior. |
-| `GET` | `/api/v1/analytics/models/performance-comparison` | untyped | Get comprehensive model performance comparison. |
 | `GET` | `/api/v1/analytics/overview` | untyped | Get comprehensive analytics overview. |
 | `GET` | `/api/v1/analytics/trends/time-series` | untyped | Get time-series trends for various metrics. |
+
+**Retired endpoints (Phase 2):**
+- `GET /api/v1/analytics/distribution/risk-scores` — no UI consumer since #68 deleted `useRiskScoreDistribution`
+- `GET /api/v1/analytics/models/performance-comparison` — no UI consumer since #68 deleted `useModelPerformanceComparison`
 
 
 ## Alert Rules

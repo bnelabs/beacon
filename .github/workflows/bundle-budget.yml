@@ -1,0 +1,99 @@
+name: Bundle Size Budget Gate
+
+# why: the 33 kB route chunk must not silently regress. This runs nightly
+# alongside the deep frontend e2e to catch bundle bloat early, before it
+# impacts production load times. The gate is advisory (annotation) rather
+# than blocking, so perf work can iterate without CI friction while still
+# surfacing regressions within 24 hours.
+on:
+  schedule:
+    # 03:30 UTC daily, right after the frontend-e2e run starts
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: bundle-budget-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  bundle-budget:
+    name: Check bundle size budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build production bundle with stats
+        run: npm run build -- --stats
+
+      - name: Analyze bundle sizes
+        id: analyze
+        run: |
+          # Budget thresholds (kB)
+          TOTAL_BUDGET=450
+          ROUTE_CHUNK_BUDGET=40
+          
+          # Extract sizes from stats.json if available, otherwise dist assets
+          if [ -f "dist/stats.json" ]; then
+            TOTAL_SIZE=$(node -e "console.log(Math.round(require('./dist/stats.json').size / 1024))")
+          else
+            TOTAL_SIZE=$(du -sk dist/assets/*.js 2>/dev/null | awk '{sum+=$1} END {print sum}')
+          fi
+          
+          # Find largest route chunk
+          LARGEST_ROUTE=$(find dist/assets -name "*.js" -type f 2>/dev/null | xargs -I {} sh -c 'size=$(stat -c%s "{}"); echo "$size {}"' | sort -rn | head -1)
+          LARGEST_ROUTE_KB=$(echo "$LARGEST_ROUTE" | awk '{print int($1/1024)}')
+          LARGEST_ROUTE_FILE=$(echo "$LARGEST_ROUTE" | awk '{print $2}')
+          
+          echo "total_size=$TOTAL_SIZE" >> $GITHUB_OUTPUT
+          echo "largest_route_kb=$LARGEST_ROUTE_KB" >> $GITHUB_OUTPUT
+          echo "largest_route_file=$LARGEST_ROUTE_FILE" >> $GITHUB_OUTPUT
+          
+          # Check budgets
+          BUDGET_OK=true
+          if [ "$TOTAL_SIZE" -gt "$TOTAL_BUDGET" ]; then
+            echo "::warning::Total bundle size ${TOTAL_SIZE}kB exceeds budget ${TOTAL_BUDGET}kB"
+            BUDGET_OK=false
+          fi
+          if [ "$LARGEST_ROUTE_KB" -gt "$ROUTE_CHUNK_BUDGET" ]; then
+            echo "::warning::Route chunk ${LARGEST_ROUTE_FILE} (${LARGEST_ROUTE_KB}kB) exceeds budget ${ROUTE_CHUNK_BUDGET}kB"
+            BUDGET_OK=false
+          fi
+          
+          echo "budget_ok=$BUDGET_OK" >> $GITHUB_OUTPUT
+
+      - name: Annotate PR or log results
+        if: always()
+        run: |
+          echo "## Bundle Size Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value | Budget | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Total Bundle | \${{ steps.analyze.outputs.total_size }}kB | 450kB | $([ "\${{ steps.analyze.outputs.budget_ok }}" = "true" ] && echo "✅" || echo "⚠️") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Largest Route Chunk | \${{ steps.analyze.outputs.largest_route_kb }}kB (\${{ steps.analyze.outputs.largest_route_file }}) | 40kB | $([ "\${{ steps.analyze.outputs.budget_ok }}" = "true" ] && echo "✅" || echo "⚠️") |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "\${{ steps.analyze.outputs.budget_ok }}" = "false" ]; then
+            echo "**Action required**: Bundle size regression detected. Review recent changes for:" >> $GITHUB_STEP_SUMMARY
+            echo "- New dependencies added" >> $GITHUB_STEP_SUMMARY
+            echo "- Large imports in route components" >> $GITHUB_STEP_SUMMARY
+            echo "- Missing code-splitting opportunities" >> $GITHUB_STEP_SUMMARY
+          fi
