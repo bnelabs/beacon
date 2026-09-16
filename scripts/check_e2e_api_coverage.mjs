@@ -191,7 +191,12 @@ async function makeInvoker() {
   // missing marker is slice(0, -1) -- the whole module, export keywords
   // included -- which new Function then rejects with "Unexpected token
   // 'export'". Anchoring on the first declaration cannot dangle like that.
-  const firstFunction = source.match(/^async function /m)
+  // `export async function` included in the anchor: the data section used to
+  // end at a standalone helper (registerBasemapTileMocks, then
+  // registerWebfontMocks), and both were deleted when the things they mocked
+  // left the app -- the only function left after the fixtures is the exported
+  // registerApiMocks itself, which is exactly the boundary this wants.
+  const firstFunction = source.match(/^(?:export\s+)?async function /m)
   if (!firstFunction || firstFunction.index === undefined) {
     throw new Error('no function declaration found in apiMocks.js')
   }

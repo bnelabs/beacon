@@ -127,6 +127,26 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   are deterministic (`derandomize=True`).
 
 ### Changed
+- **The app no longer calls Google Fonts.** `index.html` linked the
+  stylesheet and `src/styles/index.css` `@import`ed the same URL — two
+  render-path third-party round trips on every load, in a product whose own
+  components state the dashboard "must render in air-gapped deployments"
+  (and whose e2e suite had to grow a route interceptor just to stay
+  hermetic). Source Serif 4 is now self-hosted: the variable woff2 faces
+  (roman + italic, latin + latin-ext, weights 400–700 — exactly what the
+  Google URL served, ~460 KB) live in `frontend/public/fonts/` with the OFL
+  license, declared in `index.css` with `font-display: swap` and preloaded
+  for the primary face. The e2e webfont interceptor is deleted — there is
+  nothing left to intercept.
+- **The risk-map bundle is split for caching and deferral.** The
+  `RiskMapPage` chunk was 975 kB of app + deck.gl in one file: any page edit
+  invalidated every byte. `vite.config.js` now carves a `deck-vendor`
+  manual chunk (935 kB — content-hashed on the lockfile, not on app code),
+  the route chunk drops to 33 kB, and `@deck.gl/aggregation-layers` left the
+  static graph entirely: `RiskMap` loads `HeatmapLayer` through a dynamic
+  import, so it arrives as its own 89 kB async chunk in parallel with first
+  paint (and not at all for a session that never shows the heatmap). Until
+  it resolves, every other layer renders unchanged.
 - **The frontend now only reads fields the API actually sends, and a test
   keeps it that way.** The typed-call audit (`backend/tests/test_frontend_contract.py`,
   new) parses every `fetchApi<T>`/`fetchJson<T>` call, resolves the endpoint

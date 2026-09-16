@@ -833,36 +833,12 @@ const dataDisclosure = {
   orphaned_configurations: []
 }
 
-/**
- * Serve the webfonts locally instead of fetching them.
- *
- * `index.html` links a Google Fonts stylesheet and `src/styles/index.css`
- * `@import`s the same URL, so every page load made two live third-party requests
- * (the stylesheet, then the woff2 files it names from `fonts.gstatic.com`).
- * Neither was mocked, which made the e2e suite depend on the network and on a
- * third party's availability -- and the spec turns any failed resource load into
- * a test failure, because it fails on every console error. A run could therefore
- * go red for a reason that has nothing to do with the code under test, and the
- * reported failure would be wherever the test happened to be standing.
- *
- * The stylesheet is answered with an empty one and the font files with an empty
- * 204. Glyphs then fall back to the local stack, which is fine: no assertion in
- * this suite measures typography.
- */
-async function registerWebfontMocks(page) {
-  await page.route(/fonts\.(googleapis|gstatic)\.com/, (route) => {
-    const isStylesheet = /fonts\.googleapis\.com/.test(route.request().url())
-    return route.fulfill(
-      isStylesheet
-        ? { status: 200, contentType: 'text/css', body: '/* mocked: no webfonts in e2e */' }
-        : { status: 204, body: '' }
-    )
-  })
-}
 
 
 export async function registerApiMocks(page) {
-  await registerWebfontMocks(page)
+  // (registerWebfontMocks is gone: the display face is self-hosted under
+  // public/fonts/, so the app makes no fonts.googleapis/gstatic requests
+  // for the suite to intercept.)
 
   await page.addInitScript(() => {
     class MockWebSocket {

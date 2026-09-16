@@ -3,7 +3,6 @@ import DeckGL from '@deck.gl/react'
 import { MapView } from '@deck.gl/core'
 import type { Layer, MapViewState, PickingInfo } from '@deck.gl/core'
 import { ArcLayer, GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers'
-import { HeatmapLayer } from '@deck.gl/aggregation-layers'
 import type { FeatureCollection } from 'geojson'
 import MapLegend from './MapLegend'
 import { getRiskColor, networkConnections } from '../../data/network-connections'
@@ -124,6 +123,11 @@ export interface RiskMapProps {
   allowStaticNetworkFallback?: boolean
 }
 
+/** The heatmap's layer constructor, loaded on demand (see the effect in the
+ *  component). Typed via the dynamic import so the static bundle — and the
+ *  deck-vendor chunk — never pull in @deck.gl/aggregation-layers. */
+type HeatmapLayerCtor = typeof import('@deck.gl/aggregation-layers').HeatmapLayer
+
 export default function RiskMap({
   selectedRegion,
   onRegionSelect,
@@ -135,6 +139,29 @@ export default function RiskMap({
   allowStaticNetworkFallback = false
 }: RiskMapProps) {
   const [viewState, setViewState] = useState<MapViewState>(INITIAL_VIEW_STATE)
+
+  // @deck.gl/aggregation-layers (heatmap + its d3 dependencies) is a large
+  // package the map only needs while the heatmap toggle is on — which is a
+  // user choice, not a page invariant. Loading it through a dynamic import
+  // keeps it out of the risk-map chunk entirely and fetches it as its own
+  // async chunk the first time a heatmap is shown; until it resolves, the
+  // other layers render unchanged (the heatmap simply joins a frame later).
+  const [heatmapCtor, setHeatmapCtor] = useState<HeatmapLayerCtor | null>(null)
+  useEffect(() => {
+    if (!showHeatmap || heatmapCtor) return
+    let cancelled = false
+    import('@deck.gl/aggregation-layers')
+      .then((mod) => {
+        if (!cancelled) setHeatmapCtor(() => mod.HeatmapLayer)
+      })
+      .catch(() => {
+        // No heatmap rather than a broken map: the other layers do not
+        // depend on this package, and the toggle stays available to retry.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [showHeatmap, heatmapCtor])
 
   useEffect(() => {
     setViewState(INITIAL_VIEW_STATE)
@@ -330,6 +357,7 @@ export default function RiskMap({
   const selectedIso3 = selectedRegion?.iso3
 
   const layers = useMemo<Layer[]>(() => {
+    const HeatmapLayer = heatmapCtor
     const stack: Layer[] = []
     if (baseLayer) stack.push(baseLayer)
     if (geo.regionBoundaries) {
@@ -355,7 +383,7 @@ export default function RiskMap({
       )
     }
 
-    if (showHeatmap) {
+    if (showHeatmap && HeatmapLayer) {
       stack.push(
         new HeatmapLayer<MapPoint>({
           id: 'liquidity-heatmap',
@@ -477,6 +505,7 @@ export default function RiskMap({
     baseLayer,
     geo.regionBoundaries,
     heatPoints,
+    heatmapCtor,
     maxExposure,
     riskByRegion,
     scatterRegionPoints,

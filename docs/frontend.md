@@ -73,7 +73,9 @@ shipped ~170 dead classes (`bne-frost`, `bne-indigo`, `bne-sky`,
 
 ### Typography
 
-- **Display**: Source Serif 4 (loaded from Google Fonts with Georgia /
+- **Display**: Source Serif 4, self-hosted from `public/fonts/` (variable
+  woff2, roman + italic, latin + latin-ext, OFL license file alongside) with
+  Georgia /
   Palatino fallbacks, so the identity survives offline). Page mastheads,
   card titles, headline figures.
 - **UI**: system sans stack (no webfont dependency for body text).
