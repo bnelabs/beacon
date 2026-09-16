@@ -257,107 +257,12 @@ async def get_time_series_trends(
         )
 
 
-@router.get("/models/performance-comparison", response_model=Dict[str, Any])
-async def get_model_performance_comparison(
-    db: Session = Depends(get_db)
-):
-    """
-    Get comprehensive model performance comparison.
-    """
-    try:
-        # Get training jobs (which represent models)
-        models = db.query(Job).filter(
-            and_(Job.job_type == 'training', Job.result.isnot(None))
-        ).all()
-
-        comparison_data = []
-        for job in models:
-            result = job.result or {}
-
-            comparison_data.append({
-                "model_id": job.id,
-                "name": result.get('model_type', 'Unknown Model').upper(),
-                "model_type": result.get('model_type'),
-                "status": job.status,
-                "r2": result.get('test_r2') or result.get('r2'),
-                "rmse": result.get('test_rmse') or result.get('rmse'),
-                "mae": result.get('test_mae') or result.get('mae'),
-                "accuracy": result.get('accuracy'),
-                "best_val_loss": result.get('best_val_loss'),
-                "created_at": job.created_at.isoformat() if job.created_at else None,
-                "predictions_available": bool(result.get('predictions_path'))
-            })
-
-        # Calculate aggregate statistics
-        r2_scores = [m['r2'] for m in comparison_data if m['r2'] is not None]
-        rmse_scores = [m['rmse'] for m in comparison_data if m['rmse'] is not None]
-
-        return {
-            "total_models": len(comparison_data),
-            "models": comparison_data,
-            "aggregates": {
-                "avg_r2": round(sum(r2_scores) / len(r2_scores), 4) if r2_scores else None,
-                "avg_rmse": round(sum(rmse_scores) / len(rmse_scores), 4) if rmse_scores else None,
-                "best_r2": round(max(r2_scores), 4) if r2_scores else None,
-                "best_rmse": round(min(rmse_scores), 4) if rmse_scores else None
-            }
-        }
-
-    except Exception as e:
-        error_logger = ErrorLogger(db)
-        error_log = error_logger.log_error(
-            e,
-            context="fetching model performance comparison",
-            endpoint="/api/v1/analytics/models/performance-comparison",
-            method="GET"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
-        )
-
-
-@router.get("/distribution/risk-scores", response_model=Dict[str, Any])
-async def get_risk_score_distribution(
-    bins: int = Query(10, description="Number of bins for distribution"),
-    db: Session = Depends(get_db)
-):
-    """
-    Get risk score distribution across all predictions.
-
-    Note: This endpoint requires prediction data to be available.
-    """
-    try:
-        # This would require prediction data
-        # For now, return a placeholder structure
-        return {
-            "bins": bins,
-            "distribution": [],
-            "statistics": {
-                "mean": None,
-                "median": None,
-                "std_dev": None,
-                "min": None,
-                "max": None,
-                "total_predictions": 0
-            },
-            "message": "Prediction data not yet available. Run model predictions first."
-        }
-
-    except Exception as e:
-        error_logger = ErrorLogger(db)
-        error_log = error_logger.log_error(
-            e,
-            context="fetching risk score distribution",
-            endpoint="/api/v1/analytics/distribution/risk-scores",
-            method="GET"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"technical": error_log.technical_message, "user_friendly": error_log.user_message}
-        )
-
-
+# Retired endpoints (Phase 2 honest-UI cleanup):
+# - GET /models/performance-comparison: no consumer since #68 deleted useModelPerformanceComparison
+# - GET /distribution/risk-scores: no consumer since #68 deleted useRiskScoreDistribution
+# Both documented in docs/api-endpoints.md but have no frontend screen.
+# To rebuild: create a comparison UI and re-export useModelPerformanceComparison
+# from frontend/src/hooks/useAnalytics.ts.
 @router.get("/insights/anomalies", response_model=Dict[str, Any])
 async def get_anomaly_insights(
     days: int = Query(7, description="Number of days to analyze"),

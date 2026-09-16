@@ -482,13 +482,13 @@ export default function Models() {
   const navigate = useRouter((state) => state.navigate)
   const routerParams = useRouter((state) => state.params)
 
-  // The catalogue lists completed training jobs, so "Ready" is the completed
-  // state — the button used to filter on a `ready` status the endpoint never
-  // emits, which made three of the four filters permanently empty.
+  // The catalogue lists completed training jobs, so only "Ready" (completed)
+  // and "All" are meaningful states. Training/Draft filters were removed --
+  // the endpoint only returns completed jobs, so those filters would always
+  // show zero results.
   const matchesFilter = (model: ModelSummary) => {
     if (filter === 'all') return true
-    if (filter === 'ready') return model.status === 'completed'
-    return model.status === filter
+    return model.status === 'completed'
   }
 
   const filteredModels = models?.filter(matchesFilter) || []
@@ -564,20 +564,8 @@ export default function Models() {
             >
               Ready ({models?.filter((m) => m.status === 'completed').length || 0})
             </Button>
-            <Button
-              variant={filter === 'training' ? 'primary' : 'ghost'}
-              size="sm"
-              onClick={() => setFilter('training')}
-            >
-              Training ({models?.filter((m) => m.status === 'training').length || 0})
-            </Button>
-            <Button
-              variant={filter === 'draft' ? 'primary' : 'ghost'}
-              size="sm"
-              onClick={() => setFilter('draft')}
-            >
-              Draft ({models?.filter((m) => m.status === 'draft').length || 0})
-            </Button>
+            {/* Training and Draft filters removed: the /api/v1/models endpoint
+                only returns completed training jobs, so these would always be 0 */}
           </div>
 
           {filteredModels.length === 0 ? (

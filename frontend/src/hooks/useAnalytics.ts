@@ -2,12 +2,6 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchApi } from '../utils/apiClient'
 import type { AnalyticsOverview, AnomalyInsightsPayload, TimeSeriesPayload } from '../types/api'
 
-// Dead-export note: useModelPerformanceComparison and useRiskScoreDistribution
-// were removed here (no caller in src/ — checked by
-// scripts/check_frontend_hook_reachability.mjs in CI). The endpoints remain
-// documented in docs/api-endpoints.md; a hook re-added for a real screen
-// should be typed against them.
-
 /**
  * Hook to fetch analytics overview
  */
