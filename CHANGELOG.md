@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-09-16
+
 ### Added
 - **Failed jobs retry as new jobs.** `POST /api/v1/jobs/{id}/retry` re-queues a
   failed job with exactly its own type and parameters plus `retry_of`
