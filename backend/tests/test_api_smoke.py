@@ -95,6 +95,29 @@ def client():
         yield test_client
 
 
+def test_suite_engine_is_the_shared_sqlite_file():
+    """Pin the conftest invariant at the place a violation can be named.
+
+    If this fails, some module imported ``backend.database`` before
+    ``conftest.py`` pinned ``USE_SQLITE`` (or the pin was removed), which
+    means the process-global engine is bound to whatever that module's
+    environment said -- and failures will surface two dozen modules away as
+    "no such table", as they did when test_alert_evaluator became the first
+    importer. See the conftest comment for the full story.
+    """
+    try:
+        from backend.database import engine
+    except ModuleNotFoundError:
+        from database import engine  # type: ignore
+
+    url = str(engine.url)
+    assert url.startswith("sqlite"), f"suite engine is not SQLite: {url}"
+    assert url.endswith("beacon.db"), (
+        f"suite engine is bound to {url!r}, not the shared ./beacon.db; "
+        "a module imported backend.database before conftest pinned the env"
+    )
+
+
 def test_health_endpoint(client):
     response = client.get("/health")
     assert response.status_code == 200
