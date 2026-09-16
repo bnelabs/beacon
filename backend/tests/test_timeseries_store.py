@@ -17,6 +17,7 @@ from sqlalchemy.orm import sessionmaker
 from backend.database import Base
 from backend.models.timeseries import (
     IndicatorObservation,
+    IndicatorVintageLog,
     ModelMetricPoint,
     RiskScorePoint,
 )
@@ -27,7 +28,18 @@ from backend.modules.results.timeseries_store import (
     TimeSeriesStore,
 )
 
-_TABLES = [IndicatorObservation.__table__, RiskScorePoint.__table__, ModelMetricPoint.__table__]
+# record_observations appends to the vintage log as well as upserting the
+# latest-value table (that is the point-in-time contract), so the in-memory
+# schema this suite builds must carry both -- the vintage table arrived with
+# the indicator-vintage-log migration and this list did not grow with it,
+# which left test_record_observations_upsert failing on a table missing from
+# the test's OWN database, not the shared one.
+_TABLES = [
+    IndicatorObservation.__table__,
+    IndicatorVintageLog.__table__,
+    RiskScorePoint.__table__,
+    ModelMetricPoint.__table__,
+]
 
 
 @pytest.fixture()
