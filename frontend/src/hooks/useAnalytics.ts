@@ -1,11 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchApi } from '../utils/apiClient'
 
-
 /**
  * Hook to fetch analytics overview
  */
-export function useAnalyticsOverview(days = 30) {
+export function useAnalyticsOverview(days: number = 30) {
   return useQuery({
     queryKey: ['analytics', 'overview', days],
     queryFn: () => fetchApi(`/v1/analytics/overview?days=${days}`),
@@ -17,7 +16,7 @@ export function useAnalyticsOverview(days = 30) {
 /**
  * Hook to fetch time-series trends
  */
-export function useTimeSeriesTrends(metric = 'quality', days = 30) {
+export function useTimeSeriesTrends(metric: string = 'quality', days: number = 30) {
   return useQuery({
     queryKey: ['analytics', 'trends', metric, days],
     queryFn: () => fetchApi(`/v1/analytics/trends/time-series?metric=${metric}&days=${days}`),
@@ -41,7 +40,7 @@ export function useModelPerformanceComparison() {
 /**
  * Hook to fetch risk score distribution
  */
-export function useRiskScoreDistribution(bins = 10) {
+export function useRiskScoreDistribution(bins: number = 10) {
   return useQuery({
     queryKey: ['analytics', 'distribution', 'risk-scores', bins],
     queryFn: () => fetchApi(`/v1/analytics/distribution/risk-scores?bins=${bins}`),
@@ -53,7 +52,7 @@ export function useRiskScoreDistribution(bins = 10) {
 /**
  * Hook to fetch anomaly insights
  */
-export function useAnomalyInsights(days = 7) {
+export function useAnomalyInsights(days: number = 7) {
   return useQuery({
     queryKey: ['analytics', 'anomalies', days],
     queryFn: () => fetchApi(`/v1/analytics/insights/anomalies?days=${days}`),

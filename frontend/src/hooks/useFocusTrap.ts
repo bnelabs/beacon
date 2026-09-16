@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, type RefObject } from 'react'
 
 const FOCUSABLE = [
   'a[href]',
@@ -22,26 +22,36 @@ const FOCUSABLE = [
  * @param isActive whether the overlay is currently open
  * @param onClose  called on Escape, so the trap owns the whole keyboard story
  */
-export function useFocusTrap(ref, isActive, onClose) {
+export function useFocusTrap(
+  ref: RefObject<HTMLElement | null>,
+  isActive: boolean,
+  onClose?: () => void
+): void {
   useEffect(() => {
     if (!isActive) return undefined
 
     const node = ref.current
-    const previouslyFocused =
-      typeof document !== 'undefined' ? document.activeElement : null
+    // No root element to trap within yet (ref not attached). The untyped
+    // original would have thrown on `node.contains` below; bailing is the same
+    // observable behaviour for a closed/never-mounted overlay.
+    if (!node) return undefined
 
-    function focusables() {
-      if (!node) return []
-      return Array.from(node.querySelectorAll(FOCUSABLE)).filter(
+    const previouslyFocused = (
+      typeof document !== 'undefined' ? document.activeElement : null
+    ) as HTMLElement | null
+
+    // Arrow consts (not hoisted function declarations) so TS keeps the
+    // `node`-is-non-null narrowing from the guard above inside the closures.
+    const focusables = (): HTMLElement[] =>
+      Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
         (element) => element.getClientRects().length > 0
       )
-    }
 
     // Land on the first control rather than the overlay chrome.
     const initial = focusables()[0]
     if (initial) initial.focus()
 
-    function handleKeyDown(event) {
+    const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         event.stopPropagation()
         onClose?.()

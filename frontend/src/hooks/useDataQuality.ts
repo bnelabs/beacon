@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchApi } from '../utils/apiClient'
 
-
 /**
  * Hook to fetch data quality statistics
  */
@@ -29,7 +28,7 @@ export function useSourceQualityDetails() {
 /**
  * Hook to fetch quality trends
  */
-export function useQualityTrends(days = 30) {
+export function useQualityTrends(days: number = 30) {
   return useQuery({
     queryKey: ['dataQuality', 'trends', days],
     queryFn: () => fetchApi(`/v1/data-quality/trends?days=${days}`),

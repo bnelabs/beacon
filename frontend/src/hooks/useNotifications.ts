@@ -1,11 +1,22 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchApi } from '../utils/apiClient'
 
+/** Query filters for the notifications list endpoint. */
+export interface NotificationFilters {
+  unread_only?: boolean
+  category?: string | null
+  priority?: string | null
+  limit?: number
+  offset?: number
+}
+
+/** A notification id is a backend primary key; tolerate string or number. */
+export type NotificationId = string | number
 
 /**
  * Hook to fetch notifications
  */
-export function useNotifications(filters = {}) {
+export function useNotifications(filters: NotificationFilters = {}) {
   const {
     unread_only = false,
     category = null,
@@ -46,7 +57,7 @@ export function useNotificationStats() {
 /**
  * Hook to get a single notification
  */
-export function useNotification(notificationId) {
+export function useNotification(notificationId?: NotificationId) {
   return useQuery({
     queryKey: ['notifications', notificationId],
     queryFn: () => fetchApi(`/v1/notifications/${notificationId}`),
@@ -61,7 +72,7 @@ export function useCreateNotification() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (notification) =>
+    mutationFn: (notification: unknown) =>
       fetchApi('/v1/notifications', {
         method: 'POST',
         body: JSON.stringify(notification)
@@ -79,7 +90,7 @@ export function useMarkNotificationAsRead() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (notificationId) =>
+    mutationFn: (notificationId: NotificationId) =>
       fetchApi(`/v1/notifications/${notificationId}/read`, {
         method: 'POST'
       }),
@@ -96,7 +107,7 @@ export function useMarkAllAsRead() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (category = null) => {
+    mutationFn: (category: string | null = null) => {
       const params = category ? `?category=${category}` : ''
       return fetchApi(`/v1/notifications/read-all${params}`, {
         method: 'POST'
@@ -115,7 +126,7 @@ export function useDismissNotification() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (notificationId) =>
+    mutationFn: (notificationId: NotificationId) =>
       fetchApi(`/v1/notifications/${notificationId}/dismiss`, {
         method: 'POST'
       }),
@@ -132,7 +143,7 @@ export function useDeleteNotification() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (notificationId) =>
+    mutationFn: (notificationId: NotificationId) =>
       fetchApi(`/v1/notifications/${notificationId}`, {
         method: 'DELETE'
       }),
