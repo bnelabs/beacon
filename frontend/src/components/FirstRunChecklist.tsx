@@ -1,12 +1,18 @@
 import { useState } from 'react'
 import Card from './ui/Card'
 import Button from './ui/Button'
-import { useDataSources } from '../hooks/useApi'
-import { useDataSourceHealth } from '../hooks/useApi'
-import { useNetworkGraph } from '../hooks/useApi'
+import { useDataSources, useDataSourceHealth, useNetworkGraph } from '../hooks/useApi'
 import { useRouter } from '../store/useRouter'
 
 const STORAGE_KEY = 'beacon-checklist-dismissed'
+
+/** One live-state-derived onboarding step. */
+interface ChecklistStep {
+  id: string
+  label: string
+  detail: string
+  action: () => void
+}
 
 /**
  * The successor to the guided tour, and deliberately not a tour.
@@ -23,17 +29,17 @@ export default function FirstRunChecklist() {
   const { data: sources } = useDataSources()
   const { data: healthPayload } = useDataSourceHealth()
   const { data: networkPayload } = useNetworkGraph()
-  const [dismissed, setDismissed] = useState(() => {
+  const [dismissed, setDismissed] = useState<Set<string>>(() => {
     try {
-      return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
+      return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as string[])
     } catch {
-      return new Set()
+      return new Set<string>()
     }
   })
 
   const list = sources || []
   const health = healthPayload?.sources || []
-  const steps = []
+  const steps: ChecklistStep[] = []
 
   if (list.length === 0) {
     steps.push({
@@ -72,7 +78,7 @@ export default function FirstRunChecklist() {
   const visible = steps.filter((step) => !dismissed.has(step.id))
   if (visible.length === 0) return null
 
-  const dismiss = (id) => {
+  const dismiss = (id: string) => {
     setDismissed((prev) => {
       const next = new Set(prev)
       next.add(id)

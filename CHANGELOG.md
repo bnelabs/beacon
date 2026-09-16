@@ -127,6 +127,36 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   are deterministic (`derandomize=True`).
 
 ### Changed
+- **The frontend is now entirely TypeScript.** The ratchet from
+  `docs/LANGUAGE_STRATEGY.md` is closed: all 23 remaining `.js`/`.jsx` modules
+  under `frontend/src` (every page, the two data hooks, and the remaining
+  components) converted to `.ts`/`.tsx`, and `tsconfig.json` no longer carries
+  `allowJs`, so new JavaScript in `src/` is invisible to the compiler rather
+  than merely unchecked. API payload shapes are now declared once in
+  `frontend/src/types/api.ts` (jobs, models, scenarios, validation reports,
+  catalogue, disclosure, network graph, system status, data quality,
+  analytics, countries, notifications) and every hook is typed against them,
+  so the envelope/field-name drift that motivated the migration fails
+  `npm run typecheck` instead of rendering `undefined%`. `@types/react` and
+  `@types/react-dom` are pinned to the React 18 the app actually runs
+  (the transitive `@types/react` 19 pair had left `react-dom` untyped and the
+  typecheck on `main` failing). No behaviour change: the production bundle
+  builds with the same chunk graph and the e2e mock-coverage audit passes.
+- **CI is a sub-minute gate plus nightly deep runs.** Everything triggered by
+  a push or pull request now finishes in under a minute: `backend-ci.yml`
+  keeps the dependency-free checks (syntax `compileall`, compose/Dockerfile
+  validator), `frontend-ci.yml` keeps the static ones (strict typecheck with
+  a lockfile-keyed `node_modules` cache and no browser download, e2e
+  mock-coverage audit), and `versioning-ci.yml` is unchanged. The
+  multi-minute legs moved to schedule + `workflow_dispatch`: the full pytest
+  suite with the live-migration Postgres service, coverage and API-docs check
+  to the new `backend-tests.yml` (nightly 03:47 UTC); the production build
+  and the Playwright suite to the new `frontend-e2e.yml` (nightly 03:26 UTC);
+  and the always-advisory `security.yml` audits dropped their push/PR
+  triggers entirely (weekly + dispatch). The trade is recorded in
+  `.github/workflows/README.md`: a regression only a browser or pytest can
+  see surfaces at most one day late, or immediately by running the deep
+  workflow on the branch before merging.
 - Collection telemetry is written by the worker, not guessed: a success stamps
   duration and row count and clears the failure streak (which is what ends the
   backoff); a failure grows the streak and keeps the provider's reason, which

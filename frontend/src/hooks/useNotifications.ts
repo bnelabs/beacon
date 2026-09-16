@@ -1,5 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchApi } from '../utils/apiClient'
+import type { Notification, NotificationId, NotificationsResponse } from '../types/api'
+
+// The notification domain types live in types/api.ts; re-exported so existing
+// `import { type NotificationId } from '.../hooks/useNotifications'` keeps working.
+export type { Notification, NotificationId }
 
 /** Query filters for the notifications list endpoint. */
 export interface NotificationFilters {
@@ -10,8 +15,6 @@ export interface NotificationFilters {
   offset?: number
 }
 
-/** A notification id is a backend primary key; tolerate string or number. */
-export type NotificationId = string | number
 
 /**
  * Hook to fetch notifications
@@ -36,7 +39,7 @@ export function useNotifications(filters: NotificationFilters = {}) {
 
   return useQuery({
     queryKey: ['notifications', filters],
-    queryFn: () => fetchApi(`/v1/notifications${queryString ? `?${queryString}` : ''}`),
+    queryFn: () => fetchApi<NotificationsResponse>(`/v1/notifications${queryString ? `?${queryString}` : ''}`),
     staleTime: 10000, // 10 seconds
     refetchInterval: 30000 // Refetch every 30 seconds
   })
@@ -48,7 +51,7 @@ export function useNotifications(filters: NotificationFilters = {}) {
 export function useNotificationStats() {
   return useQuery({
     queryKey: ['notifications', 'stats'],
-    queryFn: () => fetchApi('/v1/notifications/stats'),
+    queryFn: () => fetchApi<{ unread_count?: number | null; [key: string]: unknown }>('/v1/notifications/stats'),
     staleTime: 10000,
     refetchInterval: 30000
   })
@@ -60,7 +63,7 @@ export function useNotificationStats() {
 export function useNotification(notificationId?: NotificationId) {
   return useQuery({
     queryKey: ['notifications', notificationId],
-    queryFn: () => fetchApi(`/v1/notifications/${notificationId}`),
+    queryFn: () => fetchApi<Notification>(`/v1/notifications/${notificationId}`),
     enabled: !!notificationId
   })
 }

@@ -1,13 +1,25 @@
 name: Versioning
 
+# why: the version-policy guard is one stdlib-only Python script, so this is
+# the cheapest real gate in the repo and stays on every push and PR: well
+# inside the sub-minute pre-merge budget the other fast gates share.
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: versioning-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

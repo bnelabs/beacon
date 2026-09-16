@@ -1,17 +1,18 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, type ChangeEvent, type MouseEvent } from 'react'
 import PageContainer from '../components/ui/PageContainer'
 import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import Button from '../components/ui/Button'
-import Badge from '../components/ui/Badge'
+import Badge, { type BadgeVariant } from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import { useJobs, useJob, useCancelJob, useBatchCancelJobs, useJobDataQuality, useRetryJob } from '../hooks/useApi'
 import { useJobsWebSocket } from '../hooks/useJobsWebSocket'
 import JobCreationModal from '../components/jobs/JobCreationModal'
 import { useRouter } from '../store/useRouter'
+import type { EntityId, Job, JobUpdate } from '../types/api'
 
-function JobStatusBadge({ status }) {
-  const variants = {
+function JobStatusBadge({ status }: { status?: string | null }) {
+  const variants: Record<string, BadgeVariant> = {
     pending: 'default',
     running: 'primary',
     completed: 'success',
@@ -20,13 +21,13 @@ function JobStatusBadge({ status }) {
   }
 
   return (
-    <Badge variant={variants[status] || 'default'} size="sm">
+    <Badge variant={variants[status ?? ''] || 'default'} size="sm">
       {status}
     </Badge>
   )
 }
 
-function ProgressBar({ progress }) {
+function ProgressBar({ progress }: { progress: number }) {
   return (
     <div className="w-full h-2 bg-bne-paper-dim rounded-full overflow-hidden">
       <div
@@ -37,19 +38,28 @@ function ProgressBar({ progress }) {
   )
 }
 
-function JobRow({ job, onSelect, isSelected, onCheckboxChange, isChecked, showCheckbox }) {
+interface JobRowProps {
+  job: Job
+  onSelect: (job: Job) => void
+  isSelected: boolean
+  onCheckboxChange: (jobId: EntityId | undefined) => void
+  isChecked: boolean
+  showCheckbox: boolean
+}
+
+function JobRow({ job, onSelect, isSelected, onCheckboxChange, isChecked, showCheckbox }: JobRowProps) {
   const cancelMutation = useCancelJob()
 
-  const handleCancel = (e) => {
+  const handleCancel = (e: MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation()
     if (confirm('Are you sure you want to cancel this job?')) {
       cancelMutation.mutate(job.job_id || job.id)
     }
   }
 
-  const handleCheckboxClick = (e) => {
+  const handleCheckboxClick = (e: ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation()
-    onCheckboxChange(job.job_id ?? job.id)
+    onCheckboxChange(job.job_id ?? job.id ?? undefined)
   }
 
   return (
@@ -122,7 +132,12 @@ function JobRow({ job, onSelect, isSelected, onCheckboxChange, isChecked, showCh
   )
 }
 
-function LossChart({ train = [], val = [] }) {
+interface LossChartProps {
+  train?: Array<number | string> | null
+  val?: Array<number | string> | null
+}
+
+function LossChart({ train = [], val = [] }: LossChartProps) {
   const trainPoints = Array.isArray(train) ? train.map(Number).filter((value) => Number.isFinite(value)) : []
   const valPoints = Array.isArray(val) ? val.map(Number).filter((value) => Number.isFinite(value)) : []
   const series = trainPoints.length || valPoints.length
@@ -139,7 +154,7 @@ function LossChart({ train = [], val = [] }) {
   const minValue = Math.min(...combined)
   const effectiveRange = maxValue - minValue || 1
 
-  const buildPoints = (values) => values.map((value, index) => {
+  const buildPoints = (values: number[]) => values.map((value, index) => {
     const xRatio = maxLength > 1 ? index / (maxLength - 1) : 0
     const x = padding + xRatio * (width - padding * 2)
     const yRatio = (value - minValue) / effectiveRange
@@ -202,7 +217,16 @@ function LossChart({ train = [], val = [] }) {
   )
 }
 
-function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRetry, retryPending = false }) {
+interface JobDetailsProps {
+  jobId: EntityId
+  onOpenModel?: (modelId: EntityId | undefined) => void
+  onOpenResults?: (modelId: EntityId | undefined) => void
+  onCreateTraining?: (dataJob: Job) => void
+  onRetry?: (failedJob: Job) => void
+  retryPending?: boolean
+}
+
+function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRetry, retryPending = false }: JobDetailsProps) {
   const { data: job, isLoading, error } = useJob(jobId)
   const qualityQuery = useJobDataQuality(jobId, {
     enabled: !!jobId && (job?.job_type === 'data_collection')
@@ -239,9 +263,7 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRet
     jobResult?.model?.id ??
     (isTrainingJob ? job.id : undefined)
   const qualityData = qualityQuery.data
-  const showQuality = isDataCollectionJob && qualityData
-
-  const formatPercent = (value) => {
+  const formatPercent = (value?: number | null) => {
     if (value === null || value === undefined) return '—'
     const numeric = Number(value)
     if (!Number.isFinite(numeric)) return '—'
@@ -251,11 +273,11 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRet
 
   const trainingHighlights = isTrainingJob ? [
     { label: 'Best epoch', value: jobResult.best_epoch ? `Epoch ${jobResult.best_epoch}` : '—' },
-    { label: 'Final train loss', value: jobResult.final_train_loss?.toFixed?.(4) ?? '—' },
-    { label: 'Final val loss', value: jobResult.final_val_loss?.toFixed?.(4) ?? '—' },
-    { label: 'Test RMSE', value: jobResult.test_rmse?.toFixed?.(4) ?? '—' },
-    { label: 'Test MAE', value: jobResult.test_mae?.toFixed?.(4) ?? '—' },
-    { label: 'Test R²', value: jobResult.test_r2?.toFixed?.(4) ?? '—' }
+    { label: 'Final train loss', value: jobResult.final_train_loss?.toFixed(4) ?? '—' },
+    { label: 'Final val loss', value: jobResult.final_val_loss?.toFixed(4) ?? '—' },
+    { label: 'Test RMSE', value: jobResult.test_rmse?.toFixed(4) ?? '—' },
+    { label: 'Test MAE', value: jobResult.test_mae?.toFixed(4) ?? '—' },
+    { label: 'Test R²', value: jobResult.test_r2?.toFixed(4) ?? '—' }
   ] : []
 
   return (
@@ -332,7 +354,7 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRet
           <CardContent>
             {qualityQuery.isLoading ? (
               <LoadingSpinner message="Evaluating data quality..." />
-            ) : showQuality ? (
+            ) : qualityData ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="rounded-lg border border-bne-line bg-bne-paper/40 p-4">
                   <p className="text-xs uppercase tracking-wide text-bne-muted">Quality score</p>
@@ -352,21 +374,21 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRet
                     Fit for engine: {qualityData.fit_for_engine ? 'Yes' : 'No'}
                   </p>
                 </div>
-                {(qualityData.warnings || []).length > 0 && (
+                {(qualityData.warnings ?? []).length > 0 && (
                   <div className="sm:col-span-2 rounded-lg border border-bne-ochre/30 bg-bne-ochre/10 p-4">
                     <p className="text-xs uppercase tracking-wide text-bne-ochre mb-2">Warnings</p>
                     <ul className="list-disc list-inside text-sm text-bne-ink space-y-1">
-                      {qualityData.warnings.map((warning, index) => (
+                      {(qualityData.warnings ?? []).map((warning, index) => (
                         <li key={index}>{warning}</li>
                       ))}
                     </ul>
                   </div>
                 )}
-                {(qualityData.errors || []).length > 0 && (
+                {(qualityData.errors ?? []).length > 0 && (
                   <div className="sm:col-span-2 rounded-lg border border-bne-clay/30 bg-bne-clay/10 p-4">
                     <p className="text-xs uppercase tracking-wide text-bne-clay mb-2">Errors</p>
                     <ul className="list-disc list-inside text-sm text-bne-clay space-y-1">
-                      {qualityData.errors.map((message, index) => (
+                      {(qualityData.errors ?? []).map((message, index) => (
                         <li key={index}>{message}</li>
                       ))}
                     </ul>
@@ -391,7 +413,7 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRet
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => onOpenResults?.(derivedModelId ?? job.id)}
+                  onClick={() => onOpenResults?.(derivedModelId ?? job.id ?? undefined)}
                   disabled={!derivedModelId && !job.id}
                 >
                   View model results
@@ -399,7 +421,7 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRet
                 <Button
                   size="sm"
                   variant="primary"
-                  onClick={() => onOpenModel?.(derivedModelId ?? job.id)}
+                  onClick={() => onOpenModel?.(derivedModelId ?? job.id ?? undefined)}
                   disabled={!derivedModelId && !job.id}
                 >
                   Launch what-if scenarios
@@ -492,12 +514,19 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRet
   )
 }
 
+/** Defaults the Jobs page hands to the creation modal (e.g. "train with this
+ *  data" from a finished collection job). */
+interface JobModalDefaults {
+  jobType?: string
+  dataJobId?: EntityId
+}
+
 export default function Jobs() {
-  const [selectedJobId, setSelectedJobId] = useState(null)
+  const [selectedJobId, setSelectedJobId] = useState<EntityId | null>(null)
   const [filter, setFilter] = useState('all')
   const [isJobModalOpen, setIsJobModalOpen] = useState(false)
-  const [jobModalDefaults, setJobModalDefaults] = useState(null)
-  const [selectedJobIds, setSelectedJobIds] = useState([])
+  const [jobModalDefaults, setJobModalDefaults] = useState<JobModalDefaults | null>(null)
+  const [selectedJobIds, setSelectedJobIds] = useState<EntityId[]>([])
   const [batchMode, setBatchMode] = useState(false)
   const { data: jobs, isLoading, error, refetch } = useJobs()
   const batchCancelMutation = useBatchCancelJobs()
@@ -507,18 +536,18 @@ export default function Jobs() {
   // Enable real-time WebSocket updates
   const { isConnected } = useJobsWebSocket({
     enabled: true,
-    onUpdate: (jobUpdate) => {
+    onUpdate: (jobUpdate: JobUpdate) => {
       console.log('Job update received:', jobUpdate)
     }
   })
 
-  const filteredJobs = jobs?.filter(job => {
+  const filteredJobs = jobs?.filter((job) => {
     if (filter === 'all') return true
     if (filter === 'active') return ['pending', 'running'].includes(job.status)
     return job.status === filter
   }) || []
 
-  const jobTypeLookup = useMemo(() => ({
+  const jobTypeLookup = useMemo<Record<string, string>>(() => ({
     data_collection: 'Collect, clean, and stage raw datasets.',
     training: 'Fit a predictive model using a completed data collection job.',
     prediction: 'Generate forward-looking risk scores from a trained model.',
@@ -531,18 +560,20 @@ export default function Jobs() {
     setSelectedJobIds([])
   }
 
-  const handleCheckboxChange = (jobId) => {
-    setSelectedJobIds(prev =>
+  const handleCheckboxChange = (jobId: EntityId | undefined) => {
+    if (jobId === undefined) return
+    setSelectedJobIds((prev) =>
       prev.includes(jobId)
-        ? prev.filter(id => id !== jobId)
+        ? prev.filter((id) => id !== jobId)
         : [...prev, jobId]
     )
   }
 
   const handleSelectAll = () => {
     const cancellableJobs = filteredJobs
-      .filter(job => ['pending', 'running'].includes(job.status))
-      .map(job => job.job_id ?? job.id)
+      .filter((job) => ['pending', 'running'].includes(job.status))
+      .map((job) => job.job_id ?? job.id)
+      .filter((id): id is EntityId => id !== null && id !== undefined)
     setSelectedJobIds(cancellableJobs)
   }
 
@@ -557,19 +588,19 @@ export default function Jobs() {
       try {
         const result = await batchCancelMutation.mutateAsync(selectedJobIds)
 
-        if (result.failed.length > 0) {
+        if ((result?.failed?.length ?? 0) > 0) {
           alert(
-            `Cancelled ${result.total_cancelled} job(s).\n` +
-            `Failed to cancel ${result.failed.length} job(s).`
+            `Cancelled ${result?.total_cancelled ?? 0} job(s).\n` +
+            `Failed to cancel ${result?.failed?.length ?? 0} job(s).`
           )
         } else {
-          alert(`Successfully cancelled ${result.total_cancelled} job(s)!`)
+          alert(`Successfully cancelled ${result?.total_cancelled ?? 0} job(s)!`)
         }
 
         setSelectedJobIds([])
         setBatchMode(false)
       } catch (error) {
-        alert(`Batch cancel failed: ${error.message}`)
+        alert(`Batch cancel failed: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
   }
@@ -606,12 +637,12 @@ export default function Jobs() {
       <PageContainer
         title="Jobs"
         subtitle={
-          isConnected && (
+          isConnected ? (
             <span className="flex items-center gap-2 text-sm text-bne-moss">
               <span className="w-2 h-2 bg-bne-moss rounded-full animate-pulse"></span>
               Live updates active
             </span>
-          )
+          ) : undefined
         }
         actions={
           <div className="flex items-center gap-2">
@@ -714,21 +745,21 @@ export default function Jobs() {
                 size="sm"
                 onClick={() => setFilter('active')}
               >
-                Active ({jobs?.filter(j => ['pending', 'running'].includes(j.status)).length || 0})
+                Active ({jobs?.filter((j) => ['pending', 'running'].includes(j.status)).length || 0})
               </Button>
               <Button
                 variant={filter === 'completed' ? 'primary' : 'ghost'}
                 size="sm"
                 onClick={() => setFilter('completed')}
               >
-                Completed ({jobs?.filter(j => j.status === 'completed').length || 0})
+                Completed ({jobs?.filter((j) => j.status === 'completed').length || 0})
               </Button>
               <Button
                 variant={filter === 'failed' ? 'primary' : 'ghost'}
                 size="sm"
                 onClick={() => setFilter('failed')}
               >
-                Failed ({jobs?.filter(j => j.status === 'failed').length || 0})
+                Failed ({jobs?.filter((j) => j.status === 'failed').length || 0})
               </Button>
             </div>
 
@@ -740,11 +771,11 @@ export default function Jobs() {
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
+                    strokeWidth={2}
                   >
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      strokeWidth={2}
                       d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                     />
                   </svg>
@@ -762,12 +793,12 @@ export default function Jobs() {
                   const jobKey = job.job_id ?? job.id
                   return (
                     <JobRow
-                      key={jobKey}
+                      key={String(jobKey)}
                       job={job}
-                      onSelect={(j) => setSelectedJobId(j.job_id ?? j.id)}
+                      onSelect={(j) => setSelectedJobId(j.job_id ?? j.id ?? null)}
                       isSelected={selectedJobId === jobKey}
                       showCheckbox={batchMode}
-                      isChecked={selectedJobIds.includes(jobKey)}
+                      isChecked={jobKey !== undefined && jobKey !== null && selectedJobIds.includes(jobKey)}
                       onCheckboxChange={handleCheckboxChange}
                     />
                   )
@@ -782,12 +813,12 @@ export default function Jobs() {
                 jobId={selectedJobId}
                 onRetry={(failedJob) => retryMutation.mutate(failedJob.id ?? failedJob.job_id)}
                 retryPending={retryMutation.isPending}
-                onOpenModel={(modelId) => navigate('results', { modelId })}
-                onOpenResults={(modelId) => navigate('results', { modelId })}
+                onOpenModel={(modelId) => navigate('results', { modelId: String(modelId) })}
+                onOpenResults={(modelId) => navigate('results', { modelId: String(modelId) })}
                 onCreateTraining={(dataJob) => {
                   setJobModalDefaults({
                     jobType: 'training',
-                    dataJobId: dataJob.id ?? dataJob.job_id
+                    dataJobId: dataJob.id ?? dataJob.job_id ?? undefined
                   })
                   setIsJobModalOpen(true)
                 }}
@@ -800,11 +831,11 @@ export default function Jobs() {
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
+                    strokeWidth={2}
                   >
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      strokeWidth={2}
                       d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                     />
                   </svg>

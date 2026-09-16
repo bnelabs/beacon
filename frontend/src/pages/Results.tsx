@@ -5,26 +5,47 @@ import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
-import { useModel } from '../hooks/useApi'
-import { useRouter } from '../store/useRouter'
-import { useValidationReport } from '../hooks/useApi'
+import { useModel, useValidationReport } from '../hooks/useApi'
+import { useRouter, type RouteParams } from '../store/useRouter'
 import EmptyState from '../components/ui/EmptyState'
+import type { ModelResultMetrics, PerSourceMetrics, ScenarioResult, ValidationSourceStats } from '../types/api'
 
-function formatNumber(value, digits = 4) {
+/** The error `detail` FastAPI answers with: a plain string, or the typed
+ *  {user_friendly, technical} envelope the backend raises on pipeline errors. */
+type ApiErrorDetail = { detail?: { user_friendly?: string } | string }
+
+function detailMessage(payload: ApiErrorDetail | null | undefined, fallback: string): string {
+  const detail = payload?.detail
+  if (typeof detail === 'object' && detail !== null && detail.user_friendly) {
+    return detail.user_friendly
+  }
+  if (typeof detail === 'string' && detail) {
+    return detail
+  }
+  return fallback
+}
+
+function formatNumber(value: unknown, digits = 4): string {
   if (value === null || value === undefined) return '—'
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) return '—'
   return numeric.toFixed(digits)
 }
 
-function formatDate(value) {
+function formatDate(value?: string | null): string {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString()
 }
 
-function MetricCard({ title, value, subtitle }) {
+interface MetricCardProps {
+  title: string
+  value: string | number
+  subtitle?: string
+}
+
+function MetricCard({ title, value, subtitle }: MetricCardProps) {
   return (
     <Card>
       <CardHeader>
@@ -38,7 +59,7 @@ function MetricCard({ title, value, subtitle }) {
   )
 }
 
-function ValidationReportCard({ jobId }) {
+function ValidationReportCard({ jobId }: { jobId: string }) {
   const { data, isLoading } = useValidationReport(jobId)
 
   return (
@@ -65,11 +86,11 @@ function ValidationReportCard({ jobId }) {
         ) : (
           <div className="space-y-3">
             <p className="text-xs text-bne-muted">
-              Event definition: {data.validation.definition?.direction === 'down' ? 'falling' : 'rising'} moves
-              above the {data.validation.definition?.quantile} quantile of the {data.validation.definition?.horizon}-step
-              move, sustained {data.validation.definition?.min_duration}+ steps.
-              Mean ROC AUC across {data.validation.sources_measured} source(s):{' '}
-              <span className="bne-figure">{data.validation.mean_roc_auc == null ? '—' : data.validation.mean_roc_auc.toFixed(3)}</span>
+              Event definition: {data.validation?.definition?.direction === 'down' ? 'falling' : 'rising'} moves
+              above the {data.validation?.definition?.quantile} quantile of the {data.validation?.definition?.horizon}-step
+              move, sustained {data.validation?.definition?.min_duration}+ steps.
+              Mean ROC AUC across {data.validation?.sources_measured} source(s):{' '}
+              <span className="bne-figure">{data.validation?.mean_roc_auc == null ? '—' : data.validation.mean_roc_auc.toFixed(3)}</span>
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-[13px]">
@@ -84,7 +105,7 @@ function ValidationReportCard({ jobId }) {
                   </tr>
                 </thead>
                 <tbody className="text-bne-ink-soft">
-                  {Object.entries(data.validation.by_source || {}).map(([source, payload]) => (
+                  {Object.entries(data.validation?.by_source || {}).map(([source, payload]: [string, ValidationSourceStats | null]) => (
                     <tr key={source} className="border-t border-bne-line-soft">
                       <td className="py-1.5 pr-4 font-mono text-xs">{source}</td>
                       {payload && payload.roc_auc != null ? (
@@ -112,7 +133,7 @@ function ValidationReportCard({ jobId }) {
   )
 }
 
-function ScenarioSummary({ scenario }) {
+function ScenarioSummary({ scenario }: { scenario: ScenarioResult | null }) {
   if (!scenario) return null
 
   return (
@@ -178,7 +199,16 @@ function ScenarioSummary({ scenario }) {
   )
 }
 
-function PredictionsTable({ rows }) {
+interface PredictionRow {
+  key?: string | number
+  label: string
+  prediction?: number | null
+  risk?: number | null
+  confidence?: { lower?: number | null; upper?: number | null } | null
+  explanation?: string | null
+}
+
+function PredictionsTable({ rows }: { rows: PredictionRow[] }) {
   if (!rows.length) {
     return <p className="text-sm text-bne-muted">No prediction outputs available yet.</p>
   }
@@ -215,7 +245,11 @@ function PredictionsTable({ rows }) {
   )
 }
 
-export default function Results({ params = {} }) {
+export interface ResultsProps {
+  params?: RouteParams
+}
+
+export default function Results({ params = {} }: ResultsProps) {
   const navigate = useRouter((state) => state.navigate)
 
   const rawModelId = params?.modelId
@@ -231,20 +265,20 @@ export default function Results({ params = {} }) {
     refetch: refetchModel
   } = useModel(modelId)
 
-  const [scenario, setScenario] = useState(null)
+  const [scenario, setScenario] = useState<ScenarioResult | null>(null)
   const validationJobId = params?.jobId
   const [scenarioLoading, setScenarioLoading] = useState(false)
-  const [scenarioError, setScenarioError] = useState(null)
+  const [scenarioError, setScenarioError] = useState<string | null>(null)
   const [scenarioReloadKey, setScenarioReloadKey] = useState(0)
   const [builderName, setBuilderName] = useState('')
   const [builderHorizon, setBuilderHorizon] = useState(30)
-  const [builderAdjustments, setBuilderAdjustments] = useState({})
-  const [builderError, setBuilderError] = useState(null)
+  const [builderAdjustments, setBuilderAdjustments] = useState<Record<string, number>>({})
+  const [builderError, setBuilderError] = useState<string | null>(null)
   const [builderLoading, setBuilderLoading] = useState(false)
-  const builderRef = useRef(null)
+  const builderRef = useRef<HTMLElement>(null)
 
-  const baselineMetrics = modelDetail?.result || {}
-  const perSourceMetrics = baselineMetrics?.per_source_metrics || {}
+  const baselineMetrics: ModelResultMetrics = modelDetail?.result || {}
+  const perSourceMetrics: Record<string, PerSourceMetrics> = baselineMetrics?.per_source_metrics || {}
   const availableSources = useMemo(() => Object.keys(perSourceMetrics), [perSourceMetrics])
 
   useEffect(() => {
@@ -263,22 +297,20 @@ export default function Results({ params = {} }) {
       try {
         const response = await fetch(`/api/models/${modelId}/scenarios/${scenarioId}`)
         if (!response.ok) {
-          const payload = await response.json().catch(() => ({}))
-          const message =
-            payload?.detail?.user_friendly ||
-            payload?.detail ||
-            response.statusText ||
-            'Failed to load scenario results.'
+          const payload = (await response.json().catch(() => ({}))) as ApiErrorDetail
+          const message = detailMessage(payload, response.statusText || 'Failed to load scenario results.')
           throw new Error(message)
         }
-        const data = await response.json()
+        const data = (await response.json()) as ScenarioResult
         if (!cancelled) {
           setScenario(data)
         }
       } catch (error) {
         if (!cancelled) {
           setScenario(null)
-          setScenarioError(error.message || 'Failed to load scenario results.')
+          setScenarioError(
+            error instanceof Error ? error.message : 'Failed to load scenario results.'
+          )
         }
       } finally {
         if (!cancelled) {
@@ -294,7 +326,7 @@ export default function Results({ params = {} }) {
   }, [modelId, scenarioId, scenarioReloadKey])
 
   useEffect(() => {
-    const template = {}
+    const template: Record<string, number> = {}
     availableSources.forEach((source) => {
       template[source] = 0
     })
@@ -344,7 +376,7 @@ export default function Results({ params = {} }) {
     )
   }
 
-  const summaryCards = (() => {
+  const summaryCards: MetricCardProps[] = (() => {
     if (scenario?.summary) {
       return [
         {
@@ -370,7 +402,7 @@ export default function Results({ params = {} }) {
       ]
     }
 
-    const cards = []
+    const cards: MetricCardProps[] = []
     if (baselineMetrics.test_rmse ?? baselineMetrics.rmse) {
       cards.push({
         title: 'Test RMSE',
@@ -409,8 +441,8 @@ export default function Results({ params = {} }) {
     return cards
   })()
 
-  const predictionsRows = (() => {
-    if (Array.isArray(scenario?.predictions) && scenario.predictions.length) {
+  const predictionsRows: PredictionRow[] = (() => {
+    if (Array.isArray(scenario?.predictions) && scenario?.predictions?.length) {
       return scenario.predictions.map((item, index) => ({
         key: item.source ?? item.bank_id ?? index,
         label: item.source || item.bank_name || `Series ${index + 1}`,
@@ -457,7 +489,7 @@ export default function Results({ params = {} }) {
       .slice(0, 8)
   })()
 
-  const modelInfoRows = [
+  const modelInfoRows: Array<{ label: string; value: string | number }> = [
     { label: 'Model ID', value: modelDetail?.model_id ?? modelId },
     { label: 'Status', value: modelDetail?.status },
     { label: 'Model Type', value: baselineMetrics?.model_type || baselineMetrics?.config?.model_type },
@@ -466,7 +498,10 @@ export default function Results({ params = {} }) {
     { label: 'Completed', value: formatDate(modelDetail?.completed_at) },
     { label: 'Data Job', value: modelDetail?.data_job_id ? `Job ${modelDetail.data_job_id}` : null },
     { label: 'Predictions Path', value: modelDetail?.predictions_path }
-  ].filter((item) => item.value !== undefined && item.value !== null && item.value !== '')
+  ].filter(
+    (item): item is { label: string; value: string | number } =>
+      item.value !== undefined && item.value !== null && item.value !== ''
+  )
 
   const pageTitle =
     scenario?.name ||
@@ -502,26 +537,22 @@ export default function Results({ params = {} }) {
         })
       })
       if (!response.ok) {
-        const payload = await response.json().catch(() => ({}))
-        const message =
-          payload?.detail?.user_friendly ||
-          payload?.detail ||
-          response.statusText ||
-          'Scenario simulation failed.'
+        const payload = (await response.json().catch(() => ({}))) as ApiErrorDetail
+        const message = detailMessage(payload, response.statusText || 'Scenario simulation failed.')
         throw new Error(message)
       }
-      const data = await response.json()
+      const data = (await response.json()) as ScenarioResult
       setScenario(data)
-      setBuilderName(data.name)
+      setBuilderName(data.name ?? '')
     } catch (error) {
-      setBuilderError(error.message || 'Scenario simulation failed.')
+      setBuilderError(error instanceof Error ? error.message : 'Scenario simulation failed.')
     } finally {
       setBuilderLoading(false)
     }
   }
 
   const resetAdjustments = () => {
-    const template = {}
+    const template: Record<string, number> = {}
     availableSources.forEach((source) => {
       template[source] = 0
     })
@@ -534,7 +565,7 @@ export default function Results({ params = {} }) {
       title={pageTitle}
       actions={
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => navigate('models', { modelId })}>
+          <Button variant="outline" size="sm" onClick={() => navigate('models', { modelId: String(modelId) })}>
             Back to Models
           </Button>
           <Button
@@ -590,7 +621,7 @@ export default function Results({ params = {} }) {
                       type="text"
                       value={builderName}
                       onChange={(event) => setBuilderName(event.target.value)}
-                      className="w-full px-3 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
+                      className="w-full px-3 py-2 border border-bne-line rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-pine"
                       placeholder="e.g., Volatility +20%"
                     />
                   </div>
@@ -599,7 +630,7 @@ export default function Results({ params = {} }) {
                     <select
                       value={builderHorizon}
                       onChange={(event) => setBuilderHorizon(Number(event.target.value))}
-                      className="w-full px-3 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
+                      className="w-full px-3 py-2 border border-bne-line rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-pine"
                     >
                       {[7, 14, 30, 60, 90].map((value) => (
                         <option key={value} value={value}>

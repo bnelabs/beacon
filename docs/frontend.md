@@ -18,7 +18,7 @@ they are short and typed by convention.
 
 | Concern | Choice |
 |---|---|
-| UI | React 18.3, no TypeScript (`.jsx` throughout) |
+| UI | React 18.3 + TypeScript (`strict: true`); all of `src/` is `.ts`/`.tsx`, domain payload types in `src/types/api.ts` |
 | Build | Vite 7.1, esbuild minify, `target: es2020` |
 | Maps | Deck.gl 9 (`@deck.gl/react`, `layers`, `geo-layers`, `aggregation-layers`) |
 | Server state | TanStack Query 5 |
@@ -96,7 +96,7 @@ shipped ~170 dead classes (`bne-frost`, `bne-indigo`, `bne-sky`,
 - The sidebar footer renders the build version from `__APP_VERSION__`
   (stamped by Vite from `package.json`, which `scripts/release.py` keeps in
   step with the repository `VERSION` file) — no more hard-coded "v3".
-- `Brand.jsx` — the beacon mark (signal tower, ochre lamp, pine broadcast
+- `Brand.tsx` — the beacon mark (signal tower, ochre lamp, pine broadcast
   arcs) drawn on the same 24-unit grid and 1.6 stroke as the navigation
   icons; `Wordmark` sets BEACON over *Banking Early-Alert Network*. The mark
   is also `public/favicon.svg`.
@@ -105,7 +105,7 @@ shipped ~170 dead classes (`bne-frost`, `bne-indigo`, `bne-sky`,
 
 ### Resilience and honesty in the shell
 
-- `components/ErrorBoundary.jsx` wraps the routed page (keyed per page). A
+- `components/ErrorBoundary.tsx` wraps the routed page (keyed per page). A
   view that throws degrades to a quiet clay panel inside working chrome with
   retry/reload; before it, one malformed payload blanked the entire app.
 - The dashboard's System Status card reads `GET /api/v1/system/status`
@@ -116,7 +116,7 @@ shipped ~170 dead classes (`bne-frost`, `bne-indigo`, `bne-sky`,
 
 ### Risk map palette
 
-`data/network-connections.js` exports `RISK_COLORS`
+`data/network-connections.ts` exports `RISK_COLORS`
 (low `#67854F`, medium `#C29A33`, high `#C05F2C`, critical `#8A3320`,
 uncalibrated `#8A8168`) on the bundled Natural Earth basemap. Region fills are warm
 washes, labels are ink with paper halos, and the heatmap ramp runs
@@ -125,26 +125,26 @@ and the *uncalibrated* state.
 
 ## Pages and navigation
 
-`frontend/src/store/useRouter.js` holds `currentPage` and `params`; `App.jsx`
+`frontend/src/store/useRouter.ts` holds `currentPage` and `params`; `App.tsx`
 switches on `currentPage` to render a lazily-imported page. Because this is not
 URL-based routing, **deep links do not survive a reload** — the app always opens
 on `dashboard`.
 
 | `currentPage` | Component | Notes |
 |---|---|---|
-| `dashboard` | `pages/Dashboard.jsx` | Eagerly loaded; welcome banner, live system-status meters, serif stat cards |
-| `globe` | `pages/RiskMapPage.jsx` | Route key is still `globe`; the page is the **Risk Map** |
-| `models` | `pages/Models.jsx` | |
-| `jobs` | `pages/Jobs.jsx` | Batch mode, WebSocket hook |
-| `results` | `pages/Results.jsx` | Breadcrumb child of `jobs` |
-| `datasources` | `pages/DataSources.jsx` | |
-| `countries` | `pages/CountryProfiles.jsx` | World Bank sync, CSV/JSON export |
-| `performance` | `pages/ModelPerformance.jsx` | |
-| `data-quality` | `pages/DataQuality.jsx` | |
-| `analytics` | `pages/Analytics.jsx` | |
-| `settings` | `pages/Settings.jsx` | |
+| `dashboard` | `pages/Dashboard.tsx` | Eagerly loaded; welcome banner, live system-status meters, serif stat cards |
+| `globe` | `pages/RiskMapPage.tsx` | Route key is still `globe`; the page is the **Risk Map** |
+| `models` | `pages/Models.tsx` | |
+| `jobs` | `pages/Jobs.tsx` | Batch mode, WebSocket hook |
+| `results` | `pages/Results.tsx` | Breadcrumb child of `jobs` |
+| `datasources` | `pages/DataSources.tsx` | |
+| `countries` | `pages/CountryProfiles.tsx` | World Bank sync, CSV/JSON export |
+| `performance` | `pages/ModelPerformance.tsx` | |
+| `data-quality` | `pages/DataQuality.tsx` | |
+| `analytics` | `pages/Analytics.tsx` | |
+| `settings` | `pages/Settings.tsx` | |
 
-`components/Breadcrumbs.jsx` derives a trail from a static parent map.
+`components/Breadcrumbs.tsx` derives a trail from a static parent map.
 `performance`, `data-quality` and `analytics` are absent from that map, so those
 three pages render no breadcrumb.
 
@@ -177,7 +177,7 @@ sources, because a feed nobody promised to refresh is not late.
 
 ## Global search (⌘K / Ctrl+K)
 
-`components/GlobalSearch.jsx` opens on ⌘K and searches a merged list, navigable
+`components/GlobalSearch.tsx` opens on ⌘K and searches a merged list, navigable
 with ↑/↓ and Enter. Result icons are two-letter monogram chips in hairline
 squares — the emoji set they replaced rendered differently on every platform
 and read as decoration, not information. It merges nine static *Page* entries with four live
@@ -231,8 +231,8 @@ Overlays (Modal, the model details drawer) trap Tab and own Escape through
 
 ## Risk map
 
-The former 3D globe is gone. `pages/RiskMapPage.jsx` renders a 2D Deck.gl map via
-`components/map/RiskMap.jsx` and `MapLegend.jsx` (the legend documents the
+The former 3D globe is gone. `pages/RiskMapPage.tsx` renders a 2D Deck.gl map via
+`components/map/RiskMap.tsx` and `MapLegend.tsx` (the legend documents the
 bands, the heat ramp and the *uncalibrated* state):
 
 - a **bundled Natural Earth basemap** (`src/data/world-countries.json`, public
@@ -252,8 +252,8 @@ bands, the heat ramp and the *uncalibrated* state):
 `three`, `@react-three/fiber`, `@react-three/drei` and the entire
 `src/components/globe/` directory were removed. The route key stays `globe` so
 existing navigation keeps working, but all user-facing copy says "Risk Map"
-and the component file is now `RiskMapPage.jsx`.
-`src/data/network-connections.js` still holds the static connection set.
+and the component file is now `RiskMapPage.tsx`.
+`src/data/network-connections.ts` still holds the static connection set.
 
 The live-network states (loading, unavailable, request failed, demo fallback,
 live vintage with edge and node counts) are stated in a status strip *above*
@@ -298,7 +298,7 @@ a socket opens.
 
 ## Notifications
 
-`components/NotificationBell.jsx` sits in the header and polls
+`components/NotificationBell.tsx` sits in the header and polls
 `/api/v1/notifications` every 30 s. It shows an unread badge, a dropdown panel,
 relative timestamps, and a "mark all read" action; clicking an item marks it
 read and follows its `action_url`.
@@ -310,19 +310,19 @@ risk`. See [`api.md`](api.md#notifications) for the response fields.
 
 ## Country profiles
 
-`pages/CountryProfiles.jsx` lists World Bank indicators with search and
+`pages/CountryProfiles.tsx` lists World Bank indicators with search and
 region/risk filters, can trigger a sync (`POST /api/v1/countries/sync`), and
-exports via `src/utils/export.js` (`downloadCSV`, `downloadJSON`,
+exports via `src/utils/export.ts` (`downloadCSV`, `downloadJSON`,
 `formatCountriesForExport`). Note the path: the removed implementation summary
 recorded this as `src/lib/utils/export.js`, which no longer exists.
 
 ## Model performance and data quality dashboards
 
-`pages/ModelPerformance.jsx` summarises model counts, mean R²/RMSE, a health
+`pages/ModelPerformance.tsx` summarises model counts, mean R²/RMSE, a health
 breakdown (ready / training / stale / failed) and a sortable comparison table,
 backed by the model catalogue endpoints.
 
-`pages/DataQuality.jsx` shows overall health, a freshness distribution, anomaly
+`pages/DataQuality.tsx` shows overall health, a freshness distribution, anomaly
 counts and a 14-day trend chart, backed by `/api/v1/data-quality/{stats,sources,trends}`.
 The composite quality score and the freshness thresholds are defined in
 [`api.md`](api.md#data-quality-score).
@@ -353,13 +353,13 @@ Container build and deployment are covered in [`deployment.md`](deployment.md).
 
 The dashboard is an operations brief, not a widget dump. Contract:
 
-- **Every widget has a designed absence.** `ui/EmptyState.jsx` renders empty
+- **Every widget has a designed absence.** `ui/EmptyState.tsx` renders empty
   and degraded states in neutral paper tones: an operator with no API keys
   sees what to do next ("create the first job"), never a provider error
   message and never a red wall. Genuine typed failures still surface through
   `ErrorMessage` where a human must act.
-- **KPI row** (`pages/Dashboard.jsx`): total jobs with a 14-day sparkline
-  (`ui/Sparkline.jsx`, dependency-free SVG), completion rate meter, active
+- **KPI row** (`pages/Dashboard.tsx`): total jobs with a 14-day sparkline
+  (`ui/Sparkline.tsx`, dependency-free SVG), completion rate meter, active
   models, enabled sources. Figures are serif tabular numerals; loading states
   are skeletons, not spinners-in-voids.
 - **Job Activity**: stacked SVG bars per day (completed/active/failed) with a

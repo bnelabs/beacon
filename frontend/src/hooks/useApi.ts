@@ -1,7 +1,34 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchApi } from '../utils/apiClient'
+import type {
+  BankSummary,
+  BatchCancelResult,
+  CatalogueFilters,
+  CatalogueItem,
+  DataSource,
+  DataSourceFormPayload,
+  DataSourceHealthPayload,
+  DataDisclosure,
+  EntityId,
+  Job,
+  JobCreatePayload,
+  JobDataQualityReport,
+  Model,
+  NetworkGraphPayload,
+  NormalizedNetworkGraph,
+  ProbeResult,
+  SystemStatus,
+  ValidationReport
+} from '../types/api'
 
-function buildQueryString(params = {}) {
+/** Shared options bag for queries that callers enable/stale-time per use. */
+export interface QueryOptions {
+  enabled?: boolean
+  staleTime?: number
+  refetchInterval?: number
+}
+
+function buildQueryString(params: CatalogueFilters = {}): string {
   const query = new URLSearchParams()
 
   if (params.category) query.set('category', params.category)
@@ -21,14 +48,14 @@ function buildQueryString(params = {}) {
 export function useJobs() {
   return useQuery({
     queryKey: ['jobs'],
-    queryFn: () => fetchApi('/v1/jobs')
+    queryFn: () => fetchApi<Job[]>('/v1/jobs')
   })
 }
 
-export function useJob(jobId) {
+export function useJob(jobId?: EntityId | null) {
   return useQuery({
     queryKey: ['jobs', jobId],
-    queryFn: () => fetchApi(`/v1/jobs/${jobId}`),
+    queryFn: () => fetchApi<Job>(`/v1/jobs/${jobId}`),
     enabled: !!jobId
   })
 }
@@ -36,14 +63,14 @@ export function useJob(jobId) {
 export function useModels() {
   return useQuery({
     queryKey: ['models'],
-    queryFn: () => fetchApi('/models')
+    queryFn: () => fetchApi<Model[]>('/models')
   })
 }
 
-export function useModel(modelId) {
+export function useModel(modelId?: EntityId | null) {
   return useQuery({
     queryKey: ['models', modelId],
-    queryFn: () => fetchApi(`/models/${modelId}`),
+    queryFn: () => fetchApi<Model>(`/models/${modelId}`),
     enabled: !!modelId
   })
 }
@@ -51,7 +78,7 @@ export function useModel(modelId) {
 export function useDataSources() {
   return useQuery({
     queryKey: ['dataSources'],
-    queryFn: () => fetchApi('/v1/data-sources'),
+    queryFn: () => fetchApi<DataSource[]>('/v1/data-sources'),
     staleTime: 300_000
   })
 }
@@ -59,7 +86,7 @@ export function useDataSources() {
 export function useDataDisclosure() {
   return useQuery({
     queryKey: ['dataSources', 'disclosure'],
-    queryFn: () => fetchApi('/v1/data-sources/disclosure'),
+    queryFn: () => fetchApi<DataDisclosure>('/v1/data-sources/disclosure'),
     staleTime: 300_000
   })
 }
@@ -67,18 +94,22 @@ export function useDataDisclosure() {
 export function useDataSourceHealth() {
   return useQuery({
     queryKey: ['dataSources', 'health'],
-    queryFn: () => fetchApi('/v1/data-sources/health'),
+    queryFn: () => fetchApi<DataSourceHealthPayload>('/v1/data-sources/health'),
     staleTime: 60_000,
     refetchInterval: 60_000
   })
 }
 
+/** The id passed through to the probe URL; matches `source.id || source.source_id`
+ *  at the call site, which can be missing for a malformed row. */
+type SourceKey = EntityId | null | undefined
+
 export function useProbeDataSource() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (sourceId) =>
-      fetchApi(`/v1/data-sources/${sourceId}/probe`, { method: 'POST' }),
+    mutationFn: (sourceId: SourceKey) =>
+      fetchApi<ProbeResult>(`/v1/data-sources/${sourceId}/probe`, { method: 'POST' }),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['dataSources'] })
       queryClient.invalidateQueries({ queryKey: ['dataSources', 'health'] })
@@ -86,12 +117,15 @@ export function useProbeDataSource() {
   })
 }
 
+/** PUT variables: `sourceId` selects the row, every remaining key is the body. */
+export type UpdateDataSourceVars = { sourceId: SourceKey } & Record<string, unknown>
+
 export function useUpdateDataSource() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ sourceId, ...body }) =>
-      fetchApi(`/v1/data-sources/${sourceId}`, {
+    mutationFn: ({ sourceId, ...body }: UpdateDataSourceVars) =>
+      fetchApi<DataSource>(`/v1/data-sources/${sourceId}`, {
         method: 'PUT',
         body: JSON.stringify(body)
       }),
@@ -106,8 +140,8 @@ export function useCreateJob() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (data) =>
-      fetchApi('/v1/jobs', {
+    mutationFn: (data: JobCreatePayload) =>
+      fetchApi<Job>('/v1/jobs', {
         method: 'POST',
         body: JSON.stringify(data)
       }),
@@ -121,7 +155,7 @@ export function useRetryJob() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (jobId) => fetchApi(`/v1/jobs/${jobId}/retry`, { method: 'POST' }),
+    mutationFn: (jobId: SourceKey) => fetchApi<Job>(`/v1/jobs/${jobId}/retry`, { method: 'POST' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
     }
@@ -132,11 +166,11 @@ export function useCancelJob() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (jobId) =>
+    mutationFn: (jobId: SourceKey) =>
       // The backend exposes single-job cancellation as DELETE /jobs/{id}
       // (the batch endpoint below is POST /jobs/batch/cancel). Calling
       // POST /jobs/{id}/cancel returned 405.
-      fetchApi(`/v1/jobs/${jobId}`, {
+      fetchApi<null>(`/v1/jobs/${jobId}`, {
         method: 'DELETE'
       }),
     onSuccess: (_, jobId) => {
@@ -150,14 +184,14 @@ export function useBatchCancelJobs() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (jobIds) =>
-      fetchApi('/v1/jobs/batch/cancel', {
+    mutationFn: (jobIds: EntityId[]) =>
+      fetchApi<BatchCancelResult>('/v1/jobs/batch/cancel', {
         method: 'POST',
         body: JSON.stringify({ job_ids: jobIds })
       }),
     onSuccess: (result) => {
       // Invalidate all affected job queries
-      result.cancelled.forEach(jobId => {
+      result?.cancelled?.forEach((jobId) => {
         queryClient.invalidateQueries({ queryKey: ['jobs', jobId] })
       })
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
@@ -169,16 +203,16 @@ export function useSyncDataSource() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ sourceId }) =>
-      fetchApi(`/v1/data-sources/${sourceId}/sync`, {
+    mutationFn: ({ sourceId }: { sourceId: SourceKey }) =>
+      fetchApi<DataSource>(`/v1/data-sources/${sourceId}/sync`, {
         method: 'POST'
       }),
     onMutate: async ({ sourceId }) => {
       await queryClient.cancelQueries({ queryKey: ['dataSources'] })
-      const previous = queryClient.getQueryData(['dataSources'])
+      const previous = queryClient.getQueryData<DataSource[]>(['dataSources'])
       if (previous) {
-        queryClient.setQueryData(['dataSources'], old =>
-          old?.map(source =>
+        queryClient.setQueryData<DataSource[]>(['dataSources'], (old) =>
+          old?.map((source) =>
             (source.id || source.source_id) === sourceId
               ? { ...source, status: 'syncing' }
               : source
@@ -195,8 +229,8 @@ export function useSyncDataSource() {
       if (!updatedId) {
         return
       }
-      queryClient.setQueryData(['dataSources'], old =>
-        old?.map(source => {
+      queryClient.setQueryData<DataSource[]>(['dataSources'], (old) =>
+        old?.map((source) => {
           const sourceId = source.id ?? source.source_id
           if (sourceId === updatedId) {
             return { ...source, ...updated }
@@ -220,8 +254,8 @@ export function useCreateDataSource() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (payload) =>
-      fetchApi('/v1/data-sources', {
+    mutationFn: (payload: DataSourceFormPayload) =>
+      fetchApi<DataSource>('/v1/data-sources', {
         method: 'POST',
         body: JSON.stringify(payload)
       }),
@@ -231,34 +265,34 @@ export function useCreateDataSource() {
   })
 }
 
-export function useCatalogueItems(filters = {}, options = {}) {
+export function useCatalogueItems(filters: CatalogueFilters = {}, options: QueryOptions = {}) {
   const queryKey = ['catalogue', filters]
   const enabled = options.enabled ?? true
 
   return useQuery({
     queryKey,
-    queryFn: () => fetchApi(`/v1/catalogue${buildQueryString(filters)}`),
+    queryFn: () => fetchApi<CatalogueItem[]>(`/v1/catalogue${buildQueryString(filters)}`),
     enabled,
     staleTime: options.staleTime ?? 60_000
   })
 }
 
-export function useJobDataQuality(jobId, options = {}) {
+export function useJobDataQuality(jobId: EntityId | null | undefined, options: QueryOptions = {}) {
   return useQuery({
     queryKey: ['job', jobId, 'dataQuality'],
-    queryFn: () => fetchApi(`/v1/results/${jobId}/data-quality`),
+    queryFn: () => fetchApi<JobDataQualityReport>(`/v1/results/${jobId}/data-quality`),
     enabled: Boolean(jobId) && (options.enabled ?? true),
     staleTime: options.staleTime ?? 60_000
   })
 }
 
-export function useBanksByRegion(filters) {
+export function useBanksByRegion(filters: CatalogueFilters | null) {
   return useQuery({
     queryKey: ['banks', filters],
     enabled: !!filters,
-    queryFn: async () => {
-      const data = await fetchApi(`/v1/catalogue${buildQueryString(filters)}`)
-      return (data || []).map((item) => ({
+    queryFn: async (): Promise<BankSummary[]> => {
+      const data = await fetchApi<CatalogueItem[]>(`/v1/catalogue${buildQueryString(filters ?? {})}`)
+      return (data || []).map((item): BankSummary => ({
         id: item.id,
         code: item.code,
         name: item.name,
@@ -267,7 +301,7 @@ export function useBanksByRegion(filters) {
         region: item.region,
         description: item.description,
         metadata: item.parameters || {},
-        risk_score: (item.parameters ?? item.metadata)?.risk_score ?? null,
+        risk_score: ((item.parameters ?? item.metadata)?.risk_score as number | string | null | undefined) ?? null,
         source: item.data_source?.name || ''
       }))
     }
@@ -284,10 +318,10 @@ export function useBanksByRegion(filters) {
  * error, so callers should render it as "no network available" and must not
  * substitute the static demo file.
  */
-export function useNetworkGraph(options = {}) {
+export function useNetworkGraph(options: QueryOptions = {}) {
   return useQuery({
     queryKey: ['network', 'graph'],
-    queryFn: () => fetchApi('/v1/network/graph'),
+    queryFn: () => fetchApi<NetworkGraphPayload>('/v1/network/graph'),
     staleTime: options.staleTime ?? 30_000,
     enabled: options.enabled ?? true
   })
@@ -300,7 +334,9 @@ export function useNetworkGraph(options = {}) {
  * exactly one place; a component must never have to guess whether an empty
  * `edges` array means "no network" or "a network with no edges".
  */
-export function normalizeNetworkGraph(payload) {
+export function normalizeNetworkGraph(
+  payload?: NetworkGraphPayload | null
+): NormalizedNetworkGraph {
   if (!payload || typeof payload !== 'object') {
     return {
       status: 'unavailable',
@@ -335,10 +371,10 @@ export function normalizeNetworkGraph(payload) {
  * badges — invented states. It now renders what the backend measured, and
  * an unreachable backend renders as unknown, not as green.
  */
-export function useSystemStatus(options = {}) {
+export function useSystemStatus(options: QueryOptions = {}) {
   return useQuery({
     queryKey: ['systemStatus'],
-    queryFn: () => fetchApi('/v1/system/status'),
+    queryFn: () => fetchApi<SystemStatus>('/v1/system/status'),
     refetchInterval: options.refetchInterval ?? 30_000,
     retry: 1,
     ...options
@@ -349,10 +385,10 @@ export function useSystemStatus(options = {}) {
  * Predictive-validity report for a backtest job (round P1).
  * Absence is a status ("not_validated"), never an error wall.
  */
-export function useValidationReport(jobId) {
+export function useValidationReport(jobId?: EntityId | null) {
   return useQuery({
     queryKey: ['validation', jobId],
-    queryFn: () => fetchApi(`/v2/reports/validation/${jobId}`),
+    queryFn: () => fetchApi<ValidationReport>(`/v2/reports/validation/${jobId}`),
     enabled: !!jobId
   })
 }

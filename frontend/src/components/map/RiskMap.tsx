@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import DeckGL from '@deck.gl/react'
 import { MapView } from '@deck.gl/core'
+import type { Layer, MapViewState, PickingInfo } from '@deck.gl/core'
 import { ArcLayer, GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers'
 import { HeatmapLayer } from '@deck.gl/aggregation-layers'
+import type { FeatureCollection } from 'geojson'
 import MapLegend from './MapLegend'
 import { getRiskColor, networkConnections } from '../../data/network-connections'
 import { normalizeNetworkGraph, useNetworkGraph } from '../../hooks/useApi'
-import { regions } from '../../data/regions'
+import { regions, type Region } from '../../data/regions'
+import type { BankSummary, ConnectionView } from '../../types/api'
 
 // The Natural Earth basemap (world-countries.json) and the region boundaries
 // (region-boundaries.json) are ~190 KB static GeoJSON payloads each. They are
@@ -28,11 +31,11 @@ const NEUTRAL_REGION_RISK = 0.35
 // Neutral arc colour used when the API reports no risk score for an edge.
 // Painting an unscored exposure with a "low risk" green would assert something
 // the data does not say.
-const UNSCORED_ARC_COLOR = [138, 129, 104]
+const UNSCORED_ARC_COLOR: [number, number, number] = [138, 129, 104]
 
 const MAX_BANK_POINTS = 500
 
-const INITIAL_VIEW_STATE = {
+const INITIAL_VIEW_STATE: MapViewState = {
   longitude: 8,
   latitude: 20,
   zoom: 1,
@@ -42,7 +45,7 @@ const INITIAL_VIEW_STATE = {
   maxZoom: 6
 }
 
-const HEAT_COLOR_RANGE = [
+const HEAT_COLOR_RANGE: Array<[number, number, number, number]> = [
   [103, 133, 79, 0],
   [103, 133, 79, 100],
   [194, 154, 51, 160],
@@ -52,25 +55,73 @@ const HEAT_COLOR_RANGE = [
 
 const MAP_VIEW = new MapView({ id: 'risk-map-view', controller: true, repeat: true })
 
-const regionById = Object.fromEntries(regions.map((region) => [region.id, region]))
-const regionByIso3 = Object.fromEntries(regions.map((region) => [region.iso3, region]))
+const regionById: Record<string, Region> = Object.fromEntries(regions.map((region) => [region.id, region]))
+const regionByIso3: Record<string, Region> = Object.fromEntries(regions.map((region) => [region.iso3, region]))
 
-function hexToRgb(hex) {
+/** A rendered map point: either a scored region centroid or a jittered bank
+ *  marker inside the selected region. */
+interface MapPoint {
+  kind: 'region' | 'bank'
+  id: string | number
+  name?: string | null
+  country?: string
+  bankCount?: number
+  regionId: string
+  position: [number, number]
+  risk: number
+}
+
+/** A rendered exposure arc: a connection plus its resolved endpoints. */
+interface ArcDatum extends ConnectionView {
+  kind: 'connection' | string | null
+  sourcePosition: [number, number]
+  targetPosition: [number, number]
+}
+
+/** What deck.gl hands back through `info.object` on a pick: one of our data
+ *  rows (MapPoint / ArcDatum), or a GeoJSON feature from the boundaries layer.
+ *  deck.gl types the picked object as the layer datum, and three different
+ *  layers can pick here, so this is the loose union of what they carry. */
+interface PickedObject {
+  kind?: string | null
+  regionId?: string
+  properties?: { iso3?: string } | null
+  id?: string | number
+  source?: string
+  target?: string
+  exposure?: number
+  riskScore?: number | null
+  transactionVolume?: number
+  layer?: string | null
+}
+
+function hexToRgb(hex: string): [number, number, number] {
   const value = Number.parseInt(hex.slice(1), 16)
   return [(value >> 16) & 255, (value >> 8) & 255, value & 255]
 }
 
-function riskColor(score, alpha) {
+function riskColor(score: number, alpha: number): [number, number, number, number] {
   return [...hexToRgb(getRiskColor(score)), alpha]
 }
 
-function seededUnit(seed) {
+function seededUnit(seed: number): number {
   const value = Math.sin(seed * 12.9898) * 43758.5453
   return value - Math.floor(value)
 }
 
-function regionPointRadius(point) {
+function regionPointRadius(point: { bankCount?: number; risk: number }): number {
   return 4 + Math.sqrt(point.bankCount || 1) * 0.35 + point.risk * 4
+}
+
+export interface RiskMapProps {
+  selectedRegion?: Region | null
+  onRegionSelect?: (region?: Region) => void
+  showNetwork?: boolean
+  showHeatmap?: boolean
+  banks?: BankSummary[]
+  onConnectionClick?: (connection: ConnectionView) => void
+  resetToken?: number
+  allowStaticNetworkFallback?: boolean
 }
 
 export default function RiskMap({
@@ -82,8 +133,8 @@ export default function RiskMap({
   onConnectionClick,
   resetToken = 0,
   allowStaticNetworkFallback = false
-}) {
-  const [viewState, setViewState] = useState(INITIAL_VIEW_STATE)
+}: RiskMapProps) {
+  const [viewState, setViewState] = useState<MapViewState>(INITIAL_VIEW_STATE)
 
   useEffect(() => {
     setViewState(INITIAL_VIEW_STATE)
@@ -93,7 +144,10 @@ export default function RiskMap({
   // their own chunks and fetched on mount rather than shipped in the main
   // bundle. Until they resolve the map renders markers/heat/arcs over a plain
   // background, so first paint is not blocked on ~370 KB of polygons.
-  const [geo, setGeo] = useState({ worldCountries: null, regionBoundaries: null })
+  const [geo, setGeo] = useState<{
+    worldCountries: FeatureCollection | null
+    regionBoundaries: FeatureCollection | null
+  }>({ worldCountries: null, regionBoundaries: null })
 
   useEffect(() => {
     let cancelled = false
@@ -103,7 +157,10 @@ export default function RiskMap({
     ])
       .then(([world, bounds]) => {
         if (!cancelled) {
-          setGeo({ worldCountries: world.default, regionBoundaries: bounds.default })
+          setGeo({
+            worldCountries: world.default as FeatureCollection,
+            regionBoundaries: bounds.default as FeatureCollection
+          })
         }
       })
       .catch(() => {
@@ -136,7 +193,7 @@ export default function RiskMap({
       networkConnections.length > 0
   )
 
-  const connections = useMemo(() => {
+  const connections = useMemo<ConnectionView[]>(() => {
     if (network.status === 'available') {
       return network.edges.map((edge) => ({
         id: edge.id,
@@ -150,7 +207,11 @@ export default function RiskMap({
     }
     if (fallbackActive) {
       return networkConnections.map((connection) => ({
-        ...connection,
+        id: connection.id,
+        source: connection.source,
+        target: connection.target,
+        exposure: connection.exposure,
+        transactionVolume: connection.transactionVolume,
         riskScore: typeof connection.riskScore === 'number' ? connection.riskScore : null
       }))
     }
@@ -162,8 +223,8 @@ export default function RiskMap({
     [connections]
   )
 
-  const riskByRegion = useMemo(() => {
-    const totals = {}
+  const riskByRegion = useMemo<Record<string, number>>(() => {
+    const totals: Record<string, { sum: number; count: number; max: number }> = {}
     for (const connection of connections) {
       for (const regionId of [connection.source, connection.target]) {
         const entry = totals[regionId] || (totals[regionId] = { sum: 0, count: 0, max: 0 })
@@ -184,7 +245,7 @@ export default function RiskMap({
     )
   }, [connections])
 
-  const regionPoints = useMemo(
+  const regionPoints = useMemo<MapPoint[]>(
     () =>
       regions.map((region) => ({
         kind: 'region',
@@ -199,7 +260,7 @@ export default function RiskMap({
     [riskByRegion]
   )
 
-  const bankPoints = useMemo(() => {
+  const bankPoints = useMemo<MapPoint[]>(() => {
     if (!selectedRegion || !banks?.length) return []
 
     return banks.slice(0, MAX_BANK_POINTS).map((bank, index) => {
@@ -209,38 +270,36 @@ export default function RiskMap({
       const parsed = Number(bank.risk_score)
 
       return {
-        kind: 'bank',
+        kind: 'bank' as const,
         id: bank.id ?? `${selectedRegion.id}-${index}`,
         name: bank.name,
         regionId: selectedRegion.id,
         position: [
           selectedRegion.lon + Math.cos(angle) * distance,
           selectedRegion.lat + Math.sin(angle) * distance
-        ],
+        ] as [number, number],
         risk: Number.isFinite(parsed) ? Math.min(Math.max(parsed, 0), 1) : 0.5
       }
     })
   }, [banks, selectedRegion])
 
-  const arcs = useMemo(
-    () =>
-      connections
-        .map((connection) => {
-          const source = regionById[connection.source]
-          const target = regionById[connection.target]
-          if (!source || !target) return null
-          return {
-            ...connection,
-            kind: 'connection',
-            sourcePosition: [source.lon, source.lat],
-            targetPosition: [target.lon, target.lat]
-          }
-        })
-        .filter(Boolean),
-    [connections]
-  )
+  const arcs = useMemo<ArcDatum[]>(() => {
+    const result: ArcDatum[] = []
+    for (const connection of connections) {
+      const source = regionById[connection.source]
+      const target = regionById[connection.target]
+      if (!source || !target) continue
+      result.push({
+        ...connection,
+        kind: 'connection',
+        sourcePosition: [source.lon, source.lat],
+        targetPosition: [target.lon, target.lat]
+      })
+    }
+    return result
+  }, [connections])
 
-  const heatPoints = useMemo(() => {
+  const heatPoints = useMemo<MapPoint[]>(() => {
     if (!bankPoints.length) return regionPoints
     return [
       ...regionPoints.filter((point) => point.regionId !== selectedRegion?.id),
@@ -248,7 +307,7 @@ export default function RiskMap({
     ]
   }, [bankPoints, regionPoints, selectedRegion])
 
-  const scatterRegionPoints = useMemo(() => {
+  const scatterRegionPoints = useMemo<MapPoint[]>(() => {
     if (!bankPoints.length) return regionPoints
     return regionPoints.filter((point) => point.regionId !== selectedRegion?.id)
   }, [bankPoints, regionPoints, selectedRegion])
@@ -270,22 +329,22 @@ export default function RiskMap({
 
   const selectedIso3 = selectedRegion?.iso3
 
-  const layers = useMemo(() => {
-    const stack = []
+  const layers = useMemo<Layer[]>(() => {
+    const stack: Layer[] = []
     if (baseLayer) stack.push(baseLayer)
     if (geo.regionBoundaries) {
       stack.push(
-        new GeoJsonLayer({
+        new GeoJsonLayer<{ iso3?: string }>({
           id: 'region-boundaries',
           data: geo.regionBoundaries,
           stroked: true,
           filled: true,
           pickable: true,
           getFillColor: (feature) =>
-            feature.properties.iso3 === selectedIso3 ? [44, 85, 69, 46] : [110, 102, 83, 14],
+            feature.properties?.iso3 === selectedIso3 ? [44, 85, 69, 46] : [110, 102, 83, 14],
           getLineColor: (feature) =>
-            feature.properties.iso3 === selectedIso3 ? [44, 85, 69, 255] : [110, 102, 83, 105],
-          getLineWidth: (feature) => (feature.properties.iso3 === selectedIso3 ? 2 : 1),
+            feature.properties?.iso3 === selectedIso3 ? [44, 85, 69, 255] : [110, 102, 83, 105],
+          getLineWidth: (feature) => (feature.properties?.iso3 === selectedIso3 ? 2 : 1),
           lineWidthUnits: 'pixels',
           updateTriggers: {
             getFillColor: selectedIso3,
@@ -298,11 +357,11 @@ export default function RiskMap({
 
     if (showHeatmap) {
       stack.push(
-        new HeatmapLayer({
+        new HeatmapLayer<MapPoint>({
           id: 'liquidity-heatmap',
           data: heatPoints,
           getPosition: (point) => point.position,
-          getWeight: (point) => (point.kind === 'bank' ? point.risk : point.risk * point.bankCount),
+          getWeight: (point) => (point.kind === 'bank' ? point.risk : point.risk * (point.bankCount ?? 0)),
           radiusPixels: 60,
           intensity: 1,
           threshold: 0.03,
@@ -315,7 +374,7 @@ export default function RiskMap({
 
     if (showNetwork) {
       stack.push(
-        new ArcLayer({
+        new ArcLayer<ArcDatum>({
           id: 'interbank-exposures',
           data: arcs,
           greatCircle: true,
@@ -338,7 +397,7 @@ export default function RiskMap({
     }
 
     stack.push(
-      new ScatterplotLayer({
+      new ScatterplotLayer<MapPoint>({
         id: 'region-markers',
         data: scatterRegionPoints,
         pickable: true,
@@ -356,7 +415,7 @@ export default function RiskMap({
 
     if (bankPoints.length) {
       stack.push(
-        new ScatterplotLayer({
+        new ScatterplotLayer<MapPoint>({
           id: 'bank-markers',
           data: bankPoints,
           pickable: true,
@@ -375,7 +434,7 @@ export default function RiskMap({
 
     if (selectedRegion) {
       stack.push(
-        new ScatterplotLayer({
+        new ScatterplotLayer<Region>({
           id: 'selected-region',
           data: [selectedRegion],
           pickable: false,
@@ -393,12 +452,12 @@ export default function RiskMap({
     }
 
     stack.push(
-      new TextLayer({
+      new TextLayer<MapPoint>({
         id: 'region-labels',
         data: scatterRegionPoints,
         pickable: false,
         getPosition: (point) => point.position,
-        getText: (point) => point.name,
+        getText: (point) => point.name ?? '',
         getSize: 11,
         getColor: [38, 33, 26, 235],
         getPixelOffset: [0, 16],
@@ -428,15 +487,15 @@ export default function RiskMap({
   ])
 
   const handleClick = useCallback(
-    (info) => {
-      const picked = info?.object
+    (info: PickingInfo) => {
+      const picked = info?.object as PickedObject | undefined
       if (!picked) return
       if (picked.kind === 'connection') {
-        onConnectionClick?.(picked)
+        onConnectionClick?.(picked as ConnectionView)
         return
       }
       if (picked.kind === 'bank' || picked.kind === 'region') {
-        onRegionSelect?.(regionById[picked.regionId])
+        onRegionSelect?.(picked.regionId ? regionById[picked.regionId] : undefined)
         return
       }
       const iso3 = picked.properties?.iso3
@@ -447,7 +506,7 @@ export default function RiskMap({
     [onConnectionClick, onRegionSelect]
   )
 
-  const handleViewStateChange = useCallback(({ viewState: next }) => {
+  const handleViewStateChange = useCallback(({ viewState: next }: { viewState: MapViewState }) => {
     setViewState((previous) => ({ ...previous, ...next }))
   }, [])
 

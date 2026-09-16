@@ -1,8 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import LoadingSpinner from '../ui/LoadingSpinner'
 import { useCatalogueItems } from '../../hooks/useApi'
+import type { CatalogueFilters, CatalogueItem, DataSource, EntityId, SelectedDataset } from '../../types/api'
+
+export interface DataSourceDetailsModalProps {
+  isOpen: boolean
+  source?: DataSource | null
+  onClose?: () => void
+  preselectedDatasetIds?: EntityId[]
+  onApplySelection?: (datasets: SelectedDataset[]) => void
+}
 
 export default function DataSourceDetailsModal({
   isOpen,
@@ -10,14 +19,14 @@ export default function DataSourceDetailsModal({
   onClose,
   preselectedDatasetIds = [],
   onApplySelection
-}) {
+}: DataSourceDetailsModalProps) {
   const sourceId = source?.id || source?.source_id
   const [searchTerm, setSearchTerm] = useState('')
   const [regionFilter, setRegionFilter] = useState('all')
   const [countryFilter, setCountryFilter] = useState('all')
-  const [previewDataset, setPreviewDataset] = useState(null)
+  const [previewDataset, setPreviewDataset] = useState<CatalogueItem | null>(null)
 
-  const filters = useMemo(() => {
+  const filters = useMemo<CatalogueFilters>(() => {
     if (!sourceId) {
       return { enabled_only: false }
     }
@@ -32,7 +41,7 @@ export default function DataSourceDetailsModal({
     staleTime: 5 * 60_000
   })
 
-  const [selectedIds, setSelectedIds] = useState(() => new Set(preselectedDatasetIds))
+  const [selectedIds, setSelectedIds] = useState<Set<EntityId>>(() => new Set(preselectedDatasetIds))
 
   useEffect(() => {
     if (!isOpen) {
@@ -45,7 +54,7 @@ export default function DataSourceDetailsModal({
     setSelectedIds(new Set(preselectedDatasetIds))
   }, [isOpen, preselectedDatasetIds])
 
-  const toggleDataset = (datasetId) => {
+  const toggleDataset = (datasetId: EntityId) => {
     setSelectedIds((prev) => {
       const next = new Set(prev)
       if (next.has(datasetId)) {
@@ -63,10 +72,10 @@ export default function DataSourceDetailsModal({
   }
 
   const clearSelection = () => {
-    setSelectedIds(new Set())
+    setSelectedIds(new Set<EntityId>())
   }
 
-  const selectedDatasets = useMemo(() => {
+  const selectedDatasets = useMemo<SelectedDataset[]>(() => {
     if (!catalogueItems) return []
     return catalogueItems
       .filter((item) => selectedIds.has(item.id))
@@ -79,9 +88,9 @@ export default function DataSourceDetailsModal({
       }))
   }, [catalogueItems, selectedIds])
 
-  const regions = useMemo(() => {
+  const regions = useMemo<string[]>(() => {
     if (!catalogueItems) return []
-    const unique = new Set()
+    const unique = new Set<string>()
     catalogueItems.forEach((item) => {
       if (item.region) {
         unique.add(item.region)
@@ -90,18 +99,18 @@ export default function DataSourceDetailsModal({
     return Array.from(unique.values()).sort()
   }, [catalogueItems])
 
-  const countries = useMemo(() => {
+  const countries = useMemo<string[]>(() => {
     if (!catalogueItems) return []
-    const unique = new Set()
+    const unique = new Set<string>()
     catalogueItems.forEach((item) => {
       if (item.country_code || item.country) {
-        unique.add(item.country_code || item.country)
+        unique.add((item.country_code || item.country) as string)
       }
     })
     return Array.from(unique.values()).sort()
   }, [catalogueItems])
 
-  const filteredItems = useMemo(() => {
+  const filteredItems = useMemo<CatalogueItem[]>(() => {
     if (!catalogueItems) return []
     return catalogueItems.filter((item) => {
       const matchesSearch = !searchTerm
@@ -113,13 +122,13 @@ export default function DataSourceDetailsModal({
       const countryValue = item.country_code || item.country
       const matchesCountry = countryFilter === 'all'
         || (countryValue && countryValue === countryFilter)
-      return matchesSearch && matchesRegion && matchesCountry
+      return Boolean(matchesSearch && matchesRegion && matchesCountry)
     })
   }, [catalogueItems, searchTerm, regionFilter, countryFilter])
 
   const datasetSummary = useMemo(() => {
     const total = filteredItems.length
-    const regionsCount = new Map()
+    const regionsCount = new Map<string, number>()
     filteredItems.forEach((item) => {
       const key = item.region || 'Unspecified'
       regionsCount.set(key, (regionsCount.get(key) || 0) + 1)
@@ -142,13 +151,15 @@ export default function DataSourceDetailsModal({
   }
 
   const selectionCount = selectedDatasets.length
-  const allSelected = catalogueItems && catalogueItems.length > 0 && selectionCount === catalogueItems.length
+  const allSelected = Boolean(
+    catalogueItems && catalogueItems.length > 0 && selectionCount === catalogueItems.length
+  )
 
   if (!source) {
     return null
   }
 
-  const metadata = [
+  const metadata: Array<{ label: string; value: ReactNode }> = [
     { label: 'Status', value: source.status },
     { label: 'Plugin Type', value: source.plugin_type },
     { label: 'Enabled', value: source.enabled ? 'Yes' : 'No' },
@@ -166,7 +177,7 @@ export default function DataSourceDetailsModal({
   const configJson = (() => {
     try {
       return JSON.stringify(source.config ?? {}, null, 2)
-    } catch (error) {
+    } catch {
       return '{}'
     }
   })()

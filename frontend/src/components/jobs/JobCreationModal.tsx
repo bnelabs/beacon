@@ -1,9 +1,16 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, type FormEvent } from 'react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import { useCatalogueItems, useCreateJob, useJobs } from '../../hooks/useApi'
+import type { CatalogueFilters, EntityId, JobCreatePayload, JobParameters } from '../../types/api'
 
-const JOB_TYPES = [
+interface JobTypeOption {
+  value: string
+  label: string
+  description: string
+}
+
+const JOB_TYPES: JobTypeOption[] = [
   {
     value: 'data_collection',
     label: 'Data Collection',
@@ -21,13 +28,13 @@ const JOB_TYPES = [
   }
 ]
 
-const MODEL_TYPE_DESCRIPTIONS = {
+const MODEL_TYPE_DESCRIPTIONS: Record<string, string> = {
   temporal_attention: 'Balances short-term volatility with longer sequences. Good default when unsure.',
   hgt: 'Captures interactions between entities (e.g., banks, regions) using a graph transformer.',
   lstm: 'Classic recurrent network for smoother time series with fewer cross-dependencies.'
 }
 
-const REGION_OPTIONS = [
+const REGION_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: 'All Regions' },
   { value: 'global', label: 'Global' },
   { value: 'north_america', label: 'North America' },
@@ -38,17 +45,53 @@ const REGION_OPTIONS = [
   { value: 'africa', label: 'Africa' }
 ]
 
-function formatDate(date) {
+/** Anything the normaliser accepts: a catalogue row, a pinned selection from
+ *  the Data Sources page, or an already-normalised dataset. */
+export interface DatasetLike {
+  id?: EntityId | null
+  code?: string | null
+  name?: string | null
+  category?: string | null
+  region?: string | null
+  data_source_id?: EntityId | null
+  data_source?: { id?: EntityId | null; name?: string | null } | null
+  source_name?: string | null
+  frequency?: string | null
+  unit?: string | null
+}
+
+/** A dataset row inside the job-creation form (post-normalisation). */
+export interface NormalizedDataset {
+  id: EntityId
+  code: string
+  name: string
+  category: string
+  region: string
+  sourceId: EntityId | null
+  sourceName: string
+  frequency: string
+  unit: string
+}
+
+export interface JobCreationModalProps {
+  isOpen: boolean
+  onClose?: () => void
+  initialDatasets?: DatasetLike[] | null
+  initialJobType?: string
+  initialDataJobId?: EntityId | null
+}
+
+function formatDate(date: Date): string {
   return date.toISOString().split('T')[0]
 }
 
-function shiftDays(baseDate, offsetDays) {
+function shiftDays(baseDate: Date, offsetDays: number): Date {
   const date = new Date(baseDate)
   date.setDate(date.getDate() + offsetDays)
   return date
 }
 
-function getDefaultCollectionWindow() {
+function getDefaultCollectionWindow(): { startDate: string; endDate: string } {
   const end = new Date()
   const start = new Date()
   start.setFullYear(start.getFullYear() - 1)
@@ -58,7 +101,12 @@ function getDefaultCollectionWindow() {
   }
 }
 
-function getDefaultTrainingWindow() {
+function getDefaultTrainingWindow(): {
+  trainStart: string
+  trainEnd: string
+  testStart: string
+  testEnd: string
+} {
   const today = new Date()
   const testEndDate = formatDate(today)
   const testStartDate = formatDate(shiftDays(today, -60))
@@ -73,7 +121,7 @@ function getDefaultTrainingWindow() {
   }
 }
 
-function parseNumber(value, fallback) {
+function parseNumber(value: string, fallback: number): number {
   if (value === '' || value === null || value === undefined) {
     return fallback
   }
@@ -87,7 +135,7 @@ export default function JobCreationModal({
   initialDatasets,
   initialJobType = 'data_collection',
   initialDataJobId = ''
-}) {
+}: JobCreationModalProps) {
   const { data: jobs } = useJobs()
   const createJob = useCreateJob()
 
@@ -127,14 +175,14 @@ export default function JobCreationModal({
   const [learningRate, setLearningRate] = useState('0.001')
   const [dropout, setDropout] = useState('0.1')
 
-  const [formError, setFormError] = useState(null)
-  const [selectedDatasets, setSelectedDatasets] = useState([])
+  const [formError, setFormError] = useState<string | null>(null)
+  const [selectedDatasets, setSelectedDatasets] = useState<NormalizedDataset[]>([])
   const [catalogueFilterTerm, setCatalogueFilterTerm] = useState('')
 
   const stableInitialDatasets = useMemo(() => initialDatasets ?? [], [initialDatasets])
 
-  const normalizeDatasets = useCallback((items) => {
-    const map = new Map()
+  const normalizeDatasets = useCallback((items?: DatasetLike[] | null): NormalizedDataset[] => {
+    const map = new Map<EntityId, NormalizedDataset>()
     ;(items || []).forEach((item) => {
       if (!item || typeof item.id === 'undefined' || item.id === null) {
         return
@@ -210,10 +258,10 @@ export default function JobCreationModal({
           (job.job_type === 'data_collection' || job.jobType === 'data_collection') &&
           job.status === 'completed'
       )
-      .sort((a, b) => (b.id || b.job_id || 0) - (a.id || a.job_id || 0))
+      .sort((a, b) => Number(b.id || b.job_id || 0) - Number(a.id || a.job_id || 0))
   }, [jobs])
 
-  const handleRemoveDataset = useCallback((datasetId) => {
+  const handleRemoveDataset = useCallback((datasetId: EntityId) => {
     setSelectedDatasets((prev) => prev.filter((dataset) => dataset.id !== datasetId))
   }, [])
 
@@ -221,8 +269,8 @@ export default function JobCreationModal({
     setSelectedDatasets([])
   }, [])
 
-  const catalogueFilters = useMemo(() => {
-    const filters = {}
+  const catalogueFilters = useMemo<CatalogueFilters>(() => {
+    const filters: CatalogueFilters = {}
     if (region) {
       filters.region = region
     }
@@ -230,7 +278,7 @@ export default function JobCreationModal({
     return filters
   }, [region])
 
-  const { data: catalogueMatches = [], isLoading: isCatalogueLoading } = useCatalogueItems(
+  const { data: catalogueMatches, isLoading: isCatalogueLoading } = useCatalogueItems(
     catalogueFilters,
     { enabled: true, staleTime: 300_000 }
   )
@@ -240,32 +288,34 @@ export default function JobCreationModal({
     [catalogueMatches, normalizeDatasets]
   )
 
-  const groupedCatalogueOptions = useMemo(() => {
-    const groups = new Map()
+  const groupedCatalogueOptions = useMemo<Array<[string, NormalizedDataset[]]>>(() => {
+    const groups = new Map<string, NormalizedDataset[]>()
     normalizedCatalogueOptions.forEach((dataset) => {
       const key = dataset.sourceName || 'Catalogue'
-      if (!groups.has(key)) {
-        groups.set(key, [])
+      const group = groups.get(key)
+      if (group) {
+        group.push(dataset)
+      } else {
+        groups.set(key, [dataset])
       }
-      groups.get(key).push(dataset)
     })
 
     return Array.from(groups.entries())
-      .map(([groupName, items]) => [
+      .map(([groupName, items]): [string, NormalizedDataset[]] => [
         groupName,
         items.sort((a, b) => a.name.localeCompare(b.name))
       ])
       .sort(([groupA], [groupB]) => groupA.localeCompare(groupB))
   }, [normalizedCatalogueOptions])
 
-  const filteredCatalogueOptions = useMemo(() => {
+  const filteredCatalogueOptions = useMemo<Array<[string, NormalizedDataset[]]>>(() => {
     const term = catalogueFilterTerm.trim().toLowerCase()
     if (!term) {
       return groupedCatalogueOptions
     }
 
     return groupedCatalogueOptions
-      .map(([groupName, items]) => [
+      .map(([groupName, items]): [string, NormalizedDataset[]] => [
         groupName,
         items.filter((dataset) => {
           const haystack = `${dataset.code} ${dataset.name} ${dataset.category} ${dataset.region}`.toLowerCase()
@@ -289,12 +339,12 @@ export default function JobCreationModal({
   }, [filteredCatalogueOptions, selectedDatasets])
 
   const isDatasetSelected = useCallback(
-    (datasetId) => selectedDatasets.some((dataset) => dataset.id === datasetId),
+    (datasetId: EntityId) => selectedDatasets.some((dataset) => dataset.id === datasetId),
     [selectedDatasets]
   )
 
   const addDatasets = useCallback(
-    (datasets = []) => {
+    (datasets: NormalizedDataset[] = []) => {
       if (!datasets.length) {
         return
       }
@@ -303,7 +353,7 @@ export default function JobCreationModal({
     [normalizeDatasets]
   )
 
-  const removeDataset = useCallback((datasetId) => {
+  const removeDataset = useCallback((datasetId?: EntityId | null) => {
     if (datasetId === undefined || datasetId === null) {
       return
     }
@@ -311,7 +361,7 @@ export default function JobCreationModal({
   }, [])
 
   const handleDatasetSelectionChange = useCallback(
-    (dataset, nextChecked) => {
+    (dataset: NormalizedDataset, nextChecked: boolean) => {
       if (!dataset || typeof dataset.id === 'undefined' || dataset.id === null) {
         return
       }
@@ -343,12 +393,12 @@ export default function JobCreationModal({
     setSelectedDatasets((prev) => prev.filter((dataset) => !ids.has(dataset.id)))
   }, [filteredCatalogueOptions])
 
-  const handleSubmit = async (event) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setFormError(null)
 
     try {
-      const payload = {
+      const payload: JobCreatePayload = {
         name: name.trim() || `${jobType === 'data_collection' ? 'Data Collection' : 'Model Training'} ${new Date().toISOString().split('T')[0]}`,
         description: description.trim() || undefined,
         job_type: jobType,
@@ -357,7 +407,7 @@ export default function JobCreationModal({
       }
 
       if (jobType === 'data_collection') {
-        const params = {}
+        const params: JobParameters = {}
         if (region) {
           params.regions = [region]
         }
@@ -389,7 +439,7 @@ export default function JobCreationModal({
           return
         }
 
-        const params = {
+        const params: JobParameters = {
           data_job_id: Number(dataJobId),
           train_start: trainStart,
           train_end: trainEnd,
@@ -411,7 +461,7 @@ export default function JobCreationModal({
           setFormError('Select a completed training job to backtest.')
           return
         }
-        const params = { trained_model_job: Number(backtestModelJob) }
+        const params: JobParameters = { trained_model_job: Number(backtestModelJob) }
         if (eventQuantile) {
           params.event_definition = {
             direction: eventDirection,
@@ -426,7 +476,7 @@ export default function JobCreationModal({
       await createJob.mutateAsync(payload)
       handleClose()
     } catch (error) {
-      setFormError(error.message || 'Failed to create job. Please try again.')
+      setFormError(error instanceof Error ? error.message : 'Failed to create job. Please try again.')
     }
   }
 
@@ -764,7 +814,7 @@ export default function JobCreationModal({
                   >
                     <option value="">Select completed data job</option>
                     {dataCollectionJobs.map((job) => (
-                      <option key={job.id || job.job_id} value={job.id || job.job_id}>
+                      <option key={String(job.id || job.job_id)} value={String(job.id || job.job_id)}>
                         #{job.id || job.job_id} · {job.name || job.parameters?.regions?.join(', ') || 'Data Collection'}
                       </option>
                     ))}

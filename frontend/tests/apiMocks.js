@@ -658,7 +658,7 @@ const notificationStats = {
  *
  * This was missing entirely, which is worth recording because of how it failed.
  * The route fell through to the deliberate "unknown GET path: answer 404, as the
- * real API does" branch at the bottom of the handler. `DataSources.jsx` calls
+ * real API does" branch at the bottom of the handler. `DataSources.tsx` calls
  * this through `useDataDisclosure`, and TanStack Query *retries* a failed query,
  * so the 404 was re-requested during the create-source mutation's
  * `invalidateQueries(['dataSources'])`. The spec fails the test on any console

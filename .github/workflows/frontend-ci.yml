@@ -1,14 +1,22 @@
 name: Frontend CI
 
-# why: keep main green and validate every proposed frontend change before merge.
+# why: keep main green and validate every proposed frontend change before
+# merge -- IN UNDER A MINUTE. This gate is static-only: install dependencies
+# (usually restored from cache), strict-TypeScript the whole app, and audit
+# the e2e mock's endpoint coverage. Everything that needs a browser or a
+# bundler -- the production build and the Playwright suite -- lives in
+# frontend-e2e.yml (nightly + manual dispatch), because a pre-merge check
+# that takes ten minutes is a check nobody waits for. The full history of
+# what each step catches is preserved in the two workflow files.
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
 
-# why: cancel superseded runs on a branch or PR, but never on main - see the note
-# in backend-ci.yml. Cancelling on main can leave a commit permanently unverified.
+# why: cancel superseded runs on a branch or PR, but never on main - see the
+# note in backend-ci.yml. Cancelling on main can leave a commit permanently
+# unverified.
 concurrency:
   group: frontend-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -17,23 +25,14 @@ permissions:
   contents: read
 
 jobs:
-  # why: NO live backend stack (no `docker compose up`, no uvicorn/Postgres/Redis) is
-  # started for this job. The Playwright suite is fully self-mocked:
-  #   * frontend/tests/full-frontend.spec.js calls registerApiMocks(page) in
-  #     beforeEach; frontend/tests/apiMocks.js registers `page.route('**/api/**', ...)`
-  #     and serves every catalogue/jobs/countries/analytics/data-quality response from
-  #     in-file fixtures.
-  #   * frontend/playwright.config.js uses a webServer block that only needs the Vite
-  #     dev server (`npm run dev` -> 127.0.0.1:8173); the component code's default
-  #     API_BASE (http://localhost:3456) is never actually reached because route
-  #     interception happens in the browser before the request leaves.
-  # The suite is therefore run standalone against the mocked API.
-  build-and-e2e:
-    name: Build and Playwright e2e (Node 24)
+  typecheck:
+    name: Typecheck and mock-coverage audit (Node 24)
     runs-on: ubuntu-latest
-    # why: browser download + vite build + the long mocked navigation spec; 30 minutes
-    # gives headroom on a cold cache while bounding a hung run.
-    timeout-minutes: 30
+    # why: the whole point of this job is a sub-minute pre-merge signal.
+    # A warm node_modules cache skips the install entirely; a miss is covered
+    # by the npm cache setup-node keeps. The timeout is tight so a hung run
+    # is killed quickly instead of burning runner minutes.
+    timeout-minutes: 5
 
     defaults:
       run:
@@ -46,31 +45,52 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          # why: Node 24 is the current Active LTS (until 2028-04) and matches the
-          # node:24-alpine base used by frontend/Dockerfile, so CI builds on the same
-          # major as the shipped runtime. GitHub's own runners execute JavaScript
-          # actions on Node 24 now, so 24 is also the consistent target for tooling.
+          # why: Node 24 is the current Active LTS (until 2028-04) and matches
+          # the node:24-alpine base used by frontend/Dockerfile, so CI checks
+          # on the same major as the shipped runtime.
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Restore node_modules
+        # why: `npm ci` is the slowest possible step in this job (~40-70s cold
+        # on the runner's network). The tree is a pure function of the lockfile,
+        # so keying the installed tree on its hash makes the common run
+        # (lockfile unchanged) skip the install completely. Any action in this
+        # repo runs on Node 24, so cache@v6 (node24) is the matching major.
+        id: node-modules
+        uses: actions/cache@v6
+        with:
+          path: frontend/node_modules
+          key: node-modules-${{ runner.os }}-node24-${{ hashFiles('frontend/package-lock.json') }}
+
       - name: Install dependencies
-        run: npm ci
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        env:
+          # why: @playwright/test's install script fetches browser binaries.
+          # This gate never launches a browser -- frontend-e2e.yml installs
+          # chromium itself -- so the download is skipped to keep the install
+          # inside the time budget.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: npm ci --no-audit --no-fund
 
       - name: Typecheck TypeScript modules
-        # The ratchet: .ts modules are strict-checked; .js legacy is not (yet).
+        # The ratchet is complete: every module under frontend/src is .ts/.tsx
+        # and all of it is checked under `strict` + `noUnusedLocals`. A
+        # payload-shape drift between the backend and the typed interfaces in
+        # frontend/src/types/api.ts fails here in seconds instead of surfacing
+        # as an `undefined%` in production or an e2e surprise ten minutes in.
         run: npm run typecheck
 
       - name: Every frontend endpoint is answered by the e2e mock
-        # Runs before Playwright on purpose. An endpoint the frontend calls and
-        # frontend/tests/apiMocks.js does not cover falls through to the mock's
-        # deliberate "unknown GET path: answer 404, as the real API does" branch,
-        # and because the spec fails on any console error the test dies at
-        # whatever assertion was executing when the query retried -- not at the
-        # thing that is actually missing. That is how an unmocked
-        # /api/v1/data-sources/disclosure presented as a create-source form that
-        # would not close, with the button still disabled after a 201.
-        # This names the endpoint instead. No browser, no daemon, ~0.2s.
+        # Runs in every gate, before any browser exists anywhere. An endpoint
+        # the frontend calls and frontend/tests/apiMocks.js does not cover
+        # falls through to the mock's deliberate "unknown GET path: answer 404,
+        # as the real API does" branch, and because the e2e spec fails on any
+        # console error the nightly suite would die at whatever assertion was
+        # executing when the query retried -- not at the thing that is actually
+        # missing. This names the endpoint instead. No browser, no daemon,
+        # ~0.2s.
         # why: the job defaults to working-directory frontend, but the check
         # lives at the repository root (backend/tests/test_e2e_api_coverage.py
         # and the workflows README reference that path), so this one step runs
@@ -78,34 +98,3 @@ jobs:
         # location, not the cwd.
         working-directory: .
         run: node scripts/check_e2e_api_coverage.mjs
-
-      - name: Build production bundle
-        run: npm run build
-
-      - name: Install Playwright browser and system dependencies
-        # why: --with-deps pulls the OS libraries chromium needs on the bare
-        # ubuntu-latest runner. The `pretest` hook (scripts/ensure-playwright.mjs) also
-        # runs `npx playwright install chromium`, which becomes a fast no-op because the
-        # browser is already present.
-        run: npx playwright install --with-deps chromium
-
-      - name: Run Playwright end-to-end suite
-        env:
-          # why: playwright.config.js sets reuseExistingServer = !process.env.CI, so CI
-          # must be truthy for Playwright to own the Vite webServer lifecycle.
-          CI: "true"
-        # why: `npm test` runs the documented entry point (pretest browser check +
-        # `playwright test`).
-        run: npm test
-
-      - name: Upload Playwright artifacts on failure
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: playwright-artifacts
-          # note: paths are resolved from the repo root, not the job's working-directory.
-          path: |
-            frontend/test-results/
-            frontend/playwright-report/
-          if-no-files-found: ignore
-          retention-days: 7

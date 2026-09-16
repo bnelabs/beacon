@@ -3,13 +3,20 @@ import { useFocusTrap } from '../hooks/useFocusTrap'
 import PageContainer from '../components/ui/PageContainer'
 import Card, { CardHeader, CardTitle, CardContent, CardFooter } from '../components/ui/Card'
 import Button from '../components/ui/Button'
-import Badge from '../components/ui/Badge'
+import Badge, { type BadgeVariant } from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import { useModels, useModel } from '../hooks/useApi'
 import { useRouter } from '../store/useRouter'
+import type { EntityId, Model, ModelResultMetrics, ScenarioResult } from '../types/api'
 
-function ModelActionsMenu({ onEdit, onDuplicate, onDelete }) {
+interface ModelActionsMenuProps {
+  onEdit?: () => void
+  onDuplicate?: () => void
+  onDelete?: () => void
+}
+
+function ModelActionsMenu({ onEdit, onDuplicate, onDelete }: ModelActionsMenuProps) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -30,7 +37,13 @@ function ModelActionsMenu({ onEdit, onDuplicate, onDelete }) {
   )
 }
 
-function TrainModelModal({ isOpen, onClose, model }) {
+interface TrainModelModalProps {
+  isOpen: boolean
+  onClose: () => void
+  model?: Model | null
+}
+
+function TrainModelModal({ isOpen, onClose, model }: TrainModelModalProps) {
   if (!isOpen || !model) return null
 
   return (
@@ -79,19 +92,25 @@ function TrainModelModal({ isOpen, onClose, model }) {
   )
 }
 
-function ModelDetailsDrawer({ model, onClose, onLaunch }) {
-  const drawerRef = useRef(null)
+interface ModelDetailsDrawerProps {
+  model?: Model | null
+  onClose: () => void
+  onLaunch?: (model: Model | null, scenario: ScenarioResult | null) => void
+}
+
+function ModelDetailsDrawer({ model, onClose, onLaunch }: ModelDetailsDrawerProps) {
+  const drawerRef = useRef<HTMLDivElement>(null)
   // Above the early returns: the trap must engage and release in the same
   // order on every render, including the render where the drawer closes.
   useFocusTrap(drawerRef, Boolean(model), onClose)
   const [scenarioName, setScenarioName] = useState('')
   const [horizonDays, setHorizonDays] = useState(30)
-  const [adjustments, setAdjustments] = useState({})
+  const [adjustments, setAdjustments] = useState<Record<string, number>>({})
   const [scenarioLoading, setScenarioLoading] = useState(false)
-  const [scenarioError, setScenarioError] = useState(null)
-  const [scenarioResult, setScenarioResult] = useState(null)
+  const [scenarioError, setScenarioError] = useState<string | null>(null)
+  const [scenarioResult, setScenarioResult] = useState<ScenarioResult | null>(null)
 
-  const availableSources = useMemo(() => {
+  const availableSources = useMemo<string[]>(() => {
     if (!model) {
       return []
     }
@@ -99,7 +118,7 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
     if (perSource && typeof perSource === 'object') {
       return Object.keys(perSource)
     }
-    const metrics = model.metrics || {}
+    const metrics: ModelResultMetrics = model.metrics || {}
     if (metrics.per_source_metrics && typeof metrics.per_source_metrics === 'object') {
       return Object.keys(metrics.per_source_metrics)
     }
@@ -114,11 +133,13 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
     setScenarioLoading(false)
     setScenarioError(null)
     setScenarioResult(null)
+    // The reset intentionally keys on the model id only: re-opening the same
+    // model must not clobber an in-progress scenario session.
   }, [model?.model_id])
 
   if (!model) return null
 
-  const handleAdjustmentChange = (source, value) => {
+  const handleAdjustmentChange = (source: string, value: number) => {
     setAdjustments((prev) => ({ ...prev, [source]: value }))
   }
 
@@ -145,21 +166,27 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
         body: JSON.stringify(payload),
       })
       if (!response.ok) {
-        const err = await response.json().catch(() => ({}))
-        const message = err?.detail?.user_friendly || err?.detail || response.statusText
+        const err = (await response.json().catch(() => ({}))) as {
+          detail?: { user_friendly?: string } | string
+        }
+        const detail = err?.detail
+        const message =
+          (typeof detail === 'object' && detail !== null && detail.user_friendly) ||
+          (typeof detail === 'string' && detail) ||
+          response.statusText
         throw new Error(message)
       }
-      const data = await response.json()
+      const data = (await response.json()) as ScenarioResult
       setScenarioResult(data)
     } catch (error) {
-      setScenarioError(error.message || 'Failed to run scenario.')
+      setScenarioError(error instanceof Error ? error.message : 'Failed to run scenario.')
     } finally {
       setScenarioLoading(false)
     }
   }
 
   return (
-    <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={model.name} className="fixed inset-0 z-40 flex justify-end">
+    <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={model.name ?? undefined} className="fixed inset-0 z-40 flex justify-end">
       <div className="absolute inset-0 bg-bne-ink/25" onClick={onClose} />
       <Card className="relative z-50 w-full max-w-xl h-full overflow-y-auto shadow-2xl" as="div">
         <CardHeader className="flex items-center justify-between">
@@ -254,7 +281,7 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
                   <div>
                     <p className="text-sm font-semibold text-bne-ink">{scenarioResult.name}</p>
                     <p className="text-xs text-bne-muted">
-                      Avg risk score: {scenarioResult.summary?.avg_risk_score?.toFixed?.(4) ?? '0.0000'} · Sources: {scenarioResult.summary?.num_series ?? 0}
+                      Avg risk score: {scenarioResult.summary?.avg_risk_score?.toFixed(4) ?? '0.0000'} · Sources: {scenarioResult.summary?.num_series ?? 0}
                     </p>
                   </div>
                   <Badge variant="primary" size="sm">Scenario</Badge>
@@ -269,11 +296,11 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {scenarioResult.predictions.map((item) => (
-                        <tr key={item.source} className="border-t border-bne-line">
+                      {(scenarioResult.predictions ?? []).map((item) => (
+                        <tr key={String(item.source)} className="border-t border-bne-line">
                           <td className="px-3 py-2 font-medium text-bne-ink">{item.source}</td>
-                          <td className="px-3 py-2 font-mono text-bne-ink">{item.prediction?.toFixed?.(4) ?? '—'}</td>
-                          <td className="px-3 py-2 font-mono text-bne-ink">{item.risk_score?.toFixed?.(4) ?? '—'}</td>
+                          <td className="px-3 py-2 font-mono text-bne-ink">{item.prediction?.toFixed(4) ?? '—'}</td>
+                          <td className="px-3 py-2 font-mono text-bne-ink">{item.risk_score?.toFixed(4) ?? '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -329,8 +356,15 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }) {
   )
 }
 
-function ModelCard({ model, onTrain, onViewDetails, onShowMenu }) {
-  const statusVariants = {
+interface ModelCardProps {
+  model: Model
+  onTrain: () => void
+  onViewDetails: () => void
+  onShowMenu?: (action: string, model: Model) => void
+}
+
+function ModelCard({ model, onTrain, onViewDetails, onShowMenu }: ModelCardProps) {
+  const statusVariants: Record<string, BadgeVariant> = {
     ready: 'success',
     training: 'primary',
     failed: 'danger',
@@ -345,7 +379,7 @@ function ModelCard({ model, onTrain, onViewDetails, onShowMenu }) {
             <CardTitle>{model.name}</CardTitle>
             <p className="text-sm text-bne-muted mt-1">{model.description}</p>
           </div>
-          <Badge variant={statusVariants[model.status] || 'default'}>
+          <Badge variant={statusVariants[model.status ?? ''] || 'default'}>
             {model.status}
           </Badge>
         </div>
@@ -397,7 +431,12 @@ function ModelCard({ model, onTrain, onViewDetails, onShowMenu }) {
   )
 }
 
-function NewModelModal({ isOpen, onClose }) {
+interface NewModelModalProps {
+  isOpen: boolean
+  onClose: () => void
+}
+
+function NewModelModal({ isOpen, onClose }: NewModelModalProps) {
   if (!isOpen) return null
 
   return (
@@ -410,8 +449,8 @@ function NewModelModal({ isOpen, onClose }) {
               onClick={onClose}
               className="p-2 hover:bg-bne-paper-dim rounded-lg transition-colors"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
@@ -515,29 +554,32 @@ function NewModelModal({ isOpen, onClose }) {
   )
 }
 
+interface MenuAction {
+  action: string
+  model: Model
+}
+
 export default function Models() {
   const [showNewModel, setShowNewModel] = useState(false)
   const [filter, setFilter] = useState('all')
-  const [selectedModelId, setSelectedModelId] = useState(null)
-  const [trainModelId, setTrainModelId] = useState(null)
-  const [menuAction, setMenuAction] = useState(null)
-  const [consumedRouteSignature, setConsumedRouteSignature] = useState(null)
+  const [selectedModelId, setSelectedModelId] = useState<EntityId | null>(null)
+  const [trainModelId, setTrainModelId] = useState<EntityId | null>(null)
+  const [menuAction, setMenuAction] = useState<MenuAction | null>(null)
+  const [consumedRouteSignature, setConsumedRouteSignature] = useState<string | null>(null)
   const { data: models, isLoading, error, refetch } = useModels()
   const { data: modelDetails } = useModel(selectedModelId)
   const { data: trainTarget } = useModel(trainModelId)
   const navigate = useRouter((state) => state.navigate)
   const routerParams = useRouter((state) => state.params)
 
-  const filteredModels = models?.filter(model => {
+  const filteredModels = models?.filter((model) => {
     if (filter === 'all') return true
     return model.status === filter
   }) || []
 
   useEffect(() => {
     if (!routerParams?.modelId) return
-    const parsedModelId = typeof routerParams.modelId === 'number'
-      ? routerParams.modelId
-      : Number(routerParams.modelId)
+    const parsedModelId = Number(routerParams.modelId)
     if (!Number.isFinite(parsedModelId)) return
 
     const signature = `${parsedModelId}:${routerParams?.ts ?? 'na'}:${routerParams?.intent ?? 'na'}`
@@ -598,21 +640,21 @@ export default function Models() {
               size="sm"
               onClick={() => setFilter('ready')}
             >
-              Ready ({models?.filter(m => m.status === 'ready').length || 0})
+              Ready ({models?.filter((m) => m.status === 'ready').length || 0})
             </Button>
             <Button
               variant={filter === 'training' ? 'primary' : 'ghost'}
               size="sm"
               onClick={() => setFilter('training')}
             >
-              Training ({models?.filter(m => m.status === 'training').length || 0})
+              Training ({models?.filter((m) => m.status === 'training').length || 0})
             </Button>
             <Button
               variant={filter === 'draft' ? 'primary' : 'ghost'}
               size="sm"
               onClick={() => setFilter('draft')}
             >
-              Draft ({models?.filter(m => m.status === 'draft').length || 0})
+              Draft ({models?.filter((m) => m.status === 'draft').length || 0})
             </Button>
           </div>
 
@@ -624,11 +666,11 @@ export default function Models() {
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
+                  strokeWidth={2}
                 >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    strokeWidth={2}
                     d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
                   />
                 </svg>
@@ -649,7 +691,7 @@ export default function Models() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredModels.map((model) => (
                 <ModelCard
-                  key={model.model_id}
+                  key={String(model.model_id)}
                   model={model}
                   onTrain={() => setTrainModelId(model.model_id)}
                   onViewDetails={() => setSelectedModelId(model.model_id)}
@@ -670,9 +712,9 @@ export default function Models() {
           const modelId = model.model_id || model.id
           if (modelId) {
             navigate('results', {
-              modelId,
-              scenarioId: scenario?.scenario_id,
-              scenarioName: scenario?.name,
+              modelId: String(modelId),
+              scenarioId: String(scenario?.scenario_id),
+              scenarioName: String(scenario?.name),
             })
           }
           setSelectedModelId(null)

@@ -1,17 +1,47 @@
 # CI/CD workflows
 
-This directory contains the GitHub Actions automation for BEACON: five
+This directory contains the GitHub Actions automation for BEACON: seven
 workflows, Dependabot configuration, and a pull-request template.
+
+The design rule is a **two-tier split**: everything that runs in front of a
+push or pull request must finish in **under a minute**, and everything that
+takes longer runs nightly and on demand. A pre-merge gate that takes ten
+minutes is a gate people stop waiting for; a nightly deep run surfaces the
+same regression at most one day later — and immediately, by hand, for any
+change that deserves it (`gh workflow run <file> --ref <branch>`).
+
+**Tier 1 — pre-merge gates (every push to `main`, every PR; each < 1 min):**
+
+| File | Purpose | Budget |
+| --- | --- | --- |
+| `backend-ci.yml` | Syntax gate (`compileall`, stdlib only) + the compose/Dockerfile validator (`validate_compose.py`, PyYAML only). | seconds |
+| `frontend-ci.yml` | Strict `tsc --noEmit` over the all-TypeScript `frontend/src` + the e2e mock-coverage audit. `node_modules` is cached by lockfile hash; Playwright's browser download is skipped (no browser runs here). | ~30s warm |
+| `versioning-ci.yml` | Runs `scripts/check_versioning.py`: VERSION is strict semver, `frontend/package.json` and `backend.__version__` agree with it, and the top changelog block is `[Unreleased]` or the current version. | seconds |
+
+**Tier 2 — deep validation (nightly `schedule` + `workflow_dispatch`):**
+
+| File | Purpose | When |
+| --- | --- | --- |
+| `backend-tests.yml` | The full backend leg: uv-installed pinned stack + CPU torch, pytest with coverage, the live-migration PostgreSQL service, the generated-API-docs check, offline migration render, advisory ruff. | nightly 03:47 UTC + manual |
+| `frontend-e2e.yml` | Production `vite build` + the fully mocked Playwright suite on chromium, artifacts on failure. | nightly 03:26 UTC + manual |
+| `security.yml` | Advisory dependency audits: `pip-audit` for `backend/requirements.txt` and `npm audit` for `frontend/`. Never blocked a merge (every step is `continue-on-error`), so it no longer queues in front of one. | weekly (Mondays 06:17 UTC) + manual |
+
+**Manual only:**
 
 | File | Purpose | Triggers |
 | --- | --- | --- |
-| `backend-ci.yml` | Compile and test the FastAPI/Celery/PyTorch backend on Python 3.12 and upload a coverage report. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
-| `frontend-ci.yml` | Build the React/Vite app on Node 24 and run the Playwright end-to-end suite. | `push` to `main`, every `pull_request`, manual `workflow_dispatch`. |
-| `docker-backend.yml` | Validate every compose file and build the backend CPU image. **Manual only.** | `workflow_dispatch` (*Actions → Docker backend image → Run workflow*). |
-| `docker-frontend.yml` | Build the frontend image. **Manual only.** | `workflow_dispatch` (*Actions → Docker frontend image → Run workflow*). |
-| `security.yml` | Advisory dependency audits: `pip-audit` for `backend/requirements.txt` and `npm audit` for `frontend/`. Never blocks a merge. | `push` to `main`, every `pull_request`, weekly `schedule` (Mondays 06:17 UTC), manual `workflow_dispatch`. |
-| `versioning-ci.yml` | Runs `scripts/check_versioning.py`: VERSION is strict semver, `frontend/package.json` and `backend.__version__` agree with it, and the top changelog block is `[Unreleased]` or the current version. | `push` to `main`, every `pull_request`. |
+| `docker-backend.yml` | Validate every compose file and build the backend CPU image. | `workflow_dispatch` (*Actions → Docker backend image → Run workflow*). |
+| `docker-frontend.yml` | Build the frontend image. | `workflow_dispatch` (*Actions → Docker frontend image → Run workflow*). |
+
+| File | Purpose | Triggers |
+| --- | --- | --- |
 | `../dependabot.yml` | Version-update PRs for `github-actions`; security-update PRs for `pip` and `npm`. No `docker` entry. | GitHub's scheduler (see the policy below). |
+
+Run the deep workflows by hand before merging the changes they exist for:
+`backend-tests.yml` for anything touching requirements, models, migrations,
+the pipeline or the API surface; `frontend-e2e.yml` for anything touching
+routing, the API client, or a flow the mocked suite walks; the docker
+workflows for any Dockerfile or base-image change.
 
 ## Concurrency
 
@@ -25,7 +55,15 @@ Every workflow uses a per-ref `concurrency` group, but cancellation is
   concurrency group as a `push`, so unconditional cancellation could discard the
   only real run for a commit.
 
-## Backend CI (`backend-ci.yml`)
+## Backend CI (`backend-ci.yml`) and deep tests (`backend-tests.yml`)
+
+`backend-ci.yml` is the pre-merge gate and runs two checks that need no
+dependency tree: `python -m compileall -q backend` (a syntax error fails in
+seconds, on the stock interpreter) and `python scripts/validate_compose.py`
+(after `pip install pyyaml` — its only third-party import). Everything below
+describes `backend-tests.yml`, which carries the full leg nightly and on
+demand; installing the pinned stack (CPU torch included) is the single
+biggest cost in CI and can never fit a sub-minute budget.
 
 - **Python 3.12** — the same minor version as `backend/Dockerfile.cpu`
   (`FROM python:3.12-slim`) and the interpreter installed by `backend/Dockerfile`.
@@ -49,19 +87,29 @@ Every workflow uses a per-ref `concurrency` group, but cancellation is
   "test" was `alembic upgrade head --sql`, which cannot detect an ordering defect:
   `baseline_core_001` renders as a deliberate no-op offline. That is how a release
   shipped whose root migration altered a table created five revisions later.
-- **Steps:** `python -m compileall -q backend` (fast syntax gate) →
-  `python scripts/generate_api_docs.py --check` (the generated endpoint inventory
-  matches the app) → `alembic upgrade head --sql` (render check only) →
-  `python scripts/validate_compose.py` (the merged compose stack and every
-  Dockerfile COPY source, no daemon required) → `python -m pytest` with coverage →
-  upload the `backend-coverage` artifact (`coverage.xml`, `htmlcov/`) → an advisory
-  `ruff` check that reports real defects without blocking.
+- **Steps (deep):** uv + CPU torch + requirements →
+  `python -m compileall -q backend` (repeated so a nightly failure is
+  self-contained) → `python scripts/generate_api_docs.py --check` (the
+  generated endpoint inventory matches the app) → `alembic upgrade head --sql`
+  (render check only) → `python -m pytest` with coverage → upload the
+  `backend-coverage` artifact (`coverage.xml`, `htmlcov/`) → an advisory
+  `ruff` check that reports real defects without blocking. The compose
+  validator stays in the fast gate, where it costs ~100ms.
 - The target and coverage flags are passed explicitly as well as living in
   `pytest.ini` (which uses the correct `[pytest]` header and sets
   `testpaths = backend/tests`). Keeping them in the workflow makes the invocation
   self-describing and immune to config drift.
 
-## Frontend CI (`frontend-ci.yml`)
+## Frontend CI (`frontend-ci.yml`) and deep e2e (`frontend-e2e.yml`)
+
+`frontend-ci.yml` is the pre-merge gate: install once (a `node_modules`
+cache keyed on the lockfile hash skips it entirely on the common run;
+`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` keeps even the cold install inside the
+budget), then `npm run typecheck` — which now checks **the whole app**: the
+JS→TS migration is complete, every module under `frontend/src` is `.ts`/`.tsx`
+under `strict` + `noUnusedLocals` — and `node
+scripts/check_e2e_api_coverage.mjs`. The build and the browser suite below
+live in `frontend-e2e.yml` (nightly + dispatch).
 
 - **Node 24** (Active LTS until 2028-04), matching the `node:24-alpine` base in
   `frontend/Dockerfile`.
@@ -72,14 +120,15 @@ Every workflow uses a per-ref `concurrency` group, but cancellation is
   forced onto a newer runtime and the Node 20 deprecation warning does not appear.
   When bumping an action, check its `action.yml` for `using: node24` rather than
   assuming the highest tag is current.
-- **Steps:** `npm ci` → `npm run typecheck` → `node scripts/check_e2e_api_coverage.mjs`
-  → `npm run build` → `npx playwright install --with-deps chromium` → `npm test` →
-  upload Playwright traces/results only on failure.
+- **Steps (deep):** `npm ci` → `npm run build` →
+  `npx playwright install --with-deps chromium` → `npm test` → upload
+  Playwright traces/results only on failure.
 - **No live backend is started.** The Playwright suite is fully mocked:
   `frontend/tests/full-frontend.spec.js` installs `frontend/tests/apiMocks.js`, which
   intercepts every `**/api/**` request via `page.route(...)`. Playwright's `webServer`
   block only starts the Vite dev server on `127.0.0.1:8173`.
-- **The mock's coverage is itself checked, before the browser starts.** The mock
+- **The mock's coverage is itself checked in the fast gate, before any
+  browser exists anywhere.** The mock
   answers an unknown GET with a deliberate 404 ("as the real API does" — answering
   200 with an empty object once let a wrong URL pass as a successful empty result),
   and the spec fails the test on *any* console error. So an endpoint the frontend
@@ -98,8 +147,8 @@ Every workflow uses a per-ref `concurrency` group, but cancellation is
 "build the real image" button, not a merge gate. No push, pull request or schedule
 can start them, so no wait they create can land in front of ordinary work.
 
-They exist because `backend-ci.yml` and `frontend-ci.yml` test the code on the
-*runner's* interpreter and Node install, and never build the images. That gap is
+They exist because the automated workflows test the code on the *runner's*
+interpreter and Node install, and never build the images. That gap is
 not theoretical — both halves of it have already bitten this repository:
 
 - A Dependabot PR proposed `python:3.14-slim` for `backend/Dockerfile.cpu`,
@@ -128,12 +177,14 @@ Three things now cover most of that gap without a build:
   No daemon, ~0.1s. `backend/tests/test_compose_stack.py` runs it in the suite
   too, and also runs it against a deliberately broken copy of the stack to prove
   it can fail.
-- Backend CI installs the *same* `backend/requirements*.txt` on the *same* Python
-  3.12 interpreter, so an uninstallable pin still fails there in ~2 minutes, and
-  a Python-version bump that cannot resolve is caught the same way.
-- Frontend CI runs `npm ci && npm run build` on Node 24, which catches a broken
-  dependency graph — but **not** a peer-dependency gap in the image, because that
-  only appears when the image resolves its own tree.
+- The nightly `backend-tests.yml` installs the *same* `backend/requirements*.txt`
+  on the *same* Python 3.12 interpreter, so an uninstallable pin still fails
+  there in ~2 minutes, and a Python-version bump that cannot resolve is caught
+  the same way.
+- The nightly `frontend-e2e.yml` runs `npm ci && npm run build` on Node 24,
+  which catches a broken dependency graph — but **not** a peer-dependency gap
+  in the image, because that only appears when the image resolves its own
+  tree.
 
 What is still only found by running the workflow: a broken base-image tag, and
 anything about the image that only exists once built. Two changes make that
@@ -163,17 +214,27 @@ gh workflow run docker-frontend.yml --ref main
 
 Measured improvements, in order of impact:
 
-- **Coverage is off for pull requests.** Instrumentation slows this suite by
-  roughly **3.5x** (measured 0.63s → 2.19s on the fastest modules). PRs now run
-  plain pytest for a fast pass/fail signal; coverage is produced on `main` and
-  on manual dispatches, where the report and artifact are actually used.
+- **The pre-merge path is static-only and finishes in under a minute.** The
+  three gate workflows (syntax + compose validation, typecheck + mock-coverage
+  audit, versioning) run no browser, install no torch, and build no bundle;
+  the multi-minute legs moved to nightly + dispatch workflows. The trade is
+  explicit: a runtime regression that only a browser or a pytest run can see
+  is caught at most one day later — or immediately, by running
+  `backend-tests.yml` / `frontend-e2e.yml` on the branch before merge.
+- **`node_modules` is cached by lockfile hash** in the frontend gate, so the
+  common run skips `npm ci` entirely (~40-70s saved), and the cold run skips
+  Playwright's ~150MB browser download (`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`).
+- **Coverage is produced only in the nightly/dispatch backend workflow.**
+  Instrumentation slows the suite by roughly **3.5x** (measured 0.63s → 2.19s
+  on the fastest modules), and the report and artifact are consumed there,
+  not on a PR.
 - **Backend installs use `uv`**, not pip: the CPU torch install went from 23s to
   **3s** and the project dependencies from 39s to **4s** (62s → 7s total). The
   uv cache is keyed on both requirements files.
-- **A requirements change never needs a Docker image build.** Backend CI
-  installs the same files on the same Python 3.12 interpreter, so an
-  uninstallable pin is caught in ~2 minutes without paying for a torch image
-  build.
+- **A requirements change never needs a Docker image build.** The nightly
+  `backend-tests.yml` installs the same files on the same Python 3.12
+  interpreter, so an uninstallable pin is caught there in ~2 minutes without
+  paying for a torch image build.
 - **No image build runs automatically at all.** `docker-backend.yml` and
   `docker-frontend.yml` are `workflow_dispatch`-only, so a push or a pull request
   never pays for one. The trade is explicit: a Dockerfile or base-image change is
@@ -190,6 +251,10 @@ execution that trains a model, plus FastAPI application start-up.
 
 ## Security audit (`security.yml`)
 
+- Weekly (Mondays 06:17 UTC) and on dispatch only. Every step was already
+  `continue-on-error`, so it never gated a merge — it only queued in front of
+  one. A newly published CVE now surfaces within the week, which is the
+  cadence an advisory signal needs.
 - `pip-audit -r backend/requirements.txt` and `npm audit --audit-level=high` in
   `frontend/`.
 - The `pip-audit` version is read from `backend/requirements-dev.txt` rather than
@@ -262,7 +327,8 @@ dependency_file_not_resolvable {message: "Error while updating peer dependency."
 
 while walking `@tanstack/react-query`'s peers through deck.gl's large peer set.
 A job that fails on every run and produces nothing is worse than no job, and
-Frontend CI catches real breakage. The image-build gap is covered on demand:
+the frontend gate (typecheck) plus nightly e2e (build + suite) catch real
+breakage. The image-build gap is covered on demand:
 `docker-frontend.yml` is the only thing that resolves peers *inside the image*, so
 run it manually when a frontend dependency changes.
 
@@ -288,6 +354,18 @@ vulnerability coverage. To re-enable routine bumps for an ecosystem, set its
 `ignore` list.
 
 ## Run this locally before opening a PR
+
+The fast gates (what CI will run on the PR):
+
+```bash
+python -m compileall -q backend                # backend syntax gate
+python scripts/validate_compose.py             # needs only PyYAML
+python scripts/check_versioning.py             # version policy
+cd frontend && npm run typecheck               # strict TS over all of src/
+node ../scripts/check_e2e_api_coverage.mjs     # e2e mock coverage
+```
+
+The deep runs (nightly in CI; run these by hand for the change you made):
 
 **Backend** (from the repository root):
 
