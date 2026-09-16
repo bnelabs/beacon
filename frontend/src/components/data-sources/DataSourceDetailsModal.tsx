@@ -20,10 +20,9 @@ export default function DataSourceDetailsModal({
   preselectedDatasetIds = [],
   onApplySelection
 }: DataSourceDetailsModalProps) {
-  const sourceId = source?.id || source?.source_id
+  const sourceId = source?.id
   const [searchTerm, setSearchTerm] = useState('')
   const [regionFilter, setRegionFilter] = useState('all')
-  const [countryFilter, setCountryFilter] = useState('all')
   const [previewDataset, setPreviewDataset] = useState<CatalogueItem | null>(null)
 
   const filters = useMemo<CatalogueFilters>(() => {
@@ -49,7 +48,6 @@ export default function DataSourceDetailsModal({
     }
     setSearchTerm('')
     setRegionFilter('all')
-    setCountryFilter('all')
     setPreviewDataset(null)
     setSelectedIds(new Set(preselectedDatasetIds))
   }, [isOpen, preselectedDatasetIds])
@@ -99,17 +97,6 @@ export default function DataSourceDetailsModal({
     return Array.from(unique.values()).sort()
   }, [catalogueItems])
 
-  const countries = useMemo<string[]>(() => {
-    if (!catalogueItems) return []
-    const unique = new Set<string>()
-    catalogueItems.forEach((item) => {
-      if (item.country_code || item.country) {
-        unique.add((item.country_code || item.country) as string)
-      }
-    })
-    return Array.from(unique.values()).sort()
-  }, [catalogueItems])
-
   const filteredItems = useMemo<CatalogueItem[]>(() => {
     if (!catalogueItems) return []
     return catalogueItems.filter((item) => {
@@ -117,14 +104,15 @@ export default function DataSourceDetailsModal({
         || item.code?.toLowerCase().includes(searchTerm.toLowerCase())
         || item.name?.toLowerCase().includes(searchTerm.toLowerCase())
         || item.category?.toLowerCase().includes(searchTerm.toLowerCase())
+      // The country filter that used to sit here read item.country_code /
+      // item.country — fields the catalogue schema does not send, so its
+      // dropdown could only ever contain "All countries". region is the real
+      // geography on a catalogue row, and it has its own filter above.
       const matchesRegion = regionFilter === 'all'
         || (item.region && item.region === regionFilter)
-      const countryValue = item.country_code || item.country
-      const matchesCountry = countryFilter === 'all'
-        || (countryValue && countryValue === countryFilter)
-      return Boolean(matchesSearch && matchesRegion && matchesCountry)
+      return Boolean(matchesSearch && matchesRegion)
     })
-  }, [catalogueItems, searchTerm, regionFilter, countryFilter])
+  }, [catalogueItems, searchTerm, regionFilter])
 
   const datasetSummary = useMemo(() => {
     const total = filteredItems.length
@@ -260,23 +248,6 @@ export default function DataSourceDetailsModal({
                     ))}
                   </select>
                 </div>
-                <div>
-                  <label className="block text-xs uppercase tracking-wide text-bne-muted mb-1">
-                    Country
-                  </label>
-                  <select
-                    value={countryFilter}
-                    onChange={(event) => setCountryFilter(event.target.value)}
-                    className="w-full px-3 py-2 border border-bne-line rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-pine"
-                  >
-                    <option value="all">All countries</option>
-                    {countries.map((country) => (
-                      <option key={country} value={country}>
-                        {country}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <div className="bg-bne-paper/60 border border-bne-line rounded-lg p-3">
                   <p className="text-xs uppercase tracking-wide text-bne-muted mb-1">Quick summary</p>
                   <p className="text-lg font-semibold text-bne-ink">{datasetSummary.total}</p>
@@ -398,21 +369,21 @@ export default function DataSourceDetailsModal({
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 text-sm">
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-bne-muted">Country</p>
+                      <p className="text-xs uppercase tracking-wide text-bne-muted">Region</p>
                       <p className="font-medium text-bne-ink mt-1">
-                        {previewDataset.country_code || previewDataset.country || 'Multiple'}
+                        {previewDataset.region?.replace(/_/g, ' ') || 'Global'}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-wide text-bne-muted">Frequency</p>
                       <p className="font-medium text-bne-ink mt-1">
-                        {previewDataset.frequency || previewDataset.update_frequency || 'Not provided'}
+                        {previewDataset.frequency || 'Not provided'}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-wide text-bne-muted">Latest coverage</p>
                       <p className="font-medium text-bne-ink mt-1">
-                        {previewDataset.last_updated || previewDataset.coverage_end || 'Unknown'}
+                        {previewDataset.last_data_update || previewDataset.updated_at || 'Unknown'}
                       </p>
                     </div>
                   </div>
@@ -421,16 +392,10 @@ export default function DataSourceDetailsModal({
                       {previewDataset.description}
                     </p>
                   )}
-                  {previewDataset.sample_metrics && (
-                    <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                      {Object.entries(previewDataset.sample_metrics).map(([key, value]) => (
-                        <div key={key} className="rounded-lg border border-bne-line bg-bne-card px-3 py-2">
-                          <p className="uppercase tracking-wide text-bne-muted">{key.replace(/_/g, ' ')}</p>
-                          <p className="text-sm font-semibold text-bne-ink mt-1">{value}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {/* The "sample metrics" grid that used to render here read
+                      previewDataset.sample_metrics — a field the catalogue
+                      schema does not send, so the branch was unreachable in
+                      production and only ever rendered for the mock. */}
                 </div>
               )}
             </>

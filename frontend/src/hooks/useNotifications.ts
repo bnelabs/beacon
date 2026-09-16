@@ -1,10 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchApi } from '../utils/apiClient'
-import type { Notification, NotificationId, NotificationsResponse } from '../types/api'
+import type { NotificationId, NotificationsResponse } from '../types/api'
 
-// The notification domain types live in types/api.ts; re-exported so existing
-// `import { type NotificationId } from '.../hooks/useNotifications'` keeps working.
-export type { Notification, NotificationId }
+// Dead-export note: useNotificationStats, useNotification,
+// useCreateNotification, useDismissNotification and useDeleteNotification
+// were removed (zero callers in src/ — NotificationBell's "dismiss" marks
+// read, which is what the backend's dismiss-vs-read split actually offers
+// the UI today). scripts/check_frontend_hook_reachability.mjs guards the
+// remaining set.
 
 /** Query filters for the notifications list endpoint. */
 export interface NotificationFilters {
@@ -46,47 +49,6 @@ export function useNotifications(filters: NotificationFilters = {}) {
 }
 
 /**
- * Hook to fetch notification stats
- */
-export function useNotificationStats() {
-  return useQuery({
-    queryKey: ['notifications', 'stats'],
-    queryFn: () => fetchApi<{ unread_count?: number | null; [key: string]: unknown }>('/v1/notifications/stats'),
-    staleTime: 10000,
-    refetchInterval: 30000
-  })
-}
-
-/**
- * Hook to get a single notification
- */
-export function useNotification(notificationId?: NotificationId) {
-  return useQuery({
-    queryKey: ['notifications', notificationId],
-    queryFn: () => fetchApi<Notification>(`/v1/notifications/${notificationId}`),
-    enabled: !!notificationId
-  })
-}
-
-/**
- * Hook to create a new notification
- */
-export function useCreateNotification() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (notification: unknown) =>
-      fetchApi('/v1/notifications', {
-        method: 'POST',
-        body: JSON.stringify(notification)
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] })
-    }
-  })
-}
-
-/**
  * Hook to mark a notification as read
  */
 export function useMarkNotificationAsRead() {
@@ -116,40 +78,6 @@ export function useMarkAllAsRead() {
         method: 'POST'
       })
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] })
-    }
-  })
-}
-
-/**
- * Hook to dismiss a notification
- */
-export function useDismissNotification() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (notificationId: NotificationId) =>
-      fetchApi(`/v1/notifications/${notificationId}/dismiss`, {
-        method: 'POST'
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] })
-    }
-  })
-}
-
-/**
- * Hook to delete a notification
- */
-export function useDeleteNotification() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (notificationId: NotificationId) =>
-      fetchApi(`/v1/notifications/${notificationId}`, {
-        method: 'DELETE'
-      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] })
     }

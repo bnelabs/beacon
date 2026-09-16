@@ -9,14 +9,16 @@ import ErrorMessage from '../components/ui/ErrorMessage'
 import { useModels, useModel } from '../hooks/useApi'
 import { useRouter } from '../store/useRouter'
 import JobCreationModal from '../components/jobs/JobCreationModal'
-import type { EntityId, Model, ModelResultMetrics, ScenarioResult } from '../types/api'
+import type { EntityId, ModelDetailData, ModelSummary, ScenarioResult } from '../types/api'
 
 interface TrainModelModalProps {
   isOpen: boolean
   onClose: () => void
   /** Hands off to the real training-job flow (JobCreationModal). */
   onContinue: () => void
-  model?: Model | null
+  /** The summary row the button was clicked on — the detail endpoint has no
+   *  `name`, so the title comes from the list. */
+  model?: ModelSummary | null
 }
 
 function TrainModelModal({ isOpen, onClose, onContinue, model }: TrainModelModalProps) {
@@ -58,13 +60,24 @@ function TrainModelModal({ isOpen, onClose, onContinue, model }: TrainModelModal
   )
 }
 
-interface ModelDetailsDrawerProps {
-  model?: Model | null
-  onClose: () => void
-  onLaunch?: (model: Model | null, scenario: ScenarioResult | null) => void
+/** Architecture name from the training parameters' config block, falling
+ *  back to the result blob's model_type — both are real outputs of the
+ *  training pipeline. There is no `architecture` field on the wire; the old
+ *  `'LSTM'` default asserted an architecture nobody reported. */
+function drawerArchitecture(model: ModelDetailData): string {
+  const config = model.parameters?.config as { model?: string | null } | undefined
+  return config?.model || model.result?.model_type || '—'
 }
 
-function ModelDetailsDrawer({ model, onClose, onLaunch }: ModelDetailsDrawerProps) {
+interface ModelDetailsDrawerProps {
+  model?: ModelDetailData | null
+  /** The catalogue name for the header; ModelDetail does not carry one. */
+  name?: string | null
+  onClose: () => void
+  onLaunch?: (model: ModelDetailData | null, scenario: ScenarioResult | null) => void
+}
+
+function ModelDetailsDrawer({ model, name, onClose, onLaunch }: ModelDetailsDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null)
   // Above the early returns: the trap must engage and release in the same
   // order on every render, including the render where the drawer closes.
@@ -80,13 +93,13 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }: ModelDetailsDrawerProp
     if (!model) {
       return []
     }
+    // Per-source metrics live in the training job's `result` blob; the
+    // detail's `metrics` object is the flat ModelMetrics extractor output
+    // (mae/rmse/r2/accuracy/best_val_loss) and never carried them — the old
+    // fallback read a field that does not exist.
     const perSource = model.result?.per_source_metrics
     if (perSource && typeof perSource === 'object') {
       return Object.keys(perSource)
-    }
-    const metrics: ModelResultMetrics = model.metrics || {}
-    if (metrics.per_source_metrics && typeof metrics.per_source_metrics === 'object') {
-      return Object.keys(metrics.per_source_metrics)
     }
     return []
   }, [model])
@@ -152,13 +165,16 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }: ModelDetailsDrawerProp
   }
 
   return (
-    <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={model.name ?? undefined} className="fixed inset-0 z-40 flex justify-end">
+    <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={name ?? `Model ${model.model_id}`} className="fixed inset-0 z-40 flex justify-end">
       <div className="absolute inset-0 bg-bne-ink/25" onClick={onClose} />
       <Card className="relative z-50 w-full max-w-xl h-full overflow-y-auto shadow-2xl" as="div">
         <CardHeader className="flex items-center justify-between">
           <div>
-            <CardTitle>{model.name}</CardTitle>
-            <p className="text-sm text-bne-muted mt-1">{model.description || 'No description provided'}</p>
+            <CardTitle>{name ?? `Model ${model.model_id}`}</CardTitle>
+            {/* ModelDetail carries no description; showing "No description
+                provided" for a field that cannot exist was inventing an
+                absence. The model type is the real subtitle. */}
+            <p className="text-sm text-bne-muted mt-1">{model.result?.model_type || 'Trained model'}</p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-bne-paper-dim rounded-lg">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -279,18 +295,21 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }: ModelDetailsDrawerProp
             <h4 className="text-sm font-semibold text-bne-ink mb-2">Overview</h4>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div><span className="text-bne-muted">Status</span><p className="font-medium text-bne-ink">{model.status}</p></div>
-              <div><span className="text-bne-muted">Architecture</span><p className="font-medium text-bne-ink">{model.architecture || 'LSTM'}</p></div>
-              <div><span className="text-bne-muted">Input Features</span><p className="font-medium text-bne-ink">{model.input_features || '—'}</p></div>
-              <div><span className="text-bne-muted">Prediction Steps</span><p className="font-medium text-bne-ink">{model.prediction_steps || '—'}</p></div>
-              <div><span className="text-bne-muted">Last Trained</span><p className="font-medium text-bne-ink">{model.last_trained ? new Date(model.last_trained).toLocaleString() : 'Never'}</p></div>
-              <div><span className="text-bne-muted">Accuracy</span><p className="font-medium text-bne-moss">{model.accuracy ? `${model.accuracy}%` : '—'}</p></div>
+              <div><span className="text-bne-muted">Architecture</span><p className="font-medium text-bne-ink">{drawerArchitecture(model)}</p></div>
+              <div><span className="text-bne-muted">Trained</span><p className="font-medium text-bne-ink">{(model.completed_at || model.created_at) ? new Date((model.completed_at || model.created_at) as string).toLocaleString() : '—'}</p></div>
+              <div><span className="text-bne-muted">R²</span><p className="font-medium text-bne-moss">{model.metrics?.r2 != null ? model.metrics.r2.toFixed(4) : model.result?.test_r2 != null ? model.result.test_r2.toFixed(4) : '—'}</p></div>
+              <div><span className="text-bne-muted">RMSE</span><p className="font-medium text-bne-ink">{model.metrics?.rmse != null ? model.metrics.rmse.toFixed(4) : model.result?.test_rmse != null ? model.result.test_rmse.toFixed(4) : '—'}</p></div>
+              <div><span className="text-bne-muted">Data Job</span><p className="font-medium text-bne-ink">{model.data_job_id != null ? `#${model.data_job_id}` : '—'}</p></div>
             </div>
           </section>
-          {model.hyperparameters && (
+          {model.parameters && (
             <section>
-              <h4 className="text-sm font-semibold text-bne-ink mb-2">Hyperparameters</h4>
+              {/* parameters IS the hyperparameter carrier: the training job's
+                  config block (model, epochs, sequence_length, learning rate,
+                  dropout) plus the data window it trained on. */}
+              <h4 className="text-sm font-semibold text-bne-ink mb-2">Training Parameters</h4>
               <pre className="bg-bne-paper/70 rounded-md p-4 text-xs text-bne-ink font-mono overflow-auto">
-                {JSON.stringify(model.hyperparameters, null, 2)}
+                {JSON.stringify(model.parameters, null, 2)}
               </pre>
             </section>
           )}
@@ -299,14 +318,6 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }: ModelDetailsDrawerProp
               <h4 className="text-sm font-semibold text-bne-ink mb-2">Performance Metrics</h4>
               <pre className="bg-bne-paper/70 rounded-md p-4 text-xs text-bne-ink font-mono overflow-auto">
                 {JSON.stringify(model.metrics, null, 2)}
-              </pre>
-            </section>
-          )}
-          {model.data_summary && (
-            <section>
-              <h4 className="text-sm font-semibold text-bne-ink mb-2">Data Summary</h4>
-              <pre className="bg-bne-paper/70 rounded-md p-4 text-xs text-bne-ink font-mono overflow-auto">
-                {JSON.stringify(model.data_summary, null, 2)}
               </pre>
             </section>
           )}
@@ -323,26 +334,34 @@ function ModelDetailsDrawer({ model, onClose, onLaunch }: ModelDetailsDrawerProp
 }
 
 interface ModelCardProps {
-  model: Model
+  model: ModelSummary
   onTrain: () => void
   onViewDetails: () => void
 }
 
 function ModelCard({ model, onTrain, onViewDetails }: ModelCardProps) {
   const statusVariants: Record<string, BadgeVariant> = {
+    completed: 'success',
     ready: 'success',
     training: 'primary',
     failed: 'danger',
     draft: 'default'
   }
 
+  // Every row below reads a field ModelSummary actually carries. The card
+  // used to render architecture/input_features/prediction_steps/accuracy/
+  // last_trained — none of which the list endpoint sends — with invented
+  // defaults ("LSTM", 12, 4) filling the gaps.
   return (
     <Card hover>
       <CardHeader>
         <div className="flex items-start justify-between">
           <div>
             <CardTitle>{model.name}</CardTitle>
-            <p className="text-sm text-bne-muted mt-1">{model.description}</p>
+            <p className="text-sm text-bne-muted mt-1">
+              {model.model_type ? model.model_type : 'model'}
+              {model.model_version ? ` · v${model.model_version}` : ''}
+            </p>
           </div>
           <Badge variant={statusVariants[model.status ?? ''] || 'default'}>
             {model.status}
@@ -353,27 +372,27 @@ function ModelCard({ model, onTrain, onViewDetails }: ModelCardProps) {
       <CardContent>
         <div className="space-y-3">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-bne-muted">Architecture</span>
-            <span className="font-medium text-bne-ink">{model.architecture || 'LSTM'}</span>
+            <span className="text-bne-muted">R²</span>
+            <span className="font-medium text-bne-ink">{model.metrics?.r2 != null ? model.metrics.r2.toFixed(4) : '—'}</span>
           </div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-bne-muted">Input Features</span>
-            <span className="font-medium text-bne-ink">{model.input_features || 12}</span>
+            <span className="text-bne-muted">RMSE</span>
+            <span className="font-medium text-bne-ink">{model.metrics?.rmse != null ? model.metrics.rmse.toFixed(4) : '—'}</span>
           </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-bne-muted">Prediction Steps</span>
-            <span className="font-medium text-bne-ink">{model.prediction_steps || 4}</span>
-          </div>
-          {model.accuracy && (
+          {model.metrics?.accuracy != null && (
             <div className="flex items-center justify-between text-sm">
               <span className="text-bne-muted">Accuracy</span>
-              <span className="font-medium text-bne-moss">{model.accuracy}%</span>
+              <span className="font-medium text-bne-moss">{model.metrics.accuracy}</span>
             </div>
           )}
           <div className="flex items-center justify-between text-sm">
-            <span className="text-bne-muted">Last Trained</span>
+            <span className="text-bne-muted">Predictions</span>
+            <span className="font-medium text-bne-ink">{model.predictions_available ? 'available' : 'none stored'}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-bne-muted">Created</span>
             <span className="font-medium text-bne-ink">
-              {model.last_trained ? new Date(model.last_trained).toLocaleDateString() : 'Never'}
+              {model.created_at ? new Date(model.created_at).toLocaleDateString() : '—'}
             </span>
           </div>
         </div>
@@ -455,19 +474,30 @@ export default function Models() {
   const [showNewModel, setShowNewModel] = useState(false)
   const [filter, setFilter] = useState('all')
   const [selectedModelId, setSelectedModelId] = useState<EntityId | null>(null)
-  const [trainModelId, setTrainModelId] = useState<EntityId | null>(null)
+  const [trainTarget, setTrainTarget] = useState<ModelSummary | null>(null)
   const [showTrainingJobModal, setShowTrainingJobModal] = useState(false)
   const [consumedRouteSignature, setConsumedRouteSignature] = useState<string | null>(null)
   const { data: models, isLoading, error, refetch } = useModels()
   const { data: modelDetails } = useModel(selectedModelId)
-  const { data: trainTarget } = useModel(trainModelId)
   const navigate = useRouter((state) => state.navigate)
   const routerParams = useRouter((state) => state.params)
 
-  const filteredModels = models?.filter((model) => {
+  // The catalogue lists completed training jobs, so "Ready" is the completed
+  // state — the button used to filter on a `ready` status the endpoint never
+  // emits, which made three of the four filters permanently empty.
+  const matchesFilter = (model: ModelSummary) => {
     if (filter === 'all') return true
+    if (filter === 'ready') return model.status === 'completed'
     return model.status === filter
-  }) || []
+  }
+
+  const filteredModels = models?.filter(matchesFilter) || []
+
+  // The detail endpoint carries no name; the header takes it from the list row.
+  const selectedSummary =
+    selectedModelId != null
+      ? models?.find((model) => String(model.model_id) === String(selectedModelId))
+      : undefined
 
   useEffect(() => {
     if (!routerParams?.modelId) return
@@ -532,7 +562,7 @@ export default function Models() {
               size="sm"
               onClick={() => setFilter('ready')}
             >
-              Ready ({models?.filter((m) => m.status === 'ready').length || 0})
+              Ready ({models?.filter((m) => m.status === 'completed').length || 0})
             </Button>
             <Button
               variant={filter === 'training' ? 'primary' : 'ghost'}
@@ -585,7 +615,7 @@ export default function Models() {
                 <ModelCard
                   key={String(model.model_id)}
                   model={model}
-                  onTrain={() => setTrainModelId(model.model_id)}
+                  onTrain={() => setTrainTarget(model)}
                   onViewDetails={() => setSelectedModelId(model.model_id)}
                 />
               ))}
@@ -604,25 +634,23 @@ export default function Models() {
       />
       <ModelDetailsDrawer
         model={modelDetails}
+        name={selectedSummary?.name}
         onClose={() => setSelectedModelId(null)}
         onLaunch={(model, scenario) => {
           if (!model) return
-          const modelId = model.model_id || model.id
-          if (modelId) {
-            navigate('results', {
-              modelId: String(modelId),
-              scenarioId: String(scenario?.scenario_id),
-              scenarioName: String(scenario?.name),
-            })
-          }
+          navigate('results', {
+            modelId: String(model.model_id),
+            scenarioId: String(scenario?.scenario_id),
+            scenarioName: String(scenario?.name),
+          })
           setSelectedModelId(null)
         }}
       />
       <TrainModelModal
-        isOpen={!!trainModelId}
-        onClose={() => setTrainModelId(null)}
+        isOpen={!!trainTarget}
+        onClose={() => setTrainTarget(null)}
         onContinue={() => {
-          setTrainModelId(null)
+          setTrainTarget(null)
           setShowTrainingJobModal(true)
         }}
         model={trainTarget}

@@ -7,9 +7,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 // the *build* machine's idea of the backend into the bundle and then resolved it
 // against the *browser's* localhost, so a remote browser silently called itself.
 import { API_ORIGIN, fetchApi, fetchJson } from '../utils/apiClient'
-import type { Country, CountryListResponse } from '../types/api'
+import type { CountryListResponse } from '../types/api'
 
-export type { Country, CountryListResponse }
+// Dead-export note: useCountry, useCountryIndicators, useCountryComparison,
+// useRegions and useRiskLevelsSummary were removed (zero callers in src/;
+// scripts/check_frontend_hook_reachability.mjs keeps it that way). The
+// endpoints stay documented in docs/api-endpoints.md.
 
 // Set VITE_API_BASE_URL only to point at a genuinely different origin.
 
@@ -22,14 +25,6 @@ export interface CountryFilters {
   max_gdp?: string | number
   min_population?: string | number
   has_banking_data?: boolean | string | null
-}
-
-/** Query filters for a single country's indicator series. */
-export interface CountryIndicatorOptions {
-  category?: string
-  indicator_code?: string
-  start_year?: string | number
-  end_year?: string | number
 }
 
 // Fetch countries with filters
@@ -58,52 +53,6 @@ export function useCountries(filters: CountryFilters = {}) {
   })
 }
 
-// Fetch single country
-export function useCountry(countryCode?: string) {
-  return useQuery({
-    queryKey: ['country', countryCode],
-    queryFn: async () => {
-      return fetchJson<Country>(`${API_ORIGIN}/api/v1/countries/${countryCode}`)
-    },
-    enabled: !!countryCode,
-    staleTime: 5 * 60 * 1000,
-  })
-}
-
-// Fetch country indicators
-export function useCountryIndicators(countryCode?: string, options: CountryIndicatorOptions = {}) {
-  const params = new URLSearchParams()
-
-  if (options.category) params.append('category', options.category)
-  if (options.indicator_code) params.append('indicator_code', options.indicator_code)
-  if (options.start_year) params.append('start_year', String(options.start_year))
-  if (options.end_year) params.append('end_year', String(options.end_year))
-
-  const queryString = params.toString()
-  const url = `${API_ORIGIN}/api/v1/countries/${countryCode}/indicators${queryString ? `?${queryString}` : ''}`
-
-  return useQuery({
-    queryKey: ['country-indicators', countryCode, options],
-    queryFn: async () => {
-      return fetchJson<{ indicators?: unknown[]; [key: string]: unknown }>(url)
-    },
-    enabled: !!countryCode,
-    staleTime: 10 * 60 * 1000, // 10 minutes
-  })
-}
-
-// Compare countries
-export function useCountryComparison() {
-  return useMutation({
-    mutationFn: async (request: unknown) => {
-      return fetchApi('/v1/countries/compare', {
-        method: 'POST',
-        body: JSON.stringify(request)
-      })
-    },
-  })
-}
-
 // Sync from World Bank
 export function useCountrySync() {
   const queryClient = useQueryClient()
@@ -119,27 +68,5 @@ export function useCountrySync() {
       // Invalidate countries queries to refetch
       queryClient.invalidateQueries({ queryKey: ['countries'] })
     },
-  })
-}
-
-// Fetch regions list
-export function useRegions() {
-  return useQuery({
-    queryKey: ['regions'],
-    queryFn: async () => {
-      return fetchJson<{ regions?: unknown[]; [key: string]: unknown }>(`${API_ORIGIN}/api/v1/countries/regions/list`)
-    },
-    staleTime: 60 * 60 * 1000, // 1 hour
-  })
-}
-
-// Fetch risk levels summary
-export function useRiskLevelsSummary() {
-  return useQuery({
-    queryKey: ['risk-levels-summary'],
-    queryFn: async () => {
-      return fetchJson<Record<string, unknown>>(`${API_ORIGIN}/api/v1/countries/risk-levels/summary`)
-    },
-    staleTime: 10 * 60 * 1000, // 10 minutes
   })
 }

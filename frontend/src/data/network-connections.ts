@@ -224,14 +224,6 @@ export const networkConnections: NetworkConnection[] = [
   }
 ]
 
-/**
- * Get connections for a specific region
- */
-export function getConnectionsForRegion(regionId: string): NetworkConnection[] {
-  return networkConnections.filter(
-    (conn) => conn.source === regionId || conn.target === regionId
-  )
-}
 
 /**
  * The risk scale of the identity: moss → ochre → rust → clay. Warm, printed-

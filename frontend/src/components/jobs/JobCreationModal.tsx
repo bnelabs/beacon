@@ -55,7 +55,6 @@ export interface DatasetLike {
   region?: string | null
   data_source_id?: EntityId | null
   data_source?: { id?: EntityId | null; name?: string | null } | null
-  source_name?: string | null
   frequency?: string | null
   unit?: string | null
 }
@@ -194,7 +193,7 @@ export default function JobCreationModal({
         category: item.category || '',
         region: item.region || '',
         sourceId: item.data_source_id ?? item.data_source?.id ?? null,
-        sourceName: item.data_source?.name || item.source_name || 'Catalogue',
+        sourceName: item.data_source?.name || 'Catalogue',
         frequency: item.frequency || '',
         unit: item.unit || ''
       })
@@ -254,9 +253,7 @@ export default function JobCreationModal({
     if (!jobs) return []
     return jobs
       .filter(
-        (job) =>
-          (job.job_type === 'data_collection' || job.jobType === 'data_collection') &&
-          job.status === 'completed'
+        (job) => job.job_type === 'data_collection' && job.status === 'completed'
       )
       .sort((a, b) => Number(b.id || b.job_id || 0) - Number(a.id || a.job_id || 0))
   }, [jobs])
@@ -815,7 +812,7 @@ export default function JobCreationModal({
                     <option value="">Select completed data job</option>
                     {dataCollectionJobs.map((job) => (
                       <option key={String(job.id || job.job_id)} value={String(job.id || job.job_id)}>
-                        #{job.id || job.job_id} · {job.name || job.parameters?.regions?.join(', ') || 'Data Collection'}
+                        #{job.id || job.job_id} · {job.parameters?.regions?.join(', ') || 'Data Collection'}
                       </option>
                     ))}
                   </select>

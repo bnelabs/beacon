@@ -7,7 +7,7 @@ import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import { useModels } from '../hooks/useApi'
 import { useRouter } from '../store/useRouter'
-import type { Model } from '../types/api'
+import type { ModelSummary } from '../types/api'
 
 interface MetricCardProps {
   title: string
@@ -39,7 +39,7 @@ function MetricCard({ title, value, subtitle }: MetricCardProps) {
 
 type SortColumn = 'accuracy' | 'rmse' | 'mae' | 'trained'
 
-function ModelComparisonTable({ models }: { models: Model[] }) {
+function ModelComparisonTable({ models }: { models: ModelSummary[] }) {
   const [sortBy, setSortBy] = useState<SortColumn>('accuracy')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
 
@@ -50,20 +50,20 @@ function ModelComparisonTable({ models }: { models: Model[] }) {
 
       switch (sortBy) {
         case 'accuracy':
-          aVal = a.accuracy || a.result?.test_r2 || 0
-          bVal = b.accuracy || b.result?.test_r2 || 0
+          aVal = a.metrics?.r2 ?? a.metrics?.accuracy ?? 0
+          bVal = b.metrics?.r2 ?? b.metrics?.accuracy ?? 0
           break
         case 'rmse':
-          aVal = a.result?.test_rmse || a.result?.rmse || Infinity
-          bVal = b.result?.test_rmse || b.result?.rmse || Infinity
+          aVal = a.metrics?.rmse ?? Infinity
+          bVal = b.metrics?.rmse ?? Infinity
           break
         case 'mae':
-          aVal = a.result?.test_mae || a.result?.mae || Infinity
-          bVal = b.result?.test_mae || b.result?.mae || Infinity
+          aVal = a.metrics?.mae ?? Infinity
+          bVal = b.metrics?.mae ?? Infinity
           break
         case 'trained':
-          aVal = a.last_trained ? new Date(a.last_trained).getTime() : 0
-          bVal = b.last_trained ? new Date(b.last_trained).getTime() : 0
+          aVal = a.created_at ? new Date(a.created_at).getTime() : 0
+          bVal = b.created_at ? new Date(b.created_at).getTime() : 0
           break
         default:
           aVal = 0
@@ -94,6 +94,7 @@ function ModelComparisonTable({ models }: { models: Model[] }) {
 
   const getStatusBadge = (status?: string | null) => {
     const variants: Record<string, BadgeVariant> = {
+      completed: 'success',
       ready: 'success',
       training: 'primary',
       failed: 'danger',
@@ -145,21 +146,21 @@ function ModelComparisonTable({ models }: { models: Model[] }) {
               <td className="py-3 px-4">
                 <div>
                   <p className="font-medium text-bne-ink">{model.name}</p>
-                  <p className="text-xs text-bne-muted">{model.architecture || 'LSTM'}</p>
+                  <p className="text-xs text-bne-muted">{model.model_type || '—'}</p>
                 </div>
               </td>
               <td className="py-3 px-4">{getStatusBadge(model.status)}</td>
               <td className="py-3 px-4 font-mono text-bne-ink">
-                {formatMetric(model.accuracy || model.result?.test_r2)}
+                {formatMetric(model.metrics?.r2 ?? model.metrics?.accuracy)}
               </td>
               <td className="py-3 px-4 font-mono text-bne-ink">
-                {formatMetric(model.result?.test_rmse || model.result?.rmse)}
+                {formatMetric(model.metrics?.rmse)}
               </td>
               <td className="py-3 px-4 font-mono text-bne-ink">
-                {formatMetric(model.result?.test_mae || model.result?.mae)}
+                {formatMetric(model.metrics?.mae)}
               </td>
               <td className="py-3 px-4 text-bne-muted">
-                {model.last_trained ? new Date(model.last_trained).toLocaleDateString() : 'Never'}
+                {model.created_at ? new Date(model.created_at).toLocaleDateString() : '—'}
               </td>
               <td className="py-3 px-4">
                 <Button variant="ghost" size="sm">
@@ -174,15 +175,15 @@ function ModelComparisonTable({ models }: { models: Model[] }) {
   )
 }
 
-function PerformanceChart({ models }: { models: Model[] }) {
+function PerformanceChart({ models }: { models: ModelSummary[] }) {
   const chartData = useMemo(() => {
     return models
-      .filter((m) => m.result?.test_r2 || m.accuracy)
+      .filter((m) => m.metrics?.r2 != null || m.metrics?.accuracy != null)
       .map((m) => ({
-        name: m.name ?? '',
-        r2: m.result?.test_r2 || m.accuracy || 0,
-        rmse: m.result?.test_rmse || m.result?.rmse || 0,
-        mae: m.result?.test_mae || m.result?.mae || 0
+        name: m.name,
+        r2: m.metrics?.r2 ?? m.metrics?.accuracy ?? 0,
+        rmse: m.metrics?.rmse ?? 0,
+        mae: m.metrics?.mae ?? 0
       }))
       .slice(0, 8) // Top 8 models
   }, [models])
@@ -218,14 +219,19 @@ function PerformanceChart({ models }: { models: Model[] }) {
   )
 }
 
-function ModelHealthIndicators({ models }: { models: Model[] }) {
+function ModelHealthIndicators({ models }: { models: ModelSummary[] }) {
   const health = useMemo(() => {
-    const ready = models.filter((m) => m.status === 'ready').length
+    // The catalogue lists completed training jobs, so "ready" is the
+    // completed state; training/failed can only ever be 0 among listed
+    // models, and saying so is more honest than counting a status the
+    // endpoint never emits as if it could appear.
+    const ready = models.filter((m) => m.status === 'completed').length
     const training = models.filter((m) => m.status === 'training').length
     const failed = models.filter((m) => m.status === 'failed').length
     const stale = models.filter((m) => {
-      if (!m.last_trained) return true
-      const daysSince = (Date.now() - new Date(m.last_trained).getTime()) / (1000 * 60 * 60 * 24)
+      const trainedAt = m.created_at
+      if (!trainedAt) return true
+      const daysSince = (Date.now() - new Date(trainedAt).getTime()) / (1000 * 60 * 60 * 24)
       return daysSince > 30
     }).length
 
@@ -327,17 +333,17 @@ export default function ModelPerformance() {
         totalModels: 0,
         avgAccuracy: 0 as number | string,
         avgRMSE: 0 as number | string,
-        bestModel: null as Model | null
+        bestModel: null as ModelSummary | null
       }
     }
 
-    const readyModels = models.filter((m) => m.status === 'ready')
+    const readyModels = models.filter((m) => m.status === 'completed')
     const r2Scores = readyModels
-      .map((m) => m.accuracy || m.result?.test_r2)
+      .map((m) => m.metrics?.r2 ?? m.metrics?.accuracy)
       .filter((s): s is number => s !== null && s !== undefined)
 
     const rmseScores = readyModels
-      .map((m) => m.result?.test_rmse || m.result?.rmse)
+      .map((m) => m.metrics?.rmse)
       .filter((s): s is number => s !== null && s !== undefined)
 
     const avgAccuracy: number | string = r2Scores.length > 0
@@ -348,9 +354,9 @@ export default function ModelPerformance() {
       ? (rmseScores.reduce((a, b) => a + b, 0) / rmseScores.length).toFixed(4)
       : 0
 
-    const bestModel = readyModels.reduce<Model | null>((best, model) => {
-      const score = model.accuracy || model.result?.test_r2 || 0
-      const bestScore = best?.accuracy || best?.result?.test_r2 || 0
+    const bestModel = readyModels.reduce<ModelSummary | null>((best, model) => {
+      const score = model.metrics?.r2 ?? model.metrics?.accuracy ?? 0
+      const bestScore = best?.metrics?.r2 ?? best?.metrics?.accuracy ?? 0
       return score > bestScore ? model : best
     }, null)
 
@@ -425,7 +431,7 @@ export default function ModelPerformance() {
           <MetricCard
             title="Best Performer"
             value={stats.bestModel?.name || '—'}
-            subtitle={stats.bestModel ? `R²: ${(stats.bestModel.accuracy || stats.bestModel.result?.test_r2 || 0).toFixed(4)}` : 'No models ready'}
+            subtitle={stats.bestModel ? `R²: ${(stats.bestModel.metrics?.r2 ?? stats.bestModel.metrics?.accuracy ?? 0).toFixed(4)}` : 'No models ready'}
           />
         </div>
 

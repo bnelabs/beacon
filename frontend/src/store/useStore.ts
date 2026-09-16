@@ -2,9 +2,9 @@ import { create } from 'zustand'
 import type { Region } from '../data/regions'
 
 // The canonical `Region` shape lives with the region reference data
-// (`data/regions.ts`). Re-exported here so existing
-// `import { type Region } from '.../store/useStore'` keeps working.
-export type { Region }
+// (`data/regions.ts`); import it from there. A compat re-export used to live
+// here "so existing imports keep working" — none did (the reachability check
+// in scripts/check_frontend_hook_reachability.mjs covers stores too).
 
 /** Identifier of a configured data source (e.g. `'fdic'`, `'fred'`). */
 export type DataSourceId = string

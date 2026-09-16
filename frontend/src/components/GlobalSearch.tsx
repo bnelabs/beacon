@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import Card from './ui/Card'
 import Badge from './ui/Badge'
 import LoadingSpinner from './ui/LoadingSpinner'
-import type { CatalogueItem, Country, Job, Model } from '../types/api'
+import type { CatalogueItem, Country, Job, ModelSummary } from '../types/api'
 
 // Same-origin by default; nginx proxies /api/ to the backend. See the note in
 // hooks/useCountries.ts for why localhost:3456 is the wrong default here.
@@ -128,10 +128,10 @@ export default function GlobalSearch() {
 
     // Models — ModelSummary exposes model_id / name / model_version. The previous
     // code read id / model_name / version, none of which exist on that schema.
-    asList<Model>(modelsData, 'models').forEach((model) => {
+    asList<ModelSummary>(modelsData, 'models').forEach((model) => {
       items.push({
         id: `model-${model.model_id}`,
-        title: model.name ?? '',
+        title: model.name,
         subtitle: model.model_type,
         category: 'Model',
         page: 'models',
