@@ -3,3 +3,4 @@ Nothing should be ignored since only a Python source file was modified and no bu
 dist/
 build/
 *.log
+node_modules/
