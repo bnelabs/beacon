@@ -1,13 +1,21 @@
 import { cn } from '../../utils/cn'
 import Button from './Button'
 
+export interface ErrorMessageProps {
+  title?: string
+  message?: string
+  error?: { message?: string } | null
+  onRetry?: () => void
+  className?: string
+}
+
 export default function ErrorMessage({
   title = 'Something went wrong',
   message,
   error,
   onRetry,
   className
-}) {
+}: ErrorMessageProps) {
   const displayMessage = message || error?.message || 'An unexpected error occurred'
 
   return (

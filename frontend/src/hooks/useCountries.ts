@@ -10,18 +10,37 @@ import { API_ORIGIN, fetchApi, fetchJson } from '../utils/apiClient'
 
 // Set VITE_API_BASE_URL only to point at a genuinely different origin.
 
+/** Query filters for the country list endpoint. */
+export interface CountryFilters {
+  search?: string
+  region?: string
+  risk_level?: string
+  min_gdp?: string | number
+  max_gdp?: string | number
+  min_population?: string | number
+  has_banking_data?: boolean | string | null
+}
+
+/** Query filters for a single country's indicator series. */
+export interface CountryIndicatorOptions {
+  category?: string
+  indicator_code?: string
+  start_year?: string | number
+  end_year?: string | number
+}
+
 // Fetch countries with filters
-export function useCountries(filters = {}) {
+export function useCountries(filters: CountryFilters = {}) {
   const params = new URLSearchParams()
 
   if (filters.search) params.append('search', filters.search)
   if (filters.region) params.append('region', filters.region)
   if (filters.risk_level) params.append('risk_level', filters.risk_level)
-  if (filters.min_gdp) params.append('min_gdp', filters.min_gdp)
-  if (filters.max_gdp) params.append('max_gdp', filters.max_gdp)
-  if (filters.min_population) params.append('min_population', filters.min_population)
+  if (filters.min_gdp) params.append('min_gdp', String(filters.min_gdp))
+  if (filters.max_gdp) params.append('max_gdp', String(filters.max_gdp))
+  if (filters.min_population) params.append('min_population', String(filters.min_population))
   if (filters.has_banking_data !== null && filters.has_banking_data !== undefined) {
-    params.append('has_banking_data', filters.has_banking_data)
+    params.append('has_banking_data', String(filters.has_banking_data))
   }
 
   const queryString = params.toString()
@@ -37,7 +56,7 @@ export function useCountries(filters = {}) {
 }
 
 // Fetch single country
-export function useCountry(countryCode) {
+export function useCountry(countryCode?: string) {
   return useQuery({
     queryKey: ['country', countryCode],
     queryFn: async () => {
@@ -49,13 +68,13 @@ export function useCountry(countryCode) {
 }
 
 // Fetch country indicators
-export function useCountryIndicators(countryCode, options = {}) {
+export function useCountryIndicators(countryCode?: string, options: CountryIndicatorOptions = {}) {
   const params = new URLSearchParams()
 
   if (options.category) params.append('category', options.category)
   if (options.indicator_code) params.append('indicator_code', options.indicator_code)
-  if (options.start_year) params.append('start_year', options.start_year)
-  if (options.end_year) params.append('end_year', options.end_year)
+  if (options.start_year) params.append('start_year', String(options.start_year))
+  if (options.end_year) params.append('end_year', String(options.end_year))
 
   const queryString = params.toString()
   const url = `${API_ORIGIN}/api/v1/countries/${countryCode}/indicators${queryString ? `?${queryString}` : ''}`
@@ -73,7 +92,7 @@ export function useCountryIndicators(countryCode, options = {}) {
 // Compare countries
 export function useCountryComparison() {
   return useMutation({
-    mutationFn: async (request) => {
+    mutationFn: async (request: unknown) => {
       return fetchApi('/v1/countries/compare', {
         method: 'POST',
         body: JSON.stringify(request)
@@ -87,7 +106,7 @@ export function useCountrySync() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (request) => {
+    mutationFn: async (request: unknown) => {
       return fetchApi('/v1/countries/sync', {
         method: 'POST',
         body: JSON.stringify(request)

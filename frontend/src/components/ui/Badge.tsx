@@ -1,9 +1,10 @@
+import { type HTMLAttributes, type ReactNode } from 'react'
 import { cn } from '../../utils/cn'
 
 /**
  * Badges are printed labels, not candy: square-ish, uppercase, tracked,
  * tint-on-hairline. The risk vocabulary (moss → ochre → rust → clay) matches
- * RISK_COLORS in data/network-connections.js and the map legend.
+ * RISK_COLORS in data/network-connections.ts and the map legend.
  *
  * `uncalibrated` exists because the engine now reports it (a standardized
  * model score is not a risk level until calibration exists — see
@@ -29,13 +30,22 @@ const sizes = {
   lg: 'px-2.5 py-1 text-xs'
 }
 
+export type BadgeVariant = keyof typeof variants
+export type BadgeSize = keyof typeof sizes
+
+export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
+  children?: ReactNode
+  variant?: BadgeVariant
+  size?: BadgeSize
+}
+
 export default function Badge({
   children,
   variant = 'default',
   size = 'md',
   className,
   ...props
-}) {
+}: BadgeProps) {
   return (
     <span
       className={cn(
@@ -57,7 +67,7 @@ export default function Badge({
  * engine can now emit ("uncalibrated") and unknown values (quiet neutral,
  * never silently "success").
  */
-export function riskVariant(level) {
+export function riskVariant(level: unknown): BadgeVariant {
   switch (String(level ?? '').toLowerCase()) {
     case 'low':
       return 'success'

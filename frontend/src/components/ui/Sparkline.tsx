@@ -4,6 +4,17 @@
  * via <title>. No chart library: the dashboard must render in air-gapped
  * deployments and in the sandboxed docs preview alike.
  */
+export type SparklineTone = 'pine' | 'ochre' | 'clay'
+
+export interface SparklineProps {
+  values?: Array<number | string> | null
+  width?: number
+  height?: number
+  tone?: SparklineTone
+  fill?: boolean
+  ariaLabel?: string
+}
+
 export default function Sparkline({
   values,
   width = 120,
@@ -11,7 +22,7 @@ export default function Sparkline({
   tone = 'pine',
   fill = true,
   ariaLabel
-}) {
+}: SparklineProps) {
   const points = (values || []).map(Number).filter((v) => Number.isFinite(v))
   if (points.length < 2) {
     return (

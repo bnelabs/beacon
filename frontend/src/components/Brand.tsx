@@ -1,4 +1,10 @@
+import { type ReactNode } from 'react'
 import { cn } from '../utils/cn'
+
+export interface BeaconMarkProps {
+  className?: string
+  lampClass?: string
+}
 
 /**
  * The BEACON mark: a signal tower with a lit lamp and two broadcast arcs.
@@ -8,7 +14,7 @@ import { cn } from '../utils/cn'
  * ochre lamp, pine signal — the three roles the palette assigns everywhere:
  * structure, watchfulness, brand.
  */
-export function BeaconMark({ className, lampClass = 'text-bne-ochre' }) {
+export function BeaconMark({ className, lampClass = 'text-bne-ochre' }: BeaconMarkProps) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -84,11 +90,16 @@ export function BeaconMark({ className, lampClass = 'text-bne-ochre' }) {
   )
 }
 
+export interface WordmarkProps {
+  className?: string
+  subtitle?: ReactNode
+}
+
 /**
  * The wordmark: serif BEACON, tracked, over the platform's full name as a
  * micro label. Used in the header and on report-style page furniture.
  */
-export function Wordmark({ className, subtitle = 'Banking Early-Alert Network' }) {
+export function Wordmark({ className, subtitle = 'Banking Early-Alert Network' }: WordmarkProps) {
   return (
     <div className={cn('select-none', className)}>
       <span className="font-display text-[19px] font-semibold leading-none tracking-brand text-bne-ink">

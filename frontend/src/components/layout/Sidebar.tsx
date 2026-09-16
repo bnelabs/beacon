@@ -1,7 +1,8 @@
+import { type ReactNode, type SVGProps } from 'react'
 import { cn } from '../../utils/cn'
 import { useRouter } from '../../store/useRouter'
 
-const iconProps = {
+const iconProps: SVGProps<SVGSVGElement> = {
   fill: 'none',
   viewBox: '0 0 24 24',
   stroke: 'currentColor',
@@ -9,7 +10,18 @@ const iconProps = {
   className: 'w-[18px] h-[18px]'
 }
 
-const groups = [
+interface NavItem {
+  name: string
+  page: string
+  icon: ReactNode
+}
+
+interface NavGroup {
+  label: string
+  items: NavItem[]
+}
+
+const groups: NavGroup[] = [
   {
     label: 'Monitor',
     items: [
@@ -123,7 +135,7 @@ const groups = [
   }
 ]
 
-const secondaryNav = [
+const secondaryNav: NavItem[] = [
   {
     name: 'Settings',
     page: 'settings',
@@ -136,7 +148,13 @@ const secondaryNav = [
   }
 ]
 
-function NavButton({ item, active, onNavigate }) {
+interface NavButtonProps {
+  item: NavItem
+  active: boolean
+  onNavigate: (page: string) => void
+}
+
+function NavButton({ item, active, onNavigate }: NavButtonProps) {
   return (
     <button
       key={item.name}

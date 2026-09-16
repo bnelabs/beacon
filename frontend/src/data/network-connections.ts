@@ -1,3 +1,16 @@
+/** One fabricated interbank exposure edge in the demo network fixture. */
+export interface NetworkConnection {
+  id: string
+  source: string
+  target: string
+  exposure: number
+  riskScore: number
+  transactionVolume: number
+}
+
+/** Human-readable risk band label. */
+export type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical'
+
 /**
  * Demo interbank network connections (FIXTURE, NOT LIVE DATA)
  *
@@ -11,7 +24,7 @@
  * Risk levels: low (0-0.3), medium (0.3-0.6), high (0.6-0.8), critical (0.8-1.0)
  */
 
-export const networkConnections = [
+export const networkConnections: NetworkConnection[] = [
   // US Internal Network
   {
     id: 'conn-1',
@@ -214,9 +227,9 @@ export const networkConnections = [
 /**
  * Get connections for a specific region
  */
-export function getConnectionsForRegion(regionId) {
+export function getConnectionsForRegion(regionId: string): NetworkConnection[] {
   return networkConnections.filter(
-    conn => conn.source === regionId || conn.target === regionId
+    (conn) => conn.source === regionId || conn.target === regionId
   )
 }
 
@@ -240,18 +253,19 @@ export const RISK_COLORS = {
  * (0.3 / 0.6 / 0.85 on the 0-1 scale, kept here at the historical 0.8 cut
  * the legend documents).
  */
-export function getRiskColor(riskScore) {
+export function getRiskColor(riskScore: number | null | undefined): string {
   if (riskScore == null || Number.isNaN(Number(riskScore))) return RISK_COLORS.uncalibrated
-  if (riskScore < 0.3) return RISK_COLORS.low
-  if (riskScore < 0.6) return RISK_COLORS.medium
-  if (riskScore < 0.8) return RISK_COLORS.high
+  const score = Number(riskScore)
+  if (score < 0.3) return RISK_COLORS.low
+  if (score < 0.6) return RISK_COLORS.medium
+  if (score < 0.8) return RISK_COLORS.high
   return RISK_COLORS.critical
 }
 
 /**
  * Get risk level label
  */
-export function getRiskLevel(riskScore) {
+export function getRiskLevel(riskScore: number): RiskLevel {
   if (riskScore < 0.3) return 'Low'
   if (riskScore < 0.6) return 'Medium'
   if (riskScore < 0.8) return 'High'
@@ -261,7 +275,7 @@ export function getRiskLevel(riskScore) {
 /**
  * Format exposure amount
  */
-export function formatExposure(amount) {
+export function formatExposure(amount: number): string {
   if (amount >= 1e9) {
     return `$${(amount / 1e9).toFixed(1)}B`
   }

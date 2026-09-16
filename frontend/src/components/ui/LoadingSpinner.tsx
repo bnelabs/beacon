@@ -7,7 +7,13 @@ const sizes = {
   xl: 'h-16 w-16'
 }
 
-export default function LoadingSpinner({ size = 'md', className, message }) {
+export interface LoadingSpinnerProps {
+  size?: keyof typeof sizes
+  className?: string
+  message?: string
+}
+
+export default function LoadingSpinner({ size = 'md', className, message }: LoadingSpinnerProps) {
   return (
     <div className="flex flex-col items-center justify-center gap-3">
       <svg
