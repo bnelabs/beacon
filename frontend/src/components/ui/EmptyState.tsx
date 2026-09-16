@@ -1,3 +1,4 @@
+import { type ReactNode } from 'react'
 import { cn } from '../../utils/cn'
 
 /**
@@ -7,7 +8,21 @@ import { cn } from '../../utils/cn'
  * what is broken. Errors that are genuine failures (non-2xx with a typed
  * detail) still surface through ErrorMessage where a human must act.
  */
-export default function EmptyState({ title, hint, action, className, compact = false }) {
+export interface EmptyStateProps {
+  title?: ReactNode
+  hint?: ReactNode
+  action?: ReactNode
+  className?: string
+  compact?: boolean
+}
+
+export default function EmptyState({
+  title,
+  hint,
+  action,
+  className,
+  compact = false
+}: EmptyStateProps) {
   return (
     <div
       className={cn(

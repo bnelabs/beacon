@@ -1,3 +1,4 @@
+import { type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { cn } from '../../utils/cn'
 
 /**
@@ -26,6 +27,16 @@ const sizes = {
   lg: 'px-6 py-2.5 text-[15px]'
 }
 
+export type ButtonVariant = keyof typeof variants
+export type ButtonSize = keyof typeof sizes
+
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  children?: ReactNode
+  variant?: ButtonVariant
+  size?: ButtonSize
+  loading?: boolean
+}
+
 export default function Button({
   children,
   variant = 'primary',
@@ -34,7 +45,7 @@ export default function Button({
   loading = false,
   className,
   ...props
-}) {
+}: ButtonProps) {
   return (
     <button
       className={cn(
