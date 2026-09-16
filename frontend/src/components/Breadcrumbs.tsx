@@ -1,6 +1,17 @@
 import { useRouter } from '../store/useRouter'
 
-const PAGE_METADATA = {
+interface PageMeta {
+  title: string
+  parent: string | null
+}
+
+interface Crumb {
+  title: string
+  page: string
+  isLast: boolean
+}
+
+const PAGE_METADATA: Record<string, PageMeta> = {
   dashboard: { title: 'Dashboard', parent: null },
   globe: { title: 'Risk Map', parent: null },
   models: { title: 'Models', parent: null },
@@ -15,9 +26,9 @@ export default function Breadcrumbs() {
   const { currentPage, params, navigate } = useRouter()
 
   // Build breadcrumb trail
-  const buildBreadcrumbs = () => {
-    const crumbs = []
-    let page = currentPage
+  const buildBreadcrumbs = (): Crumb[] => {
+    const crumbs: Crumb[] = []
+    let page: string | null = currentPage
 
     // Always start with home
     crumbs.unshift({
@@ -28,7 +39,7 @@ export default function Breadcrumbs() {
 
     // Build chain from current page to root
     while (page && PAGE_METADATA[page]) {
-      const metadata = PAGE_METADATA[page]
+      const metadata: PageMeta = PAGE_METADATA[page]
 
       crumbs.push({
         title: metadata.title,

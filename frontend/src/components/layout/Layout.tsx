@@ -1,10 +1,15 @@
+import { type ReactNode } from 'react'
 import Header from './Header'
 import Sidebar from './Sidebar'
 import GlobalSearch from '../GlobalSearch'
 import ErrorBoundary from '../ErrorBoundary'
 import { useRouter } from '../../store/useRouter'
 
-export default function Layout({ children }) {
+export interface LayoutProps {
+  children?: ReactNode
+}
+
+export default function Layout({ children }: LayoutProps) {
   const { currentPage } = useRouter()
   return (
     <div className="flex h-screen bg-bne-paper overflow-hidden">
