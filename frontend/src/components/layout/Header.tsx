@@ -9,17 +9,17 @@ export default function Header() {
   const [hasStoredToken, setHasStoredToken] = useState(
     () => Boolean(window.localStorage.getItem(API_TOKEN_KEY))
   )
-  const profileRef = useRef(null)
+  const profileRef = useRef<HTMLDivElement>(null)
   const { navigate } = useRouter()
 
   useEffect(() => {
-    function handleClickOutside(event) {
-      if (profileRef.current && !profileRef.current.contains(event.target)) {
+    function handleClickOutside(event: MouseEvent) {
+      if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
         setIsProfileMenuOpen(false)
       }
     }
 
-    function handleEscape(event) {
+    function handleEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setIsProfileMenuOpen(false)
       }
@@ -34,7 +34,7 @@ export default function Header() {
     }
   }, [])
 
-  const handleNavigate = (page) => {
+  const handleNavigate = (page: string) => {
     navigate(page)
     setIsProfileMenuOpen(false)
   }
