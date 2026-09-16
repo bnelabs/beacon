@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, type ReactNode } from 'react'
 import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
@@ -7,8 +7,18 @@ import {
   useTimeSeriesTrends,
   useAnomalyInsights
 } from '../hooks/useAnalytics'
+import type { AnomalyInsight, TimeSeriesPoint } from '../types/api'
 
-function MetricCard({ title, value, subtitle, trend, icon, color = 'bne-pine' }) {
+interface MetricCardProps {
+  title: string
+  value: ReactNode
+  subtitle?: ReactNode
+  trend?: number
+  icon?: ReactNode
+  color?: string
+}
+
+function MetricCard({ title, value, subtitle, trend, icon, color = 'bne-pine' }: MetricCardProps) {
   return (
     <Card>
       <CardContent className="p-6">
@@ -16,7 +26,7 @@ function MetricCard({ title, value, subtitle, trend, icon, color = 'bne-pine' })
           <div className={`p-3 rounded-lg bg-${color}/10`}>
             {icon}
           </div>
-          {trend && (
+          {trend != null && (
             <div className={`flex items-center gap-1 text-sm font-medium ${trend > 0 ? 'text-bne-moss' : 'text-bne-clay'}`}>
               {trend > 0 ? (
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -41,15 +51,22 @@ function MetricCard({ title, value, subtitle, trend, icon, color = 'bne-pine' })
   )
 }
 
-function TimeSeriesChart({ data, metric }) {
+interface TimeSeriesChartProps {
+  data: TimeSeriesPoint[]
+  /** The selected metric; retained in the props contract (callers pass it) but
+   *  the chart renders whatever series it is given. */
+  metric?: string
+}
+
+function TimeSeriesChart({ data }: TimeSeriesChartProps) {
   const maxValue = useMemo(() => {
     if (!Array.isArray(data) || data.length === 0) return 1
-    return Math.max(...data.map(d => d.value || 0), 1)
+    return Math.max(...data.map((d) => d.value || 0), 1)
   }, [data])
 
   const minValue = useMemo(() => {
     if (!Array.isArray(data) || data.length === 0) return 0
-    return Math.min(...data.map(d => d.value || 0))
+    return Math.min(...data.map((d) => d.value || 0))
   }, [data])
 
   if (!Array.isArray(data) || data.length === 0) {
@@ -157,8 +174,8 @@ function TimeSeriesChart({ data, metric }) {
   )
 }
 
-function AnomalyAlerts({ anomalies }) {
-  const getSeverityColor = (severity) => {
+function AnomalyAlerts({ anomalies }: { anomalies: AnomalyInsight[] }) {
+  const getSeverityColor = (severity: string) => {
     switch (severity) {
       case 'high': return 'bg-bne-clay/10 border-bne-clay/20 text-bne-clay'
       case 'medium': return 'bg-bne-ochre/10 border-bne-ochre/20 text-bne-ochre'
@@ -166,7 +183,7 @@ function AnomalyAlerts({ anomalies }) {
     }
   }
 
-  const getSeverityIcon = (severity) => {
+  const getSeverityIcon = (severity: string) => {
     if (severity === 'high') {
       return (
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -214,7 +231,7 @@ function AnomalyAlerts({ anomalies }) {
             </div>
             <p className="text-sm">{anomaly.message}</p>
             <div className="mt-2 text-xs opacity-75">
-              Detected: {new Date(anomaly.detected_at).toLocaleString()}
+              Detected: {anomaly.detected_at ? new Date(anomaly.detected_at).toLocaleString() : '—'}
             </div>
           </div>
         </div>
@@ -223,7 +240,7 @@ function AnomalyAlerts({ anomalies }) {
   )
 }
 
-function JobDistributionChart({ distribution }) {
+function JobDistributionChart({ distribution }: { distribution: Record<string, number> }) {
   const total = Object.values(distribution).reduce((sum, count) => sum + count, 0)
 
   if (total === 0) {
@@ -285,7 +302,7 @@ export default function Analytics() {
     )
   }
 
-  const { jobs, models, data_quality } = overview || { jobs: {}, models: {}, data_quality: {} }
+  const { jobs, models, data_quality } = overview ?? {}
 
   return (
     <div className="p-6 space-y-6">
@@ -316,8 +333,8 @@ export default function Analytics() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
           title="Total Jobs"
-          value={jobs.total || 0}
-          subtitle={`${jobs.completed || 0} completed`}
+          value={jobs?.total || 0}
+          subtitle={`${jobs?.completed || 0} completed`}
           icon={
             <svg className="w-6 h-6 text-bne-pine" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -327,8 +344,8 @@ export default function Analytics() {
         />
         <MetricCard
           title="Success Rate"
-          value={`${jobs.success_rate || 0}%`}
-          subtitle={`${jobs.failed || 0} failed jobs`}
+          value={`${jobs?.success_rate || 0}%`}
+          subtitle={`${jobs?.failed || 0} failed jobs`}
           icon={
             <svg className="w-6 h-6 text-bne-moss" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -338,8 +355,8 @@ export default function Analytics() {
         />
         <MetricCard
           title="Model Health"
-          value={`${models.health_percentage || 0}%`}
-          subtitle={`${models.ready || 0}/${models.total || 0} models ready`}
+          value={`${models?.health_percentage || 0}%`}
+          subtitle={`${models?.ready || 0}/${models?.total || 0} models ready`}
           icon={
             <svg className="w-6 h-6 text-bne-pine" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -349,7 +366,7 @@ export default function Analytics() {
         />
         <MetricCard
           title="Avg Execution Time"
-          value={`${jobs.avg_execution_time || 0}s`}
+          value={`${jobs?.avg_execution_time || 0}s`}
           subtitle="Per completed job"
           icon={
             <svg className="w-6 h-6 text-bne-ochre" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -365,7 +382,7 @@ export default function Analytics() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>Anomaly Detection (Last 7 Days)</CardTitle>
-            <Badge variant={anomaliesData?.anomalies_detected > 0 ? 'danger' : 'success'}>
+            <Badge variant={(anomaliesData?.anomalies_detected ?? 0) > 0 ? 'danger' : 'success'}>
               {anomaliesData?.anomalies_detected || 0} detected
             </Badge>
           </div>
@@ -413,7 +430,7 @@ export default function Analytics() {
             <CardTitle>Job Type Distribution</CardTitle>
           </CardHeader>
           <CardContent>
-            <JobDistributionChart distribution={jobs.distribution || {}} />
+            <JobDistributionChart distribution={jobs?.distribution || {}} />
           </CardContent>
         </Card>
 
@@ -425,22 +442,22 @@ export default function Analytics() {
             <div className="space-y-4">
               <div className="p-4 bg-bne-paper rounded-lg">
                 <div className="text-sm text-bne-muted mb-1">Average Quality Score</div>
-                <div className="font-display text-3xl font-semibold tnum text-bne-ink">{data_quality.avg_quality_score?.toFixed(4) || 'N/A'}</div>
+                <div className="font-display text-3xl font-semibold tnum text-bne-ink">{data_quality?.avg_quality_score?.toFixed(4) || 'N/A'}</div>
                 <div className="mt-2 w-full h-2 bg-bne-paper-dim rounded-full overflow-hidden">
                   <div
                     className="h-full bg-bne-moss rounded-full"
-                    style={{ width: `${(data_quality.avg_quality_score || 0) * 100}%` }}
+                    style={{ width: `${(data_quality?.avg_quality_score || 0) * 100}%` }}
                   />
                 </div>
               </div>
 
               <div className="p-4 bg-bne-paper rounded-lg">
                 <div className="text-sm text-bne-muted mb-1">Average Completeness</div>
-                <div className="font-display text-3xl font-semibold tnum text-bne-ink">{((data_quality.avg_completeness || 0) * 100).toFixed(1)}%</div>
+                <div className="font-display text-3xl font-semibold tnum text-bne-ink">{((data_quality?.avg_completeness || 0) * 100).toFixed(1)}%</div>
                 <div className="mt-2 w-full h-2 bg-bne-paper-dim rounded-full overflow-hidden">
                   <div
                     className="h-full bg-bne-pine-600 rounded-full"
-                    style={{ width: `${(data_quality.avg_completeness || 0) * 100}%` }}
+                    style={{ width: `${(data_quality?.avg_completeness || 0) * 100}%` }}
                   />
                 </div>
               </div>
@@ -448,7 +465,7 @@ export default function Analytics() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-3 bg-bne-card rounded-lg border border-bne-line">
                   <div className="text-xs text-bne-muted">Jobs Analyzed</div>
-                  <div className="font-display text-2xl font-semibold tnum text-bne-ink">{data_quality.jobs_analyzed || 0}</div>
+                  <div className="font-display text-2xl font-semibold tnum text-bne-ink">{data_quality?.jobs_analyzed || 0}</div>
                 </div>
                 <div className="p-3 bg-bne-card rounded-lg border border-bne-line">
                   <div className="text-xs text-bne-muted">Period</div>

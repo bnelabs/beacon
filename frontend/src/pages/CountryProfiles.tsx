@@ -1,24 +1,29 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import PageContainer from '../components/ui/PageContainer'
 import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import Badge, { riskVariant } from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
-import { useCountries, useCountrySync } from '../hooks/useCountries'
+import { useCountries, useCountrySync, type CountryFilters } from '../hooks/useCountries'
 import { downloadCSV, downloadJSON, formatCountriesForExport } from '../utils/export'
+import type { Country } from '../types/api'
 
-function CountryCard({ country }) {
-  const formatNumber = (num) => {
+/** The filter bar's local state: unset filters are `null` (cleared) rather
+ *  than absent, matching what the select/checkbox handlers write. */
+type CountryFilterState = CountryFilters
+
+function CountryCard({ country }: { country: Country }) {
+  const formatNumber = (num?: number | string | null) => {
     if (!num) return 'N/A'
     return new Intl.NumberFormat('en-US', {
       notation: 'compact',
       compactDisplay: 'short',
       maximumFractionDigits: 1
-    }).format(num)
+    }).format(Number(num))
   }
 
-  const formatCurrency = (num) => {
+  const formatCurrency = (num?: number | string | null) => {
     if (!num) return 'N/A'
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -26,7 +31,7 @@ function CountryCard({ country }) {
       notation: 'compact',
       compactDisplay: 'short',
       maximumFractionDigits: 1
-    }).format(num)
+    }).format(Number(num))
   }
 
   return (
@@ -61,7 +66,7 @@ function CountryCard({ country }) {
           <div>
             <span className="text-bne-muted">Risk Score</span>
             <p className="font-semibold text-bne-ink mt-0.5">
-              {country.risk_score ? `${parseFloat(country.risk_score).toFixed(1)}/100` : 'N/A'}
+              {country.risk_score ? `${parseFloat(String(country.risk_score)).toFixed(1)}/100` : 'N/A'}
             </p>
           </div>
         </div>
@@ -73,7 +78,7 @@ function CountryCard({ country }) {
                 <div className="flex-1">
                   <span className="text-bne-muted">Inflation</span>
                   <p className="font-medium text-bne-ink mt-0.5">
-                    {parseFloat(country.inflation_rate).toFixed(1)}%
+                    {parseFloat(String(country.inflation_rate)).toFixed(1)}%
                   </p>
                 </div>
               )}
@@ -81,7 +86,7 @@ function CountryCard({ country }) {
                 <div className="flex-1">
                   <span className="text-bne-muted">Unemployment</span>
                   <p className="font-medium text-bne-ink mt-0.5">
-                    {parseFloat(country.unemployment_rate).toFixed(1)}%
+                    {parseFloat(String(country.unemployment_rate)).toFixed(1)}%
                   </p>
                 </div>
               )}
@@ -97,7 +102,12 @@ function CountryCard({ country }) {
   )
 }
 
-function SearchFilters({ filters, onFiltersChange }) {
+interface SearchFiltersProps {
+  filters: CountryFilterState
+  onFiltersChange: (filters: CountryFilterState) => void
+}
+
+function SearchFilters({ filters, onFiltersChange }: SearchFiltersProps) {
   const regions = ['North America', 'South America', 'Europe', 'Asia', 'Africa', 'Oceania', 'Middle East']
   const riskLevels = ['low', 'medium', 'high', 'critical']
 
@@ -126,7 +136,7 @@ function SearchFilters({ filters, onFiltersChange }) {
             className="w-full px-3 py-2 border border-bne-line rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-pine"
           >
             <option value="">All Regions</option>
-            {regions.map(region => (
+            {regions.map((region) => (
               <option key={region} value={region}>{region}</option>
             ))}
           </select>
@@ -140,7 +150,7 @@ function SearchFilters({ filters, onFiltersChange }) {
             className="w-full px-3 py-2 border border-bne-line rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bne-pine"
           >
             <option value="">All Levels</option>
-            {riskLevels.map(level => (
+            {riskLevels.map((level) => (
               <option key={level} value={level}>{level.toUpperCase()}</option>
             ))}
           </select>
@@ -150,7 +160,7 @@ function SearchFilters({ filters, onFiltersChange }) {
           <label className="text-sm font-medium text-bne-ink block mb-2">
             <input
               type="checkbox"
-              checked={filters.has_banking_data || false}
+              checked={filters.has_banking_data === true || filters.has_banking_data === 'true'}
               onChange={(e) => onFiltersChange({ ...filters, has_banking_data: e.target.checked || null })}
               className="mr-2"
             />
@@ -172,7 +182,7 @@ function SearchFilters({ filters, onFiltersChange }) {
 }
 
 export default function CountryProfiles() {
-  const [filters, setFilters] = useState({})
+  const [filters, setFilters] = useState<CountryFilterState>({})
   const [showExportMenu, setShowExportMenu] = useState(false)
   const { data: countriesData, isLoading, error, refetch } = useCountries(filters)
   const syncMutation = useCountrySync()
@@ -187,14 +197,14 @@ export default function CountryProfiles() {
           refetch()
           alert('Country data synced successfully!')
         },
-        onError: (error) => {
-          alert(`Sync failed: ${error.message}`)
+        onError: (syncError) => {
+          alert(`Sync failed: ${syncError.message}`)
         }
       })
     }
   }
 
-  const handleExport = (format) => {
+  const handleExport = (format: 'csv' | 'json') => {
     if (!countriesData?.countries?.length) {
       alert('No data to export')
       return
@@ -300,7 +310,7 @@ export default function CountryProfiles() {
             <Card>
               <CardContent className="py-12 text-center">
                 <svg className="w-16 h-16 mx-auto text-bne-muted/30 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2.5 2.5 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <h3 className="text-lg font-semibold text-bne-ink mb-2">No Countries Found</h3>
                 <p className="text-sm text-bne-muted mb-6">
@@ -317,12 +327,12 @@ export default function CountryProfiles() {
             <>
               <div className="mb-4 flex items-center justify-between">
                 <p className="text-sm text-bne-muted">
-                  Found <span className="font-semibold text-bne-ink">{countriesData.total}</span> countries
+                  Found <span className="font-semibold text-bne-ink">{countriesData?.total}</span> countries
                 </p>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {countriesData.countries.map((country) => (
-                  <CountryCard key={country.id} country={country} />
+                {countriesData?.countries?.map((country) => (
+                  <CountryCard key={String(country.id)} country={country} />
                 ))}
               </div>
             </>

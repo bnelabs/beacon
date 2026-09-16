@@ -1,23 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import PageContainer from '../components/ui/PageContainer'
-import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card'
+import Card, { CardHeader, CardTitle, CardContent, type CardAccent } from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import Sparkline from '../components/ui/Sparkline'
-import { useJobs, useModels, useDataSources } from '../hooks/useApi'
+import { useJobs, useModels, useDataSources, useSystemStatus } from '../hooks/useApi'
 import { useDataQualityStats } from '../hooks/useDataQuality'
-import { useSystemStatus } from '../hooks/useApi'
 import JobCreationModal from '../components/jobs/JobCreationModal'
 import FirstRunChecklist from '../components/FirstRunChecklist'
+import type { Job } from '../types/api'
 
 const DAY_MS = 86_400_000
 
-function daysAgo(date, days) {
-  return Date.now() - days * DAY_MS >= new Date(date).getTime()
-}
-
-function relativeTime(date) {
+function relativeTime(date?: string | null): string {
   if (!date) return '—'
   const diff = Date.now() - new Date(date).getTime()
   const minutes = Math.round(diff / 60_000)
@@ -28,11 +24,19 @@ function relativeTime(date) {
   return `${Math.round(hours / 24)}d ago`
 }
 
-function Skeleton({ className }) {
+function Skeleton({ className }: { className?: string }) {
   return <div className={`animate-pulse rounded-md bg-bne-paper-dim ${className || ''}`} />
 }
 
-function StatCard({ label, value, sub, children, accent }) {
+interface StatCardProps {
+  label: string
+  value: ReactNode
+  sub?: ReactNode
+  children?: ReactNode
+  accent?: CardAccent | null
+}
+
+function StatCard({ label, value, sub, children, accent }: StatCardProps) {
   return (
     <Card accent={accent} className="relative">
       <p className="bne-micro mb-2">{label}</p>
@@ -43,7 +47,12 @@ function StatCard({ label, value, sub, children, accent }) {
   )
 }
 
-function Meter({ percent, tone }) {
+interface MeterProps {
+  percent: number
+  tone?: 'clay' | 'ochre' | 'moss'
+}
+
+function Meter({ percent, tone }: MeterProps) {
   const colour = tone === 'clay' ? 'bg-bne-clay' : tone === 'ochre' ? 'bg-bne-ochre' : 'bg-bne-moss'
   return (
     <div className="h-1.5 w-full overflow-hidden rounded-[2px] bg-bne-paper-dim">
@@ -52,7 +61,7 @@ function Meter({ percent, tone }) {
   )
 }
 
-function JobActivityChart({ jobs }) {
+function JobActivityChart({ jobs }: { jobs: Job[] }) {
   const days = 14
   const buckets = useMemo(() => {
     const now = new Date()
@@ -83,7 +92,6 @@ function JobActivityChart({ jobs }) {
       <svg viewBox="0 0 100 40" className="h-28 w-full" preserveAspectRatio="none" role="img" aria-label="Job activity, last 14 days">
         {buckets.map((bucket, index) => {
           const total = bucket.completed + bucket.running + bucket.failed
-          const h = (total / max) * 34
           const hf = (bucket.failed / max) * 34
           const hr = (bucket.running / max) * 34
           const hc = (bucket.completed / max) * 34
@@ -140,26 +148,26 @@ function SystemStatusCard() {
                 <span className="text-[13px] text-bne-muted">CPU</span>
                 <span className="bne-figure text-[13px]">{data.cpu?.usage_percent?.toFixed(0)}%{data.cpu?.cores ? ` · ${data.cpu.cores} cores` : ''}</span>
               </div>
-              <Meter percent={data.cpu?.usage_percent ?? 0} tone={data.cpu?.usage_percent > 85 ? 'clay' : undefined} />
+              <Meter percent={data.cpu?.usage_percent ?? 0} tone={(data.cpu?.usage_percent ?? 0) > 85 ? 'clay' : undefined} />
             </div>
             <div>
               <div className="mb-1 flex items-baseline justify-between">
                 <span className="text-[13px] text-bne-muted">Memory</span>
                 <span className="bne-figure text-[13px]">{data.memory?.usage_percent?.toFixed(0)}%{data.memory ? ` · ${data.memory.used_gb}/${data.memory.total_gb} GB` : ''}</span>
               </div>
-              <Meter percent={data.memory?.usage_percent ?? 0} tone={data.memory?.usage_percent > 85 ? 'clay' : undefined} />
+              <Meter percent={data.memory?.usage_percent ?? 0} tone={(data.memory?.usage_percent ?? 0) > 85 ? 'clay' : undefined} />
             </div>
             <div>
               <div className="mb-1 flex items-baseline justify-between">
                 <span className="text-[13px] text-bne-muted">Disk</span>
                 <span className="bne-figure text-[13px]">{data.disk?.usage_percent?.toFixed(0)}%{data.disk ? ` · ${data.disk.used_gb}/${data.disk.total_gb} GB` : ''}</span>
               </div>
-              <Meter percent={data.disk?.usage_percent ?? 0} tone={data.disk?.usage_percent > 85 ? 'ochre' : undefined} />
+              <Meter percent={data.disk?.usage_percent ?? 0} tone={(data.disk?.usage_percent ?? 0) > 85 ? 'ochre' : undefined} />
             </div>
             <div className="flex items-center justify-between border-t border-bne-line-soft pt-2">
               <span className="text-[13px] text-bne-muted">GPU</span>
               {data.gpu?.available ? (
-                <Badge variant="primary" size="sm">{data.gpu.count} device{data.gpu.count > 1 ? 's' : ''}</Badge>
+                <Badge variant="primary" size="sm">{data.gpu.count} device{(data.gpu.count ?? 0) > 1 ? 's' : ''}</Badge>
               ) : (
                 <Badge size="sm">Not available</Badge>
               )}
@@ -336,10 +344,10 @@ export default function Dashboard() {
                     {recentJobs.map((job) => {
                       const jobKey = job.job_id ?? job.id
                       return (
-                        <div key={jobKey} className="flex items-center justify-between rounded-md border border-bne-line-soft bg-bne-paper-raise px-3 py-2">
+                        <div key={String(jobKey)} className="flex items-center justify-between rounded-md border border-bne-line-soft bg-bne-paper-raise px-3 py-2">
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium text-bne-ink">{job.job_type}</p>
-                            <p className="font-mono text-[10px] text-bne-faint tnum">#{jobKey} · {relativeTime(job.created_at)}</p>
+                            <p className="font-mono text-[10px] text-bne-faint tnum">#{String(jobKey)} · {relativeTime(job.created_at)}</p>
                           </div>
                           <Badge
                             variant={

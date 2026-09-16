@@ -7,14 +7,17 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 // the *build* machine's idea of the backend into the bundle and then resolved it
 // against the *browser's* localhost, so a remote browser silently called itself.
 import { API_ORIGIN, fetchApi, fetchJson } from '../utils/apiClient'
+import type { Country, CountryListResponse } from '../types/api'
+
+export type { Country, CountryListResponse }
 
 // Set VITE_API_BASE_URL only to point at a genuinely different origin.
 
 /** Query filters for the country list endpoint. */
 export interface CountryFilters {
   search?: string
-  region?: string
-  risk_level?: string
+  region?: string | null
+  risk_level?: string | null
   min_gdp?: string | number
   max_gdp?: string | number
   min_population?: string | number
@@ -49,7 +52,7 @@ export function useCountries(filters: CountryFilters = {}) {
   return useQuery({
     queryKey: ['countries', filters],
     queryFn: async () => {
-      return fetchJson(url)
+      return fetchJson<CountryListResponse>(url)
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
   })
@@ -60,7 +63,7 @@ export function useCountry(countryCode?: string) {
   return useQuery({
     queryKey: ['country', countryCode],
     queryFn: async () => {
-      return fetchJson(`${API_ORIGIN}/api/v1/countries/${countryCode}`)
+      return fetchJson<Country>(`${API_ORIGIN}/api/v1/countries/${countryCode}`)
     },
     enabled: !!countryCode,
     staleTime: 5 * 60 * 1000,
@@ -82,7 +85,7 @@ export function useCountryIndicators(countryCode?: string, options: CountryIndic
   return useQuery({
     queryKey: ['country-indicators', countryCode, options],
     queryFn: async () => {
-      return fetchJson(url)
+      return fetchJson<{ indicators?: unknown[]; [key: string]: unknown }>(url)
     },
     enabled: !!countryCode,
     staleTime: 10 * 60 * 1000, // 10 minutes
@@ -124,7 +127,7 @@ export function useRegions() {
   return useQuery({
     queryKey: ['regions'],
     queryFn: async () => {
-      return fetchJson(`${API_ORIGIN}/api/v1/countries/regions/list`)
+      return fetchJson<{ regions?: unknown[]; [key: string]: unknown }>(`${API_ORIGIN}/api/v1/countries/regions/list`)
     },
     staleTime: 60 * 60 * 1000, // 1 hour
   })
@@ -135,7 +138,7 @@ export function useRiskLevelsSummary() {
   return useQuery({
     queryKey: ['risk-levels-summary'],
     queryFn: async () => {
-      return fetchJson(`${API_ORIGIN}/api/v1/countries/risk-levels/summary`)
+      return fetchJson<Record<string, unknown>>(`${API_ORIGIN}/api/v1/countries/risk-levels/summary`)
     },
     staleTime: 10 * 60 * 1000, // 10 minutes
   })

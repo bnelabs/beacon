@@ -1,11 +1,25 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import { useDataQualityStats, useSourceQualityDetails, useQualityTrends } from '../hooks/useDataQuality'
 import { useDataSourceHealth } from '../hooks/useApi'
+import type {
+  DataQualityAnomalies,
+  DataQualityFreshness,
+  QualityTrendPoint,
+  SourceQualityRow
+} from '../types/api'
 
-function MetricCard({ title, value, subtitle, trend, status }) {
+interface MetricCardProps {
+  title: string
+  value: ReactNode
+  subtitle?: ReactNode
+  trend?: number
+  status?: 'excellent' | 'good' | 'warning' | string | null
+}
+
+function MetricCard({ title, value, subtitle, trend, status }: MetricCardProps) {
   const getStatusColor = () => {
     if (!status) return 'text-bne-ink'
     if (status === 'excellent') return 'text-bne-moss'
@@ -19,7 +33,7 @@ function MetricCard({ title, value, subtitle, trend, status }) {
       <CardContent className="p-6">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-medium text-bne-muted">{title}</h3>
-          {trend && (
+          {trend != null && (
             <span className={`text-xs ${trend > 0 ? 'text-bne-moss' : 'text-bne-clay'}`}>
               {trend > 0 ? '↑' : '↓'} {Math.abs(trend)}%
             </span>
@@ -32,7 +46,7 @@ function MetricCard({ title, value, subtitle, trend, status }) {
   )
 }
 
-function FreshnessIndicator({ freshness }) {
+function FreshnessIndicator({ freshness }: { freshness: DataQualityFreshness }) {
   const getStatusInfo = () => {
     const { fresh, stale, outdated, never_synced } = freshness
     const total = fresh + stale + outdated + never_synced
@@ -94,7 +108,7 @@ function FreshnessIndicator({ freshness }) {
   )
 }
 
-function QualityTrendChart({ trends }) {
+function QualityTrendChart({ trends }: { trends: QualityTrendPoint[] }) {
   const chartData = useMemo(() => {
     if (!Array.isArray(trends) || trends.length === 0) return []
 
@@ -104,7 +118,7 @@ function QualityTrendChart({ trends }) {
 
   const maxValue = useMemo(() => {
     if (chartData.length === 0) return 1
-    const values = chartData.map(d => d.avg_quality_score || 0)
+    const values = chartData.map((d) => d.avg_quality_score || 0)
     return Math.max(...values, 1)
   }, [chartData])
 
@@ -120,7 +134,7 @@ function QualityTrendChart({ trends }) {
     <div className="space-y-2">
       {/* Chart */}
       <div className="h-48 flex items-end gap-1">
-        {chartData.map((day, index) => {
+        {chartData.map((day) => {
           const height = ((day.avg_quality_score || 0) / maxValue) * 100
           const color = day.avg_quality_score >= 0.7 ? 'bg-bne-moss' : day.avg_quality_score >= 0.5 ? 'bg-bne-ochre' : 'bg-bne-clay'
 
@@ -163,11 +177,11 @@ function QualityTrendChart({ trends }) {
   )
 }
 
-function SourceQualityTable({ sources }) {
+function SourceQualityTable({ sources }: { sources: SourceQualityRow[] }) {
   const sortedSources = useMemo(() => {
     return [...(Array.isArray(sources) ? sources : [])].sort((a, b) => {
       // Sort by freshness first, then quality
-      const freshnessOrder = { fresh: 0, stale: 1, outdated: 2, never_synced: 3 }
+      const freshnessOrder: Record<string, number> = { fresh: 0, stale: 1, outdated: 2, never_synced: 3 }
       if (freshnessOrder[a.freshness_status] !== freshnessOrder[b.freshness_status]) {
         return freshnessOrder[a.freshness_status] - freshnessOrder[b.freshness_status]
       }
@@ -175,7 +189,7 @@ function SourceQualityTable({ sources }) {
     })
   }, [sources])
 
-  const getFreshnessColor = (status) => {
+  const getFreshnessColor = (status: string) => {
     switch (status) {
       case 'fresh': return 'text-bne-moss bg-bne-moss/10'
       case 'stale': return 'text-bne-ochre bg-bne-ochre/10'
@@ -199,7 +213,7 @@ function SourceQualityTable({ sources }) {
         </thead>
         <tbody>
           {sortedSources.map((source) => (
-            <tr key={source.id} className="border-b border-bne-line hover:bg-bne-paper/30 transition-colors">
+            <tr key={String(source.id)} className="border-b border-bne-line hover:bg-bne-paper/30 transition-colors">
               <td className="py-3 px-4">
                 <div className="font-medium text-bne-ink">{source.name}</div>
               </td>
@@ -243,9 +257,15 @@ function SourceQualityTable({ sources }) {
   )
 }
 
-function AnomalyAlerts({ anomalies }) {
-  const alerts = useMemo(() => {
-    const result = []
+interface QualityAlert {
+  severity: 'warning' | 'error'
+  title: string
+  message: string
+}
+
+function AnomalyAlerts({ anomalies }: { anomalies: DataQualityAnomalies }) {
+  const alerts = useMemo<QualityAlert[]>(() => {
+    const result: QualityAlert[] = []
 
     if (anomalies.low_quality_jobs > 0) {
       result.push({
@@ -322,8 +342,9 @@ function AnomalyAlerts({ anomalies }) {
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
+                strokeWidth={2}
               >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
               <div>
                 <p className={`font-semibold text-sm ${alert.severity === 'error' ? 'text-bne-clay' : 'text-bne-ochre'}`}>
@@ -374,6 +395,10 @@ export default function DataQuality() {
         </Card>
       </div>
     )
+  }
+
+  if (!stats) {
+    return null
   }
 
   const { overview, freshness, quality, anomalies } = stats
@@ -439,16 +464,16 @@ export default function DataQuality() {
           <CardContent>
             <div className="space-y-2">
               {scheduledHealth.map((row) => (
-                <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                <div key={String(row.id)} className="flex flex-wrap items-center justify-between gap-3 text-sm">
                   <span className="font-medium text-bne-ink">{row.name}</span>
                   <span className="text-bne-muted">
                     every{' '}
-                    {row.sync_interval_minutes >= 1440
-                      ? `${Math.round(row.sync_interval_minutes / 1440)} d`
-                      : row.sync_interval_minutes >= 60
-                        ? `${Math.round(row.sync_interval_minutes / 60)} h`
+                    {(row.sync_interval_minutes ?? 0) >= 1440
+                      ? `${Math.round((row.sync_interval_minutes ?? 0) / 1440)} d`
+                      : (row.sync_interval_minutes ?? 0) >= 60
+                        ? `${Math.round((row.sync_interval_minutes ?? 0) / 60)} h`
                         : `${row.sync_interval_minutes} min`}
-                    {row.backoff_factor > 1 ? ` · backing off ×${row.backoff_factor}` : ''}
+                    {(row.backoff_factor ?? 1) > 1 ? ` · backing off ×${row.backoff_factor}` : ''}
                   </span>
                   <span className="text-bne-muted">
                     {row.last_successful_fetch

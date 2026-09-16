@@ -1,11 +1,11 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react'
 import Modal from './components/ui/Modal'
 import Button from './components/ui/Button'
 import { API_TOKEN_KEY } from './utils/apiClient'
 import Layout from './components/layout/Layout'
 import Dashboard from './pages/Dashboard'
 import LoadingSpinner from './components/ui/LoadingSpinner'
-import { useRouter } from './store/useRouter'
+import { useRouter, type RouteParams } from './store/useRouter'
 
 // Lazy load heavy components to reduce initial bundle size
 const RiskMapPage = lazy(() => import('./pages/RiskMapPage'))
@@ -18,6 +18,12 @@ const ModelPerformance = lazy(() => import('./pages/ModelPerformance'))
 const DataQuality = lazy(() => import('./pages/DataQuality'))
 const Analytics = lazy(() => import('./pages/Analytics'))
 const Settings = lazy(() => import('./pages/Settings'))
+
+/** Every routed page is rendered with the hash-route params; pages that do
+ *  not need them simply ignore the prop. */
+interface PageProps {
+  params: RouteParams
+}
 
 export default function App() {
   const { currentPage, params } = useRouter()
@@ -41,7 +47,7 @@ export default function App() {
   }
 
   const renderPage = () => {
-    const PageComponent = (() => {
+    const PageComponent: ComponentType<PageProps> = (() => {
       switch (currentPage) {
         case 'dashboard':
           return Dashboard

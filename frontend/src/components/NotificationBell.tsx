@@ -1,14 +1,24 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type MouseEvent, type ReactNode } from 'react'
 import Badge from './ui/Badge'
-import Card, { CardHeader, CardTitle, CardContent } from './ui/Card'
 import Button from './ui/Button'
-import { useNotifications, useMarkNotificationAsRead, useMarkAllAsRead } from '../hooks/useNotifications'
+import {
+  useNotifications,
+  useMarkNotificationAsRead,
+  useMarkAllAsRead
+} from '../hooks/useNotifications'
+import type { Notification, NotificationId } from '../types/api'
 import { useRouter } from '../store/useRouter'
 
-function NotificationItem({ notification, onRead, onDismiss }) {
+interface NotificationItemProps {
+  notification: Notification
+  onRead: (id: NotificationId) => void
+  onDismiss: (id: NotificationId) => void
+}
+
+function NotificationItem({ notification, onRead, onDismiss }: NotificationItemProps) {
   const navigate = useRouter((state) => state.navigate)
 
-  const getIcon = (type) => {
+  const getIcon = (type?: string | null): ReactNode => {
     switch (type) {
       case 'success':
         return (
@@ -58,10 +68,13 @@ function NotificationItem({ notification, onRead, onDismiss }) {
     }
   }
 
-  const formatTime = (dateString) => {
-    const date = new Date(dateString)
+  const formatTime = (dateString?: string | null) => {
+    // The cast keeps the exact runtime of the untyped original for the two
+    // degenerate inputs: `new Date(null)` is the epoch, `new Date(undefined)`
+    // is Invalid Date. A missing created_at renders the same as before.
+    const date = new Date(dateString as string)
     const now = new Date()
-    const diff = Math.floor((now - date) / 1000) // seconds
+    const diff = Math.floor((now.getTime() - date.getTime()) / 1000) // seconds
 
     if (diff < 60) return 'Just now'
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
@@ -105,7 +118,7 @@ function NotificationItem({ notification, onRead, onDismiss }) {
         </div>
         {!notification.is_read && (
           <button
-            onClick={(e) => {
+            onClick={(e: MouseEvent<HTMLButtonElement>) => {
               e.stopPropagation()
               onDismiss(notification.id)
             }}
@@ -139,16 +152,17 @@ export default function NotificationBell() {
     return () => clearInterval(interval)
   }, [refetch])
 
-  const handleMarkAsRead = (id) => {
+  const handleMarkAsRead = (id: NotificationId) => {
     markAsReadMutation.mutate(id)
   }
 
-  const handleDismiss = (id) => {
+  const handleDismiss = (id: NotificationId) => {
     markAsReadMutation.mutate(id)
   }
 
   const handleMarkAllAsRead = () => {
-    markAllAsReadMutation.mutate()
+    // `null` category = mark every category read, same as the hook's default.
+    markAllAsReadMutation.mutate(null)
   }
 
   return (

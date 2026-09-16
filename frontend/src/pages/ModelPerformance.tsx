@@ -1,14 +1,23 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, type ReactNode } from 'react'
 import PageContainer from '../components/ui/PageContainer'
 import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import Button from '../components/ui/Button'
-import Badge from '../components/ui/Badge'
+import Badge, { type BadgeVariant } from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import { useModels } from '../hooks/useApi'
 import { useRouter } from '../store/useRouter'
+import type { Model } from '../types/api'
 
-function MetricCard({ title, value, change, trend, subtitle }) {
+interface MetricCardProps {
+  title: string
+  value: ReactNode
+  change?: string
+  trend?: 'up' | 'down' | 'flat'
+  subtitle?: ReactNode
+}
+
+function MetricCard({ title, value, change, trend, subtitle }: MetricCardProps) {
   const trendColor = trend === 'up' ? 'text-bne-moss' : trend === 'down' ? 'text-bne-clay' : 'text-bne-muted'
   const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'
 
@@ -33,13 +42,16 @@ function MetricCard({ title, value, change, trend, subtitle }) {
   )
 }
 
-function ModelComparisonTable({ models }) {
-  const [sortBy, setSortBy] = useState('accuracy')
-  const [sortOrder, setSortOrder] = useState('desc')
+type SortColumn = 'accuracy' | 'rmse' | 'mae' | 'trained'
+
+function ModelComparisonTable({ models }: { models: Model[] }) {
+  const [sortBy, setSortBy] = useState<SortColumn>('accuracy')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
 
   const sortedModels = useMemo(() => {
     const sorted = [...models].sort((a, b) => {
-      let aVal, bVal
+      let aVal: number
+      let bVal: number
 
       switch (sortBy) {
         case 'accuracy':
@@ -69,7 +81,7 @@ function ModelComparisonTable({ models }) {
     return sorted
   }, [models, sortBy, sortOrder])
 
-  const handleSort = (column) => {
+  const handleSort = (column: SortColumn) => {
     if (sortBy === column) {
       setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')
     } else {
@@ -78,21 +90,21 @@ function ModelComparisonTable({ models }) {
     }
   }
 
-  const formatMetric = (value) => {
+  const formatMetric = (value?: number | null) => {
     if (value === null || value === undefined) return '—'
     const num = Number(value)
     if (!Number.isFinite(num)) return '—'
     return num.toFixed(4)
   }
 
-  const getStatusBadge = (status) => {
-    const variants = {
+  const getStatusBadge = (status?: string | null) => {
+    const variants: Record<string, BadgeVariant> = {
       ready: 'success',
       training: 'primary',
       failed: 'danger',
       draft: 'default'
     }
-    return <Badge variant={variants[status] || 'default'} size="sm">{status}</Badge>
+    return <Badge variant={variants[status ?? ''] || 'default'} size="sm">{status}</Badge>
   }
 
   return (
@@ -132,7 +144,7 @@ function ModelComparisonTable({ models }) {
         <tbody>
           {sortedModels.map((model) => (
             <tr
-              key={model.model_id}
+              key={String(model.model_id)}
               className="border-b border-bne-line last:border-0 hover:bg-bne-paper/30 transition-colors"
             >
               <td className="py-3 px-4">
@@ -167,12 +179,12 @@ function ModelComparisonTable({ models }) {
   )
 }
 
-function PerformanceChart({ models }) {
+function PerformanceChart({ models }: { models: Model[] }) {
   const chartData = useMemo(() => {
     return models
-      .filter(m => m.result?.test_r2 || m.accuracy)
-      .map(m => ({
-        name: m.name,
+      .filter((m) => m.result?.test_r2 || m.accuracy)
+      .map((m) => ({
+        name: m.name ?? '',
         r2: m.result?.test_r2 || m.accuracy || 0,
         rmse: m.result?.test_rmse || m.result?.rmse || 0,
         mae: m.result?.test_mae || m.result?.mae || 0
@@ -184,7 +196,7 @@ function PerformanceChart({ models }) {
     return <p className="text-sm text-bne-muted">No performance data available</p>
   }
 
-  const maxR2 = Math.max(...chartData.map(d => d.r2))
+  const maxR2 = Math.max(...chartData.map((d) => d.r2))
 
   return (
     <div className="space-y-4">
@@ -211,23 +223,23 @@ function PerformanceChart({ models }) {
   )
 }
 
-function ModelHealthIndicators({ models }) {
+function ModelHealthIndicators({ models }: { models: Model[] }) {
   const health = useMemo(() => {
-    const ready = models.filter(m => m.status === 'ready').length
-    const training = models.filter(m => m.status === 'training').length
-    const failed = models.filter(m => m.status === 'failed').length
-    const stale = models.filter(m => {
+    const ready = models.filter((m) => m.status === 'ready').length
+    const training = models.filter((m) => m.status === 'training').length
+    const failed = models.filter((m) => m.status === 'failed').length
+    const stale = models.filter((m) => {
       if (!m.last_trained) return true
       const daysSince = (Date.now() - new Date(m.last_trained).getTime()) / (1000 * 60 * 60 * 24)
       return daysSince > 30
     }).length
 
-    const totalHealth = models.length > 0 ? ((ready / models.length) * 100).toFixed(0) : 0
+    const totalHealth = models.length > 0 ? Number(((ready / models.length) * 100).toFixed(0)) : 0
 
     return { ready, training, failed, stale, totalHealth }
   }, [models])
 
-  const getHealthColor = (score) => {
+  const getHealthColor = (score: number) => {
     if (score >= 80) return 'text-bne-moss'
     if (score >= 50) return 'text-bne-ochre'
     return 'text-bne-clay'
@@ -318,30 +330,30 @@ export default function ModelPerformance() {
     if (!models || models.length === 0) {
       return {
         totalModels: 0,
-        avgAccuracy: 0,
-        avgRMSE: 0,
-        bestModel: null
+        avgAccuracy: 0 as number | string,
+        avgRMSE: 0 as number | string,
+        bestModel: null as Model | null
       }
     }
 
-    const readyModels = models.filter(m => m.status === 'ready')
+    const readyModels = models.filter((m) => m.status === 'ready')
     const r2Scores = readyModels
-      .map(m => m.accuracy || m.result?.test_r2)
-      .filter(s => s !== null && s !== undefined)
+      .map((m) => m.accuracy || m.result?.test_r2)
+      .filter((s): s is number => s !== null && s !== undefined)
 
     const rmseScores = readyModels
-      .map(m => m.result?.test_rmse || m.result?.rmse)
-      .filter(s => s !== null && s !== undefined)
+      .map((m) => m.result?.test_rmse || m.result?.rmse)
+      .filter((s): s is number => s !== null && s !== undefined)
 
-    const avgAccuracy = r2Scores.length > 0
+    const avgAccuracy: number | string = r2Scores.length > 0
       ? (r2Scores.reduce((a, b) => a + b, 0) / r2Scores.length).toFixed(4)
       : 0
 
-    const avgRMSE = rmseScores.length > 0
+    const avgRMSE: number | string = rmseScores.length > 0
       ? (rmseScores.reduce((a, b) => a + b, 0) / rmseScores.length).toFixed(4)
       : 0
 
-    const bestModel = readyModels.reduce((best, model) => {
+    const bestModel = readyModels.reduce<Model | null>((best, model) => {
       const score = model.accuracy || model.result?.test_r2 || 0
       const bestScore = best?.accuracy || best?.result?.test_r2 || 0
       return score > bestScore ? model : best
@@ -383,7 +395,7 @@ export default function ModelPerformance() {
       subtitle="Centralized view of all model metrics, health indicators, and performance trends"
       actions={
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={refetch}>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
             <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>

@@ -8,7 +8,18 @@ import { useSystemStatus } from '../hooks/useApi'
 
 const PREFERENCES_KEY = 'beacon.preferences.v1'
 
-const DEFAULT_PREFERENCES = {
+/** Browser-local UI preferences. BEACON has no accounts; these never leave
+ *  this device and are labelled as local wherever they surface. */
+interface Preferences {
+  emailAlerts: boolean
+  jobLifecycle: boolean
+  weeklyDigest: boolean
+  autoRefresh: boolean
+  confirmBeforeStop: boolean
+  experimentalFeatures: boolean
+}
+
+const DEFAULT_PREFERENCES: Preferences = {
   emailAlerts: true,
   jobLifecycle: true,
   weeklyDigest: false,
@@ -17,17 +28,24 @@ const DEFAULT_PREFERENCES = {
   experimentalFeatures: false
 }
 
-function loadPreferences() {
+function loadPreferences(): Preferences {
   try {
     const raw = window.localStorage.getItem(PREFERENCES_KEY)
     if (!raw) return DEFAULT_PREFERENCES
-    return { ...DEFAULT_PREFERENCES, ...JSON.parse(raw) }
+    return { ...DEFAULT_PREFERENCES, ...(JSON.parse(raw) as Partial<Preferences>) }
   } catch {
     return DEFAULT_PREFERENCES
   }
 }
 
-function PreferenceToggle({ label, description, value, onChange }) {
+interface PreferenceToggleProps {
+  label: string
+  description?: string
+  value: boolean
+  onChange: () => void
+}
+
+function PreferenceToggle({ label, description, value, onChange }: PreferenceToggleProps) {
   return (
     <button
       type="button"
@@ -57,7 +75,7 @@ function PreferenceToggle({ label, description, value, onChange }) {
 
 export default function Settings() {
   const { data: systemStatus } = useSystemStatus()
-  const [preferences, setPreferences] = useState(loadPreferences)
+  const [preferences, setPreferences] = useState<Preferences>(loadPreferences)
 
   // Preferences are UI-side state: persisted in this browser, and labelled as
   // such. Nothing here pretends to be a server-side account setting while
@@ -70,7 +88,7 @@ export default function Settings() {
     }
   }, [preferences])
 
-  const toggles = useMemo(
+  const toggles = useMemo<Array<{ key: keyof Preferences; label: string; description: string }>>(
     () => [
       {
         key: 'emailAlerts',
@@ -91,7 +109,7 @@ export default function Settings() {
     []
   )
 
-  const workspaceToggles = useMemo(
+  const workspaceToggles = useMemo<Array<{ key: keyof Preferences; label: string; description: string }>>(
     () => [
       {
         key: 'autoRefresh',
@@ -112,7 +130,7 @@ export default function Settings() {
     []
   )
 
-  const handleToggle = (key) => {
+  const handleToggle = (key: keyof Preferences) => {
     setPreferences((previous) => ({
       ...previous,
       [key]: !previous[key]

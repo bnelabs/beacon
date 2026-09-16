@@ -1,12 +1,12 @@
 name: Security audit
 
-# why: advisory dependency and supply-chain signal. Runs on the same events as CI so a
-# newly published CVE shows up in the PR/checks UI, plus a weekly schedule so it still
-# fires when the repository is quiet, plus manual dispatch.
+# why: advisory dependency and supply-chain signal, and nothing else. Every
+# step here is continue-on-error by design -- an audit has never been able to
+# block a merge -- so running it on every push and PR only added queue time
+# and a wall of green-but-slow checks in front of work. It now fires weekly
+# (a newly published CVE surfaces within the week, which is exactly the
+# cadence an advisory signal needs) and on demand.
 on:
-  push:
-    branches: [main]
-  pull_request:
   schedule:
     - cron: "17 6 * * 1"
   workflow_dispatch:

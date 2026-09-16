@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import type { Job, JobUpdate } from '../types/api'
 
 /**
  * Live job updates over the backend WebSocket, with a polling fallback.
@@ -16,7 +17,19 @@ const MAX_RECONNECT_ATTEMPTS = 5
 const RECONNECT_DELAY_MS = 3000
 const FALLBACK_POLL_INTERVAL_MS = 5000
 
-export function useJobsWebSocket(options = {}) {
+export interface JobsWebSocketOptions {
+  enabled?: boolean
+  onUpdate?: (update: JobUpdate) => void
+  onError?: (error: unknown) => void
+}
+
+export interface JobsWebSocketState {
+  isConnected: boolean
+  reconnect: () => void
+  disconnect: () => void
+}
+
+export function useJobsWebSocket(options: JobsWebSocketOptions = {}): JobsWebSocketState {
   const { enabled = true, onUpdate, onError } = options
 
   // Connection state is React state, not a read of `wsRef` during render. A ref
@@ -24,9 +37,9 @@ export function useJobsWebSocket(options = {}) {
   // live socket and the "Live updates active" badge never appeared.
   const [isConnected, setIsConnected] = useState(false)
 
-  const wsRef = useRef(null)
-  const reconnectTimerRef = useRef(null)
-  const pollTimerRef = useRef(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const reconnectAttemptsRef = useRef(0)
   const queryClient = useQueryClient()
 
@@ -42,14 +55,14 @@ export function useJobsWebSocket(options = {}) {
     onErrorRef.current = onError
   }, [onError])
 
-  const updateJobInCache = useCallback((jobUpdate) => {
+  const updateJobInCache = useCallback((jobUpdate: JobUpdate) => {
     // The payload carries both `id` and `job_id`, because the two caches below
     // are keyed differently.
-    queryClient.setQueryData(['jobs', jobUpdate.job_id], (old) =>
+    queryClient.setQueryData(['jobs', jobUpdate.job_id], (old: Job | undefined) =>
       old ? { ...old, ...jobUpdate } : old
     )
 
-    queryClient.setQueryData(['jobs'], (old) =>
+    queryClient.setQueryData(['jobs'], (old: Job[] | undefined) =>
       Array.isArray(old)
         ? old.map((job) =>
             job.job_id === jobUpdate.job_id || job.id === jobUpdate.job_id
@@ -79,7 +92,7 @@ export function useJobsWebSocket(options = {}) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/api/v1/jobs/ws`
 
-    let ws
+    let ws: WebSocket | undefined
     try {
       ws = new WebSocket(wsUrl)
     } catch (err) {
@@ -87,6 +100,9 @@ export function useJobsWebSocket(options = {}) {
       if (onErrorRef.current) {
         onErrorRef.current(err)
       }
+      return
+    }
+    if (!ws) {
       return
     }
     wsRef.current = ws
@@ -97,9 +113,9 @@ export function useJobsWebSocket(options = {}) {
       setIsConnected(true)
     }
 
-    ws.onmessage = (event) => {
+    ws.onmessage = (event: MessageEvent<string>) => {
       try {
-        const data = JSON.parse(event.data)
+        const data = JSON.parse(event.data) as { type?: string; job?: JobUpdate }
         if (data.type === 'job_update' && data.job) {
           updateJobInCache(data.job)
         }
@@ -109,7 +125,7 @@ export function useJobsWebSocket(options = {}) {
       }
     }
 
-    ws.onerror = (error) => {
+    ws.onerror = (error: Event) => {
       console.error('[JobsWebSocket] Error:', error)
       if (onErrorRef.current) {
         onErrorRef.current(error)

@@ -1,0 +1,105 @@
+name: Frontend e2e (deep)
+
+# why: the production build and the Playwright suite are the deep frontend
+# validation: ~10 minutes of browser downloads, Vite bundling and mocked
+# navigation that used to run on every push and pull request. That wait is
+# what made CI feel slower than the work, so the suite moved here -- nightly
+# and on demand -- while frontend-ci.yml keeps the sub-minute static gate
+# (typecheck + mock-coverage audit) in front of every merge. A regression this
+# catches is surfaced at most one day late, and immediately on request:
+#   gh workflow run frontend-e2e.yml --ref <branch>
+# Run it by hand before merging anything that touches routing, the API client,
+# or a flow the mocked suite walks (jobs, data sources, the risk map).
+on:
+  schedule:
+    # 03:26 UTC daily. Off-the-hour minutes are deliberate: GitHub delays
+    # scheduled runs during high load at :00, and a nightly signal that
+    # arrives late is a signal that gets read the next morning.
+    - cron: "26 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: frontend-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-e2e:
+    name: Build and Playwright e2e (Node 24)
+    runs-on: ubuntu-latest
+    # why: browser download + vite build + the long mocked navigation spec;
+    # 30 minutes gives headroom on a cold cache while bounding a hung run.
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # why: NO live backend stack (no `docker compose up`, no uvicorn/
+      # Postgres/Redis) is started for this job. The Playwright suite is fully
+      # self-mocked:
+      #   * frontend/tests/full-frontend.spec.js calls registerApiMocks(page)
+      #     in beforeEach; frontend/tests/apiMocks.js registers
+      #     `page.route('**/api/**', ...)` and serves every
+      #     catalogue/jobs/countries/analytics/data-quality response from
+      #     in-file fixtures.
+      #   * frontend/playwright.config.js uses a webServer block that only needs
+      #     the Vite dev server (`npm run dev` -> 127.0.0.1:8173); the
+      #     component code's default API_BASE (http://localhost:3456) is never
+      #     actually reached because route interception happens in the browser
+      #     before the request leaves.
+      # The suite is therefore run standalone against the mocked API.
+
+      - name: Build production bundle
+        # why: the runner-side proof that the app bundles. Frontend CI's
+        # typecheck proves the code is type-correct; this proves Rollup can
+        # resolve and ship it (the failure class the Dockerfile's old
+        # `npm install --legacy-peer-deps` produced: a missing @deck.gl/widgets
+        # that typechecked fine and failed to bundle).
+        run: npm run build
+
+      - name: Install Playwright browser and system dependencies
+        # why: --with-deps pulls the OS libraries chromium needs on the bare
+        # ubuntu-latest runner. The `pretest` hook (scripts/ensure-playwright.mjs)
+        # also runs `npx playwright install chromium`, which becomes a fast
+        # no-op because the browser is already present.
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright end-to-end suite
+        env:
+          # why: playwright.config.js sets reuseExistingServer =
+          # !process.env.CI, so CI must be truthy for Playwright to own the
+          # Vite webServer lifecycle.
+          CI: "true"
+        # why: `npm test` runs the documented entry point (pretest browser
+        # check + `playwright test`).
+        run: npm test
+
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-artifacts
+          # note: paths are resolved from the repo root, not the job's
+          # working-directory.
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7

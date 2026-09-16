@@ -290,14 +290,25 @@ schema; there is deliberately no second copy of the DDL that could drift.
 
 ## CI/CD
 
-| Workflow | Purpose |
-|---|---|
-| `.github/workflows/backend-ci.yml` | Compile + `pytest` with coverage on push/PR |
-| `.github/workflows/frontend-ci.yml` | `npm run build` + Playwright e2e on push/PR |
-| `.github/workflows/security.yml` | Advisory `pip-audit` and `npm audit`, plus a weekly run |
+CI is split into a **sub-minute pre-merge gate** (static checks that need no
+browser, no torch, no bundler) and **nightly/on-demand deep runs** (the full
+test suite, the production build, the Playwright suite). A gate that takes ten
+minutes is a gate nobody waits for; the deep runs surface the same regressions
+at most a day later — or immediately via `gh workflow run <file> --ref <branch>`.
 
-Dependabot keeps pip, npm, GitHub Actions and Docker images current. Local
-equivalents for every job: [`.github/workflows/README.md`](.github/workflows/README.md).
+| Workflow | Purpose | Triggers |
+|---|---|---|
+| `.github/workflows/backend-ci.yml` | Syntax gate (`compileall`) + compose/Dockerfile validation — no dependency tree | push/PR (**< 1 min**) |
+| `.github/workflows/frontend-ci.yml` | Strict `tsc --noEmit` over all of `frontend/src` + e2e mock-coverage audit | push/PR (**< 1 min**) |
+| `.github/workflows/versioning-ci.yml` | Version-policy guard | push/PR (**< 1 min**) |
+| `.github/workflows/backend-tests.yml` | Full `pytest` + coverage, live-migration Postgres, generated-API-docs check | nightly + dispatch |
+| `.github/workflows/frontend-e2e.yml` | Production `vite build` + mocked Playwright suite | nightly + dispatch |
+| `.github/workflows/security.yml` | Advisory `pip-audit` and `npm audit` | weekly + dispatch |
+| `.github/workflows/docker-backend.yml` / `docker-frontend.yml` | Build the real images | dispatch only |
+
+Dependabot keeps GitHub Actions current (pip/npm security-only; no Docker
+entry). Local equivalents for every job:
+[`.github/workflows/README.md`](.github/workflows/README.md).
 
 ---
 

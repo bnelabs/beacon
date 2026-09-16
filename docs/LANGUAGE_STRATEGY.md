@@ -191,23 +191,34 @@ should come from `docs/api-endpoints.md`, `test_reachability.py` and
 
 The frontend's failure modes were type-shaped (payload-envelope drift,
 `undefined%` rendering, wrong field names surviving four review rounds). The
-migration is phased and ratcheted — new code is `.ts`, existing modules convert
-when touched:
+migration was phased and ratcheted — new code is `.ts`, existing modules convert
+when touched. It is complete: **zero `.js`/`.jsx` modules remain under
+`frontend/src`.**
 
 1. **Phase 1 (done, 2026-09):** `src/utils/apiClient.ts` — the single HTTP
    client with typed generics and the envelope normaliser; `tsconfig.json`
    with `strict: true`; `npm run typecheck` in CI. Zero `.js` modules may add
    new fetch logic.
-2. **Phase 2:** hooks (`useApi`, `useDataQuality`, `useAnalytics`,
-   `useCountries`, `useNotifications`) converted alongside response types
-   generated from the backend OpenAPI schema (`/openapi.json`), so envelope
-   and field-name drift becomes a compile error rather than an e2e surprise.
-3. **Phase 3:** page components, one route per PR, starting with the
-   data-quality and analytics dashboards (the pages whose payloads crashed
-   under wrong shapes in testing).
+2. **Phase 2 (done, 2026-09):** every hook (`useApi`, `useJobsWebSocket`,
+   `useDataQuality`, `useAnalytics`, `useCountries`, `useNotifications`) is
+   `.ts` and returns typed responses. The response types were not generated
+   from `/openapi.json` as originally sketched; they are hand-derived in
+   `src/types/api.ts` from the generated endpoint inventory
+   (`docs/api-endpoints.md`) and from every field the UI actually reads, so
+   envelope and field-name drift is a compile error rather than an e2e
+   surprise. If a generator is added later, `src/types/api.ts` is the file it
+   must replace.
+3. **Phase 3 (done, 2026-09):** every page, component and entry point is
+   `.tsx` — not one route per PR but one migration to close the ratchet,
+   because the incremental batches (PR #64 and its predecessors) had already
+   converted the UI kit, layout and stores, and leaving eleven pages in
+   untyped JS kept the exact failure modes the migration exists to kill.
+   `tsconfig.json` no longer carries `allowJs`, so a new `.js` module in
+   `src/` is not merely unchecked, it is invisible to the compiler.
 
-JavaScript stays where it is honest: config files, the Playwright spec, and
-unconverted legacy modules during the ratchet.
+JavaScript stays where it is honest: config files (`vite.config.js`,
+`tailwind.config.js`, `playwright.config.js`) and the Playwright spec — tooling
+and tests, not the shipped app.
 
 ## What is not on the table
 

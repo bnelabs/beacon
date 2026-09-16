@@ -1,7 +1,7 @@
 import PageContainer from '../components/ui/PageContainer'
 import Card, { CardHeader, CardTitle, CardContent, CardFooter } from '../components/ui/Card'
 import Button from '../components/ui/Button'
-import Badge from '../components/ui/Badge'
+import Badge, { type BadgeVariant } from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import {
@@ -17,12 +17,20 @@ import { useMemo, useState } from 'react'
 import DataSourceFormModal from '../components/data-sources/DataSourceFormModal'
 import DataSourceDetailsModal from '../components/data-sources/DataSourceDetailsModal'
 import JobCreationModal from '../components/jobs/JobCreationModal'
+import type {
+  DataSource,
+  DataSourceFormPayload,
+  DataSourceHealthRow,
+  EntityId,
+  ProbeResult,
+  SelectedDataset
+} from '../types/api'
 
 // Provenance classes come from the backend disclosure payload; this map only
 // decides how each class is rendered (badge variant + human label). The
 // vocabulary is closed on the backend (PROVENANCE_CLASSES), so an unknown
 // class falls back to the neutral badge rather than disappearing.
-const PROVENANCE_CLASS_META = {
+const PROVENANCE_CLASS_META: Record<string, { label: string; variant: BadgeVariant }> = {
   supervisory_published: { label: 'Supervisory', variant: 'primary' },
   official_statistics: { label: 'Official statistics', variant: 'info' },
   regulatory_filings: { label: 'Regulatory filings', variant: 'info' },
@@ -30,6 +38,25 @@ const PROVENANCE_CLASS_META = {
   research_dataset: { label: 'Research dataset', variant: 'warning' },
   operator_declared: { label: 'Operator declared', variant: 'warning' },
   undisclosed: { label: 'Undisclosed', variant: 'danger' }
+}
+
+/** Stable string key for a source row: property keys are strings at runtime,
+ *  and probe results / health rows are looked up by exactly this. */
+function sourceKey(source: DataSource): string {
+  return String(source.id || source.source_id || '')
+}
+
+interface DataSourceCardProps {
+  source: DataSource
+  onSync?: (source: DataSource) => void
+  onConfigure?: (source: DataSource) => void
+  onView?: (source: DataSource) => void
+  isSyncing?: boolean
+  health?: DataSourceHealthRow | null
+  onProbe?: (source: DataSource) => void
+  onSchedule?: (source: DataSource, minutes: number | null) => void
+  probePending?: boolean
+  probeResult?: ProbeResult | null
 }
 
 function DataSourceCard({
@@ -43,8 +70,8 @@ function DataSourceCard({
   onSchedule,
   probePending = false,
   probeResult = null
-}) {
-  const statusVariants = {
+}: DataSourceCardProps) {
+  const statusVariants: Record<string, BadgeVariant> = {
     active: 'success',
     inactive: 'default',
     error: 'danger',
@@ -64,7 +91,7 @@ function DataSourceCard({
           <div>
             <div className="flex items-center gap-2 mb-2">
               <CardTitle>{source.name || source.source_name}</CardTitle>
-              <Badge variant={statusVariants[source.status] || 'default'} size="sm">
+              <Badge variant={statusVariants[source.status ?? ''] || 'default'} size="sm">
                 {source.status || 'active'}
               </Badge>
             </div>
@@ -94,7 +121,7 @@ function DataSourceCard({
           <div className="flex items-center justify-between text-sm">
             <span className="text-bne-muted">Schedule</span>
             <select
-              aria-label={`Collection schedule for ${source.name}`}
+              aria-label={`Collection schedule for ${source.name ?? 'this source'}`}
               className="rounded-md border border-bne-line bg-bne-card px-2 py-1 text-xs font-medium text-bne-ink focus:border-bne-pine focus:outline-none"
               value={source.sync_interval_minutes ?? ''}
               onChange={(event) =>
@@ -133,20 +160,20 @@ function DataSourceCard({
                     <Badge variant="primary" size="sm">running now</Badge>
                   ) : health.overdue ? (
                     <Badge variant="warning" size="sm">
-                      {health.consecutive_failures > 0
+                      {(health.consecutive_failures ?? 0) > 0
                         ? `overdue · retry ×${health.backoff_factor}`
                         : 'due'}
                     </Badge>
                   ) : (
                     <span className="font-medium text-bne-ink">
-                      {new Date(health.next_due_at).toLocaleString()}
+                      {health.next_due_at ? new Date(health.next_due_at).toLocaleString() : '—'}
                     </span>
                   )
                 ) : (
                   <span className="font-medium text-bne-muted">manual</span>
                 )}
               </div>
-              {health.consecutive_failures > 0 && health.error_message && (
+              {(health.consecutive_failures ?? 0) > 0 && health.error_message && (
                 <p className="text-xs text-bne-clay">
                   {health.consecutive_failures} consecutive failure(s): {health.error_message}
                 </p>
@@ -211,45 +238,45 @@ export default function DataSources() {
   const updateMutation = useUpdateDataSource()
   const { data: healthPayload } = useDataSourceHealth()
   const probeMutation = useProbeDataSource()
-  const [probeResults, setProbeResults] = useState({})
+  const [probeResults, setProbeResults] = useState<Record<string, ProbeResult | null>>({})
 
   // The health payload is the scheduler's view of each feed: cadence, last
   // outcome, next due date and the backoff factor while a feed fails.
   const healthById = useMemo(() => {
-    const map = new Map()
-    ;(healthPayload?.sources || []).forEach((row) => map.set(row.id, row))
+    const map = new Map<string, DataSourceHealthRow>()
+    ;(healthPayload?.sources || []).forEach((row) => map.set(String(row.id), row))
     return map
   }, [healthPayload])
 
-  const handleProbe = (source) => {
-    const id = source.id || source.source_id
+  const handleProbe = (source: DataSource) => {
+    const id: EntityId | null | undefined = source.id || source.source_id
     probeMutation.mutate(id, {
-      onSuccess: (result) => setProbeResults((prev) => ({ ...prev, [id]: result })),
-      onError: (error) =>
+      onSuccess: (result) => setProbeResults((prev) => ({ ...prev, [sourceKey(source)]: result })),
+      onError: (probeError) =>
         setProbeResults((prev) => ({
           ...prev,
-          [id]: { success: false, message: error?.message || 'probe failed' }
+          [sourceKey(source)]: { success: false, message: probeError?.message || 'probe failed' }
         }))
     })
   }
 
-  const handleSchedule = (source, minutes) => {
+  const handleSchedule = (source: DataSource, minutes: number | null) => {
     updateMutation.mutate({
       sourceId: source.id || source.source_id,
       sync_interval_minutes: minutes
     })
   }
   const [isFormOpen, setIsFormOpen] = useState(false)
-  const [formMode, setFormMode] = useState('create')
-  const [formSource, setFormSource] = useState(null)
-  const [detailsSource, setDetailsSource] = useState(null)
+  const [formMode, setFormMode] = useState<'create' | 'edit'>('create')
+  const [formSource, setFormSource] = useState<DataSource | null>(null)
+  const [detailsSource, setDetailsSource] = useState<DataSource | null>(null)
 
   // Plugin options come from the backend disclosure (the runtime registry),
   // not a hand-maintained frontend list: a feed the API cannot resolve must
   // not be selectable, and a feed it can must not be missing.
   const pluginOptions = useMemo(() => {
-    const seen = new Set()
-    const base = []
+    const seen = new Set<string>()
+    const base: Array<{ value: string; label: string }> = []
     ;(disclosure?.sources || []).forEach((source) => {
       if (source.plugin_type && !seen.has(source.plugin_type)) {
         base.push({ value: source.plugin_type, label: source.name || source.plugin_type })
@@ -266,8 +293,8 @@ export default function DataSources() {
     return base
   }, [disclosure, sources])
 
-  const [selectedDatasets, setSelectedDatasets] = useState([])
-  const selectedDatasetIds = useMemo(() => selectedDatasets.map((dataset) => dataset.id), [selectedDatasets])
+  const [selectedDatasets, setSelectedDatasets] = useState<SelectedDataset[]>([])
+  const selectedDatasetIds = useMemo<EntityId[]>(() => selectedDatasets.map((dataset) => dataset.id), [selectedDatasets])
   const [isJobModalOpen, setIsJobModalOpen] = useState(false)
 
   // The most recent real fetch across sources; "Never" when nothing has run.
@@ -276,20 +303,20 @@ export default function DataSources() {
   // every render.)
   const lastSyncLabel = useMemo(() => {
     const stamps = (sources || [])
-      .map(s => s.last_successful_fetch || s.updated_at || s.last_updated)
-      .filter(Boolean)
-      .map(s => new Date(s).getTime())
-      .filter(t => !Number.isNaN(t))
+      .map((s) => s.last_successful_fetch || s.updated_at || s.last_updated)
+      .filter((stamp): stamp is string => Boolean(stamp))
+      .map((s) => new Date(s).getTime())
+      .filter((t) => !Number.isNaN(t))
     if (stamps.length === 0) return 'Never'
     return new Date(Math.max(...stamps)).toLocaleString()
   }, [sources])
 
-  const handleDatasetSelection = (datasets = []) => {
+  const handleDatasetSelection = (datasets: SelectedDataset[] = []) => {
     if (!datasets || datasets.length === 0) {
       return
     }
     setSelectedDatasets((prev) => {
-      const map = new Map(prev.map((dataset) => [dataset.id, dataset]))
+      const map = new Map<EntityId, SelectedDataset>(prev.map((dataset) => [dataset.id, dataset]))
       datasets.forEach((dataset) => {
         if (dataset && typeof dataset.id !== 'undefined' && dataset.id !== null) {
           map.set(dataset.id, dataset)
@@ -299,7 +326,7 @@ export default function DataSources() {
     })
   }
 
-  const handleRemoveSelectedDataset = (datasetId) => {
+  const handleRemoveSelectedDataset = (datasetId: EntityId) => {
     setSelectedDatasets((prev) => prev.filter((dataset) => dataset.id !== datasetId))
   }
 
@@ -316,7 +343,7 @@ export default function DataSources() {
 
   const currentSyncingId = syncMutation.isPending ? syncMutation.variables?.sourceId : null
 
-  const handleSync = (source) => {
+  const handleSync = (source: DataSource) => {
     if (!source) return
     const sourceId = source.id || source.source_id
     if (!sourceId) return
@@ -329,17 +356,17 @@ export default function DataSources() {
     setIsFormOpen(true)
   }
 
-  const handleConfigure = (source) => {
+  const handleConfigure = (source: DataSource) => {
     setFormMode('edit')
     setFormSource(source)
     setIsFormOpen(true)
   }
 
-  const handleView = (source) => {
+  const handleView = (source: DataSource) => {
     setDetailsSource(source)
   }
 
-  const handleFormSubmit = async (payload) => {
+  const handleFormSubmit = async (payload: DataSourceFormPayload) => {
     if (formMode === 'create') {
       await createMutation.mutateAsync(payload)
     } else if (formMode === 'edit' && formSource) {
@@ -370,8 +397,8 @@ export default function DataSources() {
     )
   }
 
-  const activeSources = sources?.filter(s => s.status === 'active') || []
-  const inactiveSources = sources?.filter(s => s.status !== 'active') || []
+  const activeSources = sources?.filter((s) => s.status === 'active') || []
+  const inactiveSources = sources?.filter((s) => s.status !== 'active') || []
 
   const workflowSteps = [
     {
@@ -461,7 +488,7 @@ export default function DataSources() {
               <div className="flex flex-wrap gap-2">
                 {selectedDatasets.map((dataset) => (
                   <span
-                    key={dataset.id}
+                    key={String(dataset.id)}
                     className="inline-flex items-center gap-2 rounded-full border border-bne-pine bg-bne-pine/10 px-3 py-1 text-sm text-bne-ink"
                   >
                     <div>
@@ -498,22 +525,22 @@ export default function DataSources() {
           <div>
             <h3 className="text-lg font-semibold text-bne-ink mb-4">Active Sources</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {activeSources.map((source) => (
+              {activeSources.map((source, index) => (
                 <DataSourceCard
-                  key={source.id || source.source_id || source.name}
+                  key={sourceKey(source) || source.name || index}
                   source={source}
                   onSync={handleSync}
                   onConfigure={handleConfigure}
                   onView={handleView}
                   isSyncing={currentSyncingId === (source.id || source.source_id)}
-                  health={healthById.get(source.id || source.source_id)}
+                  health={healthById.get(sourceKey(source)) ?? null}
                   onProbe={handleProbe}
                   onSchedule={handleSchedule}
                   probePending={
                     probeMutation.isPending &&
                     probeMutation.variables === (source.id || source.source_id)
                   }
-                  probeResult={probeResults[source.id || source.source_id]}
+                  probeResult={probeResults[sourceKey(source)]}
                 />
               ))}
             </div>
@@ -524,22 +551,22 @@ export default function DataSources() {
           <div>
             <h3 className="text-lg font-semibold text-bne-ink mb-4">Inactive Sources</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {inactiveSources.map((source) => (
+              {inactiveSources.map((source, index) => (
                 <DataSourceCard
-                  key={source.id || source.source_id || source.name}
+                  key={sourceKey(source) || source.name || index}
                   source={source}
                   onSync={handleSync}
                   onConfigure={handleConfigure}
                   onView={handleView}
                   isSyncing={currentSyncingId === (source.id || source.source_id)}
-                  health={healthById.get(source.id || source.source_id)}
+                  health={healthById.get(sourceKey(source)) ?? null}
                   onProbe={handleProbe}
                   onSchedule={handleSchedule}
                   probePending={
                     probeMutation.isPending &&
                     probeMutation.variables === (source.id || source.source_id)
                   }
-                  probeResult={probeResults[source.id || source.source_id]}
+                  probeResult={probeResults[sourceKey(source)]}
                 />
               ))}
             </div>
@@ -554,11 +581,11 @@ export default function DataSources() {
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
+                strokeWidth={2}
               >
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  strokeWidth={2}
                   d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
                 />
               </svg>
@@ -590,7 +617,7 @@ export default function DataSources() {
                 <p className="text-sm text-bne-ink">{disclosure.policy.synthetic_data}</p>
               </div>
             )}
-            {disclosure?.sources?.length > 0 ? (
+            {(disclosure?.sources?.length ?? 0) > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -604,9 +631,9 @@ export default function DataSources() {
                     </tr>
                   </thead>
                   <tbody>
-                    {disclosure.sources.map((source) => {
+                    {(disclosure?.sources ?? []).map((source) => {
                       const meta = PROVENANCE_CLASS_META[source.provenance_class] ||
-                        { label: source.provenance_class, variant: 'default' }
+                        { label: source.provenance_class, variant: 'default' as BadgeVariant }
                       return (
                         <tr key={source.plugin_type} className="border-b border-bne-line/60 align-top">
                           <td className="py-3 pr-4">
@@ -648,7 +675,7 @@ export default function DataSources() {
               <p className="text-sm text-bne-muted">Provenance disclosure is unavailable.</p>
             )}
 
-            {disclosure?.inferred_inputs?.length > 0 && (
+            {(disclosure?.inferred_inputs?.length ?? 0) > 0 && (
               <div className="mt-6">
                 <h4 className="text-sm font-semibold text-bne-ink mb-2">Inferred inputs</h4>
                 <p className="text-xs text-bne-muted mb-3">
@@ -656,7 +683,7 @@ export default function DataSources() {
                   Each is labelled at every surface it appears on and excluded from the
                   observed-data stores.
                 </p>
-                {disclosure.inferred_inputs.map((input) => (
+                {(disclosure?.inferred_inputs ?? []).map((input) => (
                   <div
                     key={input.name}
                     className="rounded-md border border-bne-ochre/30 bg-bne-ochre-50/40 px-4 py-3 mb-2"
@@ -673,10 +700,10 @@ export default function DataSources() {
               </div>
             )}
 
-            {disclosure?.orphaned_configurations?.length > 0 && (
+            {(disclosure?.orphaned_configurations?.length ?? 0) > 0 && (
               <div className="mt-4 rounded-md border border-bne-clay/30 bg-bne-clay-50/40 px-4 py-3">
                 <p className="text-sm font-medium text-bne-ink mb-1">Configurations that cannot fetch</p>
-                {disclosure.orphaned_configurations.map((orphan) => (
+                {(disclosure?.orphaned_configurations ?? []).map((orphan) => (
                   <p key={orphan.plugin_type} className="text-xs text-bne-muted font-mono">
                     {orphan.plugin_type}: {orphan.problem}
                   </p>

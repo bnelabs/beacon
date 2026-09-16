@@ -1,13 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
+import type { DataSource, DataSourceFormPayload, PluginOption } from '../../types/api'
 
-function formatJson(value) {
+function formatJson(value: unknown): string {
   try {
     return JSON.stringify(value ?? {}, null, 2)
-  } catch (error) {
+  } catch {
     return '{\n  \n}'
   }
+}
+
+export interface DataSourceFormModalProps {
+  isOpen: boolean
+  mode?: 'create' | 'edit'
+  initialSource?: DataSource | null
+  pluginOptions?: PluginOption[] | null
+  onClose?: () => void
+  onSubmit?: (payload: DataSourceFormPayload) => Promise<void> | void
 }
 
 export default function DataSourceFormModal({
@@ -17,7 +27,7 @@ export default function DataSourceFormModal({
   pluginOptions,
   onClose,
   onSubmit
-}) {
+}: DataSourceFormModalProps) {
   const [name, setName] = useState('')
   const [pluginType, setPluginType] = useState('')
   const [description, setDescription] = useState('')
@@ -27,7 +37,7 @@ export default function DataSourceFormModal({
   const [freeTierLimits, setFreeTierLimits] = useState('')
   const [coverageDescription, setCoverageDescription] = useState('')
   const [configText, setConfigText] = useState('')
-  const [error, setError] = useState(null)
+  const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const pluginValues = useMemo(() => pluginOptions || [], [pluginOptions])
@@ -37,11 +47,11 @@ export default function DataSourceFormModal({
       return
     }
 
-    const source = initialSource || {}
+    const source = initialSource || ({} as Partial<DataSource>)
     setName(source.name || '')
     setPluginType(source.plugin_type || pluginValues[0]?.value || '')
     setDescription(source.description || '')
-    setEnabled(source.enabled !== undefined ? source.enabled : true)
+    setEnabled(source.enabled !== undefined && source.enabled !== null ? source.enabled : true)
     setRegistrationUrl(source.registration_url || '')
     setRegistrationRequired(source.registration_required || false)
     setFreeTierLimits(source.free_tier_limits || '')
@@ -51,7 +61,7 @@ export default function DataSourceFormModal({
     setIsSubmitting(false)
   }, [isOpen, initialSource, pluginValues])
 
-  const handleSubmit = async (event) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
     if (!name.trim()) {
@@ -64,17 +74,17 @@ export default function DataSourceFormModal({
       return
     }
 
-    let parsedConfig = {}
+    let parsedConfig: Record<string, unknown> = {}
     if (configText.trim()) {
       try {
-        parsedConfig = JSON.parse(configText)
-      } catch (parseError) {
+        parsedConfig = JSON.parse(configText) as Record<string, unknown>
+      } catch {
         setError('Config must be valid JSON.')
         return
       }
     }
 
-    const payload = {
+    const payload: DataSourceFormPayload = {
       name: name.trim(),
       plugin_type: pluginType,
       description: description.trim() || null,
@@ -94,7 +104,9 @@ export default function DataSourceFormModal({
       setIsSubmitting(false)
       onClose?.()
     } catch (submitError) {
-      setError(submitError?.message || 'Failed to save data source. Please try again.')
+      setError(
+        submitError instanceof Error ? submitError.message : 'Failed to save data source. Please try again.'
+      )
       setIsSubmitting(false)
     }
   }

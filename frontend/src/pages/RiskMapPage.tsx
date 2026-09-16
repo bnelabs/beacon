@@ -16,7 +16,8 @@ import {
   getRiskColor,
   networkConnections
 } from '../data/network-connections'
-import { regions } from '../data/regions'
+import { regions, type Region } from '../data/regions'
+import type { BankSummary, CatalogueFilters, ConnectionView } from '../types/api'
 
 // The bundled network file is demo data. It is only consulted when this flag is
 // explicitly set AND the backend has nothing to serve, and the fallback is
@@ -24,7 +25,7 @@ import { regions } from '../data/regions'
 const ALLOW_STATIC_NETWORK_FALLBACK =
   import.meta.env.VITE_ALLOW_STATIC_NETWORK_FALLBACK === 'true'
 
-const API_REGION_BY_ID = {
+const API_REGION_BY_ID: Record<string, string> = {
   'us-northeast': 'north_america',
   'us-southeast': 'north_america',
   'us-midwest': 'north_america',
@@ -43,20 +44,23 @@ const API_REGION_BY_ID = {
 
 const DATA_SOURCES = ['fdic', 'ecb', 'fmp']
 
+/** A connection whose risk score was actually reported (not null). */
+type ScoredConnection = ConnectionView & { riskScore: number }
+
 export default function RiskMapPage() {
   const { selectedRegion, setSelectedRegion } = useStore()
   const [selectedDataSource, setSelectedDataSource] = useState('fdic')
   const [showNetwork, setShowNetwork] = useState(false)
   const [showHeatmap, setShowHeatmap] = useState(true)
   const [resetToken, setResetToken] = useState(0)
-  const [selectedConnection, setSelectedConnection] = useState(null)
+  const [selectedConnection, setSelectedConnection] = useState<ConnectionView | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [estimateOpen, setEstimateOpen] = useState(false)
 
-  const regionFilters = useMemo(() => {
+  const regionFilters = useMemo<CatalogueFilters | null>(() => {
     if (!selectedRegion) return null
 
-    const filters = { enabled_only: true }
+    const filters: CatalogueFilters = { enabled_only: true }
     if (selectedRegion.iso3) {
       filters.countries = [selectedRegion.iso3]
     }
@@ -70,14 +74,24 @@ export default function RiskMapPage() {
   }, [selectedRegion])
 
   const {
-    data: banks = [],
+    data: banksData,
     isFetching: banksLoading,
     error: banksError,
     refetch: refetchBanks
   } = useBanksByRegion(regionFilters)
+  const banks: BankSummary[] = banksData ?? []
 
   const totalAssets = banks.length
-  const criticalAssets = useMemo(() => banks.filter((bank) => bank.risk_score && bank.risk_score >= 0.7), [banks])
+  const criticalAssets = useMemo(
+    () =>
+      banks.filter(
+        (bank) =>
+          bank.risk_score != null &&
+          bank.risk_score !== '' &&
+          Number(bank.risk_score) >= 0.7
+      ),
+    [banks]
+  )
 
   const {
     data: networkPayload,
@@ -99,7 +113,7 @@ export default function RiskMapPage() {
   // Exposures come from the backend. An institution-level edge is only loadable
   // when both endpoints are present in the network payload; nothing is
   // synthesised for edges the API did not send.
-  const connections = useMemo(() => {
+  const connections = useMemo<ConnectionView[]>(() => {
     if (network.status === 'available') {
       return network.edges.map((edge) => ({
         id: edge.id,
@@ -113,7 +127,11 @@ export default function RiskMapPage() {
     }
     if (fallbackActive) {
       return networkConnections.map((connection) => ({
-        ...connection,
+        id: connection.id,
+        source: connection.source,
+        target: connection.target,
+        exposure: connection.exposure,
+        transactionVolume: connection.transactionVolume,
         riskScore: typeof connection.riskScore === 'number' ? connection.riskScore : null
       }))
     }
@@ -125,7 +143,9 @@ export default function RiskMapPage() {
       (sum, connection) => sum + (Number(connection.exposure) || 0),
       0
     )
-    const scored = connections.filter((connection) => typeof connection.riskScore === 'number')
+    const scored = connections.filter(
+      (connection): connection is ScoredConnection => typeof connection.riskScore === 'number'
+    )
     const averageRisk = scored.length
       ? scored.reduce((sum, connection) => sum + connection.riskScore, 0) / scored.length
       : null
@@ -140,7 +160,8 @@ export default function RiskMapPage() {
     return { totalExposure, averageRisk, riskiest, largest, count: connections.length }
   }, [connections])
 
-  const getRegionName = (regionId) => regions.find((region) => region.id === regionId)?.name || regionId
+  const getRegionName = (regionId: string) =>
+    regions.find((region) => region.id === regionId)?.name || regionId
 
   // The live-network states are stated once, in a strip above the map rather
   // than watermarked over it: a warning painted across the canvas read as part
@@ -152,7 +173,7 @@ export default function RiskMapPage() {
     (connection) => !regionIds.has(connection.source) || !regionIds.has(connection.target)
   ).length
 
-  let networkStatus = null
+  let networkStatus: string | null = null
   if (networkLoading) {
     networkStatus = 'Loading interbank exposures…'
   } else if (fallbackActive) {
@@ -170,13 +191,13 @@ export default function RiskMapPage() {
     networkStatus = `Live interbank network, ${vintage} — ${network.edges.length} edge(s), ${network.nodes.length} institution(s).${unplaced}`
   }
 
-  const handleConnectionClick = (connection) => {
+  const handleConnectionClick = (connection: ConnectionView) => {
     setSelectedConnection(connection)
     setSelectedRegion(null)
   }
 
-  const handleRegionSelect = (region) => {
-    setSelectedRegion(region)
+  const handleRegionSelect = (region?: Region | null) => {
+    setSelectedRegion(region ?? null)
     setSelectedConnection(null)
   }
 
@@ -465,8 +486,8 @@ export default function RiskMapPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {banks.map((bank) => (
-                            <tr key={bank.id} className="border-t border-bne-line">
+                          {banks.map((bank, index) => (
+                            <tr key={String(bank.id ?? index)} className="border-t border-bne-line">
                               <td className="px-3 py-2 font-mono text-xs text-bne-ink">{bank.code}</td>
                               <td className="px-3 py-2 text-bne-ink">{bank.name}</td>
                               <td className="px-3 py-2 text-xs font-mono text-bne-muted">
@@ -500,11 +521,11 @@ export default function RiskMapPage() {
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
+                  strokeWidth={2}
                 >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    strokeWidth={2}
                     d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
                   />
                 </svg>

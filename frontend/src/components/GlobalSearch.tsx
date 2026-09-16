@@ -5,14 +5,32 @@ import { useQuery } from '@tanstack/react-query'
 import Card from './ui/Card'
 import Badge from './ui/Badge'
 import LoadingSpinner from './ui/LoadingSpinner'
+import type { CatalogueItem, Country, Job, Model } from '../types/api'
 
 // Same-origin by default; nginx proxies /api/ to the backend. See the note in
-// hooks/useCountries.js for why localhost:3456 is the wrong default here.
+// hooks/useCountries.ts for why localhost:3456 is the wrong default here.
 // Fetch and refuse a non-2xx response. Previously the queries returned
 // res.json() unconditionally, so a 404 yielded {"detail": "Not Found"} and the
 // category silently came back empty — which is how a wrong URL went unnoticed.
+
+/** One entry in the merged search palette. */
+interface SearchItem {
+  id: string
+  title: string
+  subtitle?: string | null
+  category: string
+  page: string
+  icon: string
+  meta?: string | null
+}
+
+/** A search item with its fuzzy-match score attached (ranking pass). */
+interface ScoredSearchItem extends SearchItem {
+  score: number
+}
+
 // Fuzzy match scoring
-function fuzzyMatch(str, pattern) {
+function fuzzyMatch(str: string, pattern: string): number {
   const patternLower = pattern.toLowerCase()
   const strLower = str.toLowerCase()
 
@@ -41,12 +59,12 @@ export default function GlobalSearch() {
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
-  const inputRef = useRef(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   const { navigate } = useRouter()
 
   // Fetch searchable data. Each query is independent, so a category whose
   // endpoint is unavailable degrades on its own rather than emptying the palette.
-  // URLs match the existing hooks in useApi.js: a trailing slash is not required
+  // URLs match the existing hooks in useApi.ts: a trailing slash is not required
   // by any of them, and /api/models is the path the rest of the app uses for the
   // model catalogue (the backend mounts it at both /api/models and /api/v1/models).
   const { data: jobsData } = useQuery({
@@ -80,8 +98,8 @@ export default function GlobalSearch() {
   })
 
   // Build searchable items
-  const searchableItems = useMemo(() => {
-    const items = []
+  const searchableItems = useMemo<SearchItem[]>(() => {
+    const items: SearchItem[] = []
 
     // Static pages
     items.push(
@@ -96,7 +114,7 @@ export default function GlobalSearch() {
     )
 
     // Jobs — GET /api/v1/jobs answers with a bare array of JobResponse.
-    asList(jobsData, 'jobs').forEach(job => {
+    asList<Job>(jobsData, 'jobs').forEach((job) => {
       items.push({
         id: `job-${job.id}`,
         title: `Job #${job.id} - ${job.job_type}`,
@@ -110,10 +128,10 @@ export default function GlobalSearch() {
 
     // Models — ModelSummary exposes model_id / name / model_version. The previous
     // code read id / model_name / version, none of which exist on that schema.
-    asList(modelsData, 'models').forEach(model => {
+    asList<Model>(modelsData, 'models').forEach((model) => {
       items.push({
         id: `model-${model.model_id}`,
-        title: model.name,
+        title: model.name ?? '',
         subtitle: model.model_type,
         category: 'Model',
         page: 'models',
@@ -124,10 +142,10 @@ export default function GlobalSearch() {
 
     // Catalogue — DataCatalogueItemResponse; the source is a nested object, and
     // there is no `series_id` field on it.
-    asList(catalogueData, 'items').forEach(item => {
+    asList<CatalogueItem>(catalogueData, 'items').forEach((item) => {
       items.push({
         id: `catalogue-${item.id}`,
-        title: item.name,
+        title: item.name ?? '',
         subtitle: item.description,
         category: 'Data Catalogue',
         page: 'datasources',
@@ -137,7 +155,7 @@ export default function GlobalSearch() {
     })
 
     // Countries — CountryListResponse is a wrapper object, so this one needs the key.
-    asList(countriesData, 'countries').forEach(country => {
+    asList<Country>(countriesData, 'countries').forEach((country) => {
       items.push({
         id: `country-${country.id}`,
         title: country.country_name,
@@ -153,18 +171,20 @@ export default function GlobalSearch() {
   }, [jobsData, modelsData, catalogueData, countriesData])
 
   // Filter and rank results
-  const results = useMemo(() => {
-    if (!query.trim()) return searchableItems.slice(0, 15)
+  const results = useMemo<ScoredSearchItem[]>(() => {
+    if (!query.trim()) {
+      return searchableItems.slice(0, 15).map((item) => ({ ...item, score: 0 }))
+    }
 
     const scored = searchableItems
-      .map(item => {
+      .map((item): ScoredSearchItem => {
         const titleScore = fuzzyMatch(item.title, query)
         const subtitleScore = item.subtitle ? fuzzyMatch(item.subtitle, query) * 0.5 : 0
         const categoryScore = fuzzyMatch(item.category, query) * 0.3
         const score = titleScore + subtitleScore + categoryScore
         return { ...item, score }
       })
-      .filter(item => item.score > 0)
+      .filter((item) => item.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, 10)
 
@@ -173,11 +193,11 @@ export default function GlobalSearch() {
 
   // Keyboard shortcuts
   useEffect(() => {
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       // Cmd+K or Ctrl+K to open
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault()
-        setIsOpen(prev => !prev)
+        setIsOpen((prev) => !prev)
         setQuery('')
         setSelectedIndex(0)
       }
@@ -192,10 +212,10 @@ export default function GlobalSearch() {
       if (isOpen && results.length > 0) {
         if (e.key === 'ArrowDown') {
           e.preventDefault()
-          setSelectedIndex(prev => (prev + 1) % results.length)
+          setSelectedIndex((prev) => (prev + 1) % results.length)
         } else if (e.key === 'ArrowUp') {
           e.preventDefault()
-          setSelectedIndex(prev => (prev - 1 + results.length) % results.length)
+          setSelectedIndex((prev) => (prev - 1 + results.length) % results.length)
         } else if (e.key === 'Enter') {
           e.preventDefault()
           const selected = results[selectedIndex]
@@ -273,6 +293,7 @@ export default function GlobalSearch() {
                       fill="none"
                       viewBox="0 0 24 24"
                       stroke="currentColor"
+                      strokeWidth={2}
                     >
                       <path
                         strokeLinecap="round"

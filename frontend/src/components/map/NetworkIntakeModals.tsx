@@ -2,6 +2,7 @@ import { useState } from 'react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import { fetchApi } from '../../utils/apiClient'
+import type { NetworkEstimateResult } from '../../types/api'
 
 /**
  * The missing half of the network layer: the backend has accepted declared
@@ -15,12 +16,19 @@ import { fetchApi } from '../../utils/apiClient'
  * presented without its prior-status is exactly the kind of quiet invention
  * this platform refuses everywhere else.
  */
-export function ExposureUploadModal({ isOpen, onClose, onDone }) {
+
+interface NetworkIntakeModalProps {
+  isOpen: boolean
+  onClose?: () => void
+  onDone?: (result: unknown) => void
+}
+
+export function ExposureUploadModal({ isOpen, onClose, onDone }: NetworkIntakeModalProps) {
   const [institution, setInstitution] = useState('')
-  const [file, setFile] = useState(null)
+  const [file, setFile] = useState<File | null>(null)
   const [asOf, setAsOf] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(null)
+  const [error, setError] = useState<string | null>(null)
 
   const submit = async () => {
     if (!institution || !file) {
@@ -43,7 +51,7 @@ export function ExposureUploadModal({ isOpen, onClose, onDone }) {
       onDone?.(result)
       onClose?.()
     } catch (err) {
-      setError(err?.message || 'The upload was refused.')
+      setError(err instanceof Error ? err.message : 'The upload was refused.')
     } finally {
       setBusy(false)
     }
@@ -95,11 +103,11 @@ export function ExposureUploadModal({ isOpen, onClose, onDone }) {
   )
 }
 
-export function EstimateNetworkModal({ isOpen, onClose, onDone }) {
+export function EstimateNetworkModal({ isOpen, onClose, onDone }: NetworkIntakeModalProps) {
   const [assets, setAssets] = useState('{\n  "BANK_A": 120.0,\n  "BANK_B": 80.0\n}')
   const [liabilities, setLiabilities] = useState('{\n  "BANK_A": 110.0,\n  "BANK_B": 90.0\n}')
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState(null)
+  const [result, setResult] = useState<NetworkEstimateResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const submit = async () => {
@@ -107,17 +115,17 @@ export function EstimateNetworkModal({ isOpen, onClose, onDone }) {
     setError(null)
     try {
       const payload = {
-        interbank_assets: JSON.parse(assets),
-        interbank_liabilities: JSON.parse(liabilities)
+        interbank_assets: JSON.parse(assets) as Record<string, number>,
+        interbank_liabilities: JSON.parse(liabilities) as Record<string, number>
       }
-      const response = await fetchApi('/v1/network/estimate', {
+      const response = await fetchApi<NetworkEstimateResult>('/v1/network/estimate', {
         method: 'POST',
         body: JSON.stringify(payload)
       })
       setResult(response)
       onDone?.(response)
     } catch (err) {
-      setError(err?.message || 'The estimate was refused.')
+      setError(err instanceof Error ? err.message : 'The estimate was refused.')
     } finally {
       setBusy(false)
     }
