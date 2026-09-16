@@ -17,6 +17,7 @@ from sqlalchemy.orm import sessionmaker
 from backend.database import Base
 from backend.models.timeseries import (
     IndicatorObservation,
+    IndicatorVintageLog,
     ModelMetricPoint,
     RiskScorePoint,
 )
@@ -27,7 +28,28 @@ from backend.modules.results.timeseries_store import (
     TimeSeriesStore,
 )
 
-_TABLES = [IndicatorObservation.__table__, RiskScorePoint.__table__, ModelMetricPoint.__table__]
+# The Timescale hypertables: latest-value stores partitioned on `time`, whose
+# primary keys must carry the time column (test_time_column_... below).
+_HYPERTABLES = [
+    IndicatorObservation.__table__,
+    RiskScorePoint.__table__,
+    ModelMetricPoint.__table__,
+]
+
+# Everything the in-memory fixture must create. record_observations appends
+# to the vintage log as well as upserting the latest-value table (that is the
+# point-in-time contract), so the fixture schema has to carry both -- the
+# vintage table arrived with the indicator-vintage-log migration and this
+# list did not grow with it, which left test_record_observations_upsert
+# failing on a table missing from the test's OWN database.
+#
+# The vintage log is deliberately NOT in _HYPERTABLES: it is a plain
+# append-only audit table with a surrogate `id` key, and its migration's
+# docstring says exactly why (rebuilding the hypertable's primary key to
+# carry vintages is a rebuild of the hypertable -- the log exists to avoid
+# that). One list used to serve both purposes; conflating them would have
+# "fixed" the fixture by asserting a rule the table is designed to break.
+_TABLES = _HYPERTABLES + [IndicatorVintageLog.__table__]
 
 
 @pytest.fixture()
@@ -67,8 +89,11 @@ def _risk_row(day: int, score: float, region: str = "EUROPE", entity: str = "ban
 # --------------------------------------------------------------------------
 
 def test_time_column_is_part_of_every_primary_key():
-    """TimescaleDB cannot make a hypertable when a unique index omits the time column."""
-    for table in _TABLES:
+    """TimescaleDB cannot make a hypertable when a unique index omits the time column.
+
+    Iterates the hypertables, not every fixture table: the vintage log is a
+    plain append-only table by design (see _TABLES)."""
+    for table in _HYPERTABLES:
         assert "time" in {column.name for column in table.primary_key.columns}, table.name
 
 

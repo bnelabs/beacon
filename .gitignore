@@ -92,6 +92,8 @@ results/dashboards/*.html
 *.db
 *.sqlite
 *.sqlite3
+# the shared SQLite file backend.database binds under USE_SQLITE=true
+beacon.db
 
 # Redis dump
 dump.rdb

@@ -248,6 +248,21 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   `docker-compose.simple.yml`) with the precondition each waits on.
 
 ### Fixed
+- **The backend suite had been red on main for two days, and the failure
+  named the wrong thing.** `test_pipeline_integration` and
+  `test_provenance_disclosure` died with "no such table: data_sources" —
+  which reads like a schema defect and was an import-order defect:
+  `backend.database` binds one process-global engine from the environment at
+  first import, and `test_alert_evaluator.py` (added in #61) is collected
+  before `test_api_smoke.py` and sets `DATABASE_URL` without `USE_SQLITE`,
+  so the suite's engine silently moved to that module's private file. The
+  pipeline test's `reload(database)` then landed on an empty `./beacon.db` —
+  its reloaded `Base` has no tables registered because every model module is
+  already imported against the original `Base`, so its `init_db()` creates
+  nothing. `backend/tests/conftest.py` now pins `USE_SQLITE=true` before any
+  test module can import (conftest is the only hook pytest guarantees runs
+  first), and `test_suite_engine_is_the_shared_sqlite_file` fails with the
+  explanation attached if the binding ever moves again.
 - **The TypeScript migration briefly shipped an unstyled app.** Tailwind's
   `content` globs still said `src/**/*.{js,jsx}` after every source file
   became `.ts`/`.tsx`, so the generated stylesheet contained no app
