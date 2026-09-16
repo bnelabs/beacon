@@ -1,14 +1,25 @@
 import { cn } from '../../utils/cn'
 import { getRiskColor, RISK_COLORS } from '../../data/network-connections'
 
-const RISK_BANDS = [
+interface RiskBand {
+  label: string
+  range: string
+  sample: number
+}
+
+const RISK_BANDS: RiskBand[] = [
   { label: 'Low', range: '< 0.30', sample: 0.15 },
   { label: 'Medium', range: '0.30 – 0.59', sample: 0.45 },
   { label: 'High', range: '0.60 – 0.79', sample: 0.7 },
   { label: 'Critical', range: '≥ 0.80', sample: 0.9 }
 ]
 
-export default function MapLegend({ showNetwork = false, className }) {
+export interface MapLegendProps {
+  showNetwork?: boolean
+  className?: string
+}
+
+export default function MapLegend({ showNetwork = false, className }: MapLegendProps) {
   return (
     <div
       data-testid="map-legend"

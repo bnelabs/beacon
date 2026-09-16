@@ -1,12 +1,29 @@
+import { type ReactNode } from 'react'
 import { cn } from '../../utils/cn'
 import Breadcrumbs from '../Breadcrumbs'
+
+export interface PageContainerProps {
+  children?: ReactNode
+  title?: ReactNode
+  subtitle?: ReactNode
+  eyebrow?: ReactNode
+  actions?: ReactNode
+  className?: string
+}
 
 /**
  * Page frame: breadcrumbs, then a serif title over a hairline rule — the
  * masthead of a printed brief. `eyebrow` renders the tracked micro label
  * above the title for the section name.
  */
-export default function PageContainer({ children, title, subtitle, eyebrow, actions, className }) {
+export default function PageContainer({
+  children,
+  title,
+  subtitle,
+  eyebrow,
+  actions,
+  className
+}: PageContainerProps) {
   return (
     <div className={cn('px-7 py-6', className)}>
       <div className="mb-7">

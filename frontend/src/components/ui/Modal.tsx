@@ -1,7 +1,16 @@
-import { useEffect, useRef } from 'react'
-import { useFocusTrap } from '../../hooks/useFocusTrap'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { cn } from '../../utils/cn'
+
+export interface ModalProps {
+  isOpen: boolean
+  onClose?: () => void
+  title?: ReactNode
+  children?: ReactNode
+  footer?: ReactNode
+  widthClass?: string
+}
 
 /**
  * Lightweight modal overlay used across dashboard pages.
@@ -14,8 +23,8 @@ export default function Modal({
   children,
   footer,
   widthClass = 'max-w-2xl'
-}) {
-  const panelRef = useRef(null)
+}: ModalProps) {
+  const panelRef = useRef<HTMLDivElement>(null)
   // The trap owns Escape as well as Tab, so the keyboard story lives in one
   // place instead of half here and half in the hook.
   useFocusTrap(panelRef, isOpen, onClose)
