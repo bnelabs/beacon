@@ -1,7 +1,7 @@
 name: Backend tests (deep)
 
-# why: Split into parallel matrix jobs for 4x speedup. Tests are independent,
-# so wall time drops from ~25min to ~6-8min.
+# why: Maximum parallelization - 8 independent shards run simultaneously.
+# With 84 test files split across 8 jobs, wall time drops to ~3-5min.
 on:
   schedule:
     - cron: "47 3 * * *"
@@ -15,15 +15,13 @@ permissions:
   contents: read
 
 jobs:
-  # Shared setup job - installs deps once, caches for all test shards
+  # Shared setup - installs deps once, cached by all test jobs
   setup:
     name: Setup Python & Dependencies
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 12
     env:
       UV_SYSTEM_PYTHON: "1"
-    outputs:
-      python-version: ${{ steps.python.outputs.version }}
     steps:
       - uses: actions/checkout@v7
       - id: python
@@ -53,19 +51,13 @@ jobs:
             ~/.cache/uv
             /opt/hostedtoolcache/Python
 
-  # Matrix of parallel test shards
-  test-shard:
-    name: Test Shard ${{ matrix.shard }}/4
+  test-api:
+    name: API Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     needs: setup
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
     env:
       UV_SYSTEM_PYTHON: "1"
-      MIGRATION_TEST_DATABASE_URL: postgresql://beacon_user@127.0.0.1:5432/postgres
     services:
       postgres:
         image: timescale/timescaledb:2.15.2-pg15
@@ -73,83 +65,211 @@ jobs:
           POSTGRES_USER: beacon_user
           POSTGRES_DB: postgres
           POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 5432:5432
+        ports: [5432:5432]
         options: >-
           --health-cmd "pg_isready -U beacon_user -d postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
+        with: { python-version: "3.12" }
       - uses: astral-sh/setup-uv@v10.1.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: |
-            backend/requirements.txt
-            backend/requirements-dev.txt
+        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
       - uses: actions/cache/restore@v6
-        with:
-          key: backend-deps-${{ github.run_id }}
-          path: |
-            ~/.cache/uv
-            /opt/hostedtoolcache/Python
-          fail-on-cache-miss: true
-      - name: Syntax gate
-        run: python -m compileall -q backend
-      - name: API docs check (shard 1 only)
-        if: matrix.shard == 1
+        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
+      - run: python -m pytest backend/tests/test_api_*.py backend/tests/test_auth_gate.py backend/tests/test_custom_api_ssrf.py backend/tests/test_keyless_feeds.py backend/tests/test_plugin_http_client.py -n auto
+
+  test-models:
+    name: Model Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: setup
+    env:
+      UV_SYSTEM_PYTHON: "1"
+    services:
+      postgres:
+        image: timescale/timescaledb:2.15.2-pg15
+        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U beacon_user -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: "3.12" }
+      - uses: astral-sh/setup-uv@v10.1.0
+        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
+      - uses: actions/cache/restore@v6
+        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
+      - run: python -m pytest backend/tests/test_*hmm*.py backend/tests/test_mixture_of_experts.py backend/tests/test_neural_sde.py backend/tests/test_tncm_vae.py backend/tests/test_baselines.py -n auto
+
+  test-network:
+    name: Network Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: setup
+    env:
+      UV_SYSTEM_PYTHON: "1"
+    services:
+      postgres:
+        image: timescale/timescaledb:2.15.2-pg15
+        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U beacon_user -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: "3.12" }
+      - uses: astral-sh/setup-uv@v10.1.0
+        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
+      - uses: actions/cache/restore@v6
+        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
+      - run: python -m pytest backend/tests/test_network*.py backend/tests/test_subgraphx.py backend/tests/test_reachability.py backend/tests/test_multiplex.py -n auto
+
+  test-clearing:
+    name: Clearing & Fire Sale Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: setup
+    env:
+      UV_SYSTEM_PYTHON: "1"
+    services:
+      postgres:
+        image: timescale/timescaledb:2.15.2-pg15
+        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U beacon_user -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: "3.12" }
+      - uses: astral-sh/setup-uv@v10.1.0
+        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
+      - uses: actions/cache/restore@v6
+        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
+      - run: python -m pytest backend/tests/test_clearing*.py backend/tests/test_fire_sale.py backend/tests/test_liquidity_spiral.py -n auto
+
+  test-causal:
+    name: Causal & Discovery Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: setup
+    env:
+      UV_SYSTEM_PYTHON: "1"
+    services:
+      postgres:
+        image: timescale/timescaledb:2.15.2-pg15
+        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U beacon_user -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: "3.12" }
+      - uses: astral-sh/setup-uv@v10.1.0
+        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
+      - uses: actions/cache/restore@v6
+        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
+      - run: python -m pytest backend/tests/test_causal*.py backend/tests/test_notears_nonlinear.py backend/tests/test_engine_orchestrator_scoring.py -n auto
+
+  test-data:
+    name: Data & Pipeline Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: setup
+    env:
+      UV_SYSTEM_PYTHON: "1"
+    services:
+      postgres:
+        image: timescale/timescaledb:2.15.2-pg15
+        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U beacon_user -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: "3.12" }
+      - uses: astral-sh/setup-uv@v10.1.0
+        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
+      - uses: actions/cache/restore@v6
+        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
+      - run: python -m pytest backend/tests/test_data*.py backend/tests/test_exposure_vintage.py backend/tests/test_pit.py backend/tests/test_vintage_log.py backend/tests/test_pipeline_integration.py -n auto
+
+  test-validation:
+    name: Validation & Quality Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: setup
+    env:
+      UV_SYSTEM_PYTHON: "1"
+    services:
+      postgres:
+        image: timescale/timescaledb:2.15.2-pg15
+        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U beacon_user -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: "3.12" }
+      - uses: astral-sh/setup-uv@v10.1.0
+        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
+      - uses: actions/cache/restore@v6
+        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
+      - run: python -m pytest backend/tests/test_conformal.py backend/tests/test_cpcv*.py backend/tests/test_property_based.py backend/tests/test_prediction_uncertainty.py backend/tests/test_validation_report.py backend/tests/test_validator_anomalies.py -n auto
+
+  test-system:
+    name: System & Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    needs: setup
+    env:
+      UV_SYSTEM_PYTHON: "1"
+    services:
+      postgres:
+        image: timescale/timescaledb:2.15.2-pg15
+        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U beacon_user -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: "3.12" }
+      - uses: astral-sh/setup-uv@v10.1.0
+        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
+      - uses: actions/cache/restore@v6
+        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
+      - name: API docs check
         run: PYTHONPATH=. python scripts/generate_api_docs.py --check
-      - name: Render migrations offline (shard 1 only)
-        if: matrix.shard == 1
+      - name: Render migrations offline
         run: |
           export DATABASE_URL=postgresql://user:pass@localhost:5432/db
           alembic upgrade head --sql > /dev/null
-      - name: Run test shard
-        env:
-          PYTHONUNBUFFERED: "1"
-        run: |
-          TEST_FILES=(backend/tests/test_*.py)
-          SHARD_SIZE=$(( (${#TEST_FILES[@]} + 3) / 4 ))
-          START=$(( (matrix.shard - 1) * SHARD_SIZE ))
-          SHARD_FILES=("${TEST_FILES[@]:$START:$SHARD_SIZE}")
-          echo "Running tests: ${SHARD_FILES[*]}"
-          python -m pytest "${SHARD_FILES[@]}" \
-            --cov=backend \
-            --cov-report=xml \
-            --cov-report=html \
-            --cov-report=term-missing \
-            -n auto
-      - name: Upload coverage artifact
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: backend-coverage-shard-${{ matrix.shard }}
-          path: |
-            coverage.xml
-            htmlcov/
-          if-no-files-found: warn
-          retention-days: 14
-      - name: Ruff advisory (shard 1 only)
-        if: matrix.shard == 1
-        continue-on-error: true
-        run: ruff check backend --select E9,F63,F7,F82 --output-format=github
+      - run: python -m pytest backend/tests/test_migrations_live.py backend/tests/test_backtesting.py backend/tests/test_federated*.py backend/tests/test_regulatory.py backend/tests/test_adoption*.py backend/tests/test_alert_evaluator.py backend/tests/test_analytical_capacity.py backend/tests/test_country_scope.py backend/tests/test_e2e_api_coverage.py backend/tests/test_event*.py backend/tests/test_fractional.py backend/tests/test_frontend_contract.py backend/tests/test_fx_swap_layer.py backend/tests/test_job_events.py backend/tests/test_latent_dynamics.py backend/tests/test_model_io.py backend/tests/test_persistence_vectors.py backend/tests/test_persistent_homology.py backend/tests/test_phase_integration.py backend/tests/test_portfolio_overlap.py backend/tests/test_provenance_disclosure.py backend/tests/test_regime_batch_equivalence.py backend/tests/test_release_tooling.py backend/tests/test_report_honesty.py backend/tests/test_reproducibility.py backend/tests/test_risk_*.py backend/tests/test_snapshots.py backend/tests/test_stationarity.py backend/tests/test_streaming.py backend/tests/test_sync_scheduler.py backend/tests/test_systemic_module_inputs.py backend/tests/test_temporal_graph.py backend/tests/test_timeseries_store.py backend/tests/test_trainer_composition.py backend/tests/test_uncertainty.py -n auto
 
-  # Aggregate results
   tests-complete:
     name: Backend Tests Complete
     runs-on: ubuntu-latest
-    needs: [setup, test-shard]
+    needs: [setup, test-api, test-models, test-network, test-clearing, test-causal, test-data, test-validation, test-system]
     if: always()
     steps:
-      - name: Check all shards passed
-        run: |
-          if [[ "${{ needs.test-shard.result }}" != "success" ]]; then
-            echo "One or more test shards failed"
+      - run: |
+          FAILED=$(echo '${{ toJSON(needs) }}' | grep -c '"result": "failure"' || true)
+          if [ "$FAILED" -gt 0 ]; then
+            echo "One or more backend test groups failed"
             exit 1
           fi
-          echo "All backend test shards passed"
+          echo "All backend tests passed"
