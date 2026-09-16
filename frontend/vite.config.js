@@ -22,7 +22,15 @@ export default defineConfig({
       output: {
         manualChunks: {
           'react-vendor': ['react', 'react-dom'],
-          'query-vendor': ['@tanstack/react-query', 'zustand']
+          'query-vendor': ['@tanstack/react-query', 'zustand'],
+          // deck.gl is ~90% of the risk-map chunk and changes when the
+          // lockfile changes, not when app code does: splitting it out keeps
+          // the route chunk small and the heavy vendor bytes cached across
+          // releases. @deck.gl/aggregation-layers is deliberately NOT listed
+          // -- RiskMap imports it dynamically (the heatmap is a toggle), so
+          // Rollup keeps it as its own async chunk, fetched only when the
+          // heatmap is on.
+          'deck-vendor': ['@deck.gl/react', '@deck.gl/core', '@deck.gl/layers']
         }
       }
     },
