@@ -34,8 +34,16 @@ TEST_DB_PATH = Path(__file__).resolve().parent / "test_data_source_update.sqlite
 if TEST_DB_PATH.exists():
     TEST_DB_PATH.unlink()
 
-os.environ["USE_SQLITE"] = "true"
-os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
+# setdefault, not assignment: in a full-suite run test_api_smoke (imported
+# first alphabetically) has already bound the global engine to its own
+# SQLite file, and backend.database caches that engine at import time --
+# overwriting DATABASE_URL here would not move any session, it would only
+# leave a stale value in os.environ for later modules that read it at
+# import time (test_pipeline_integration reloads backend.database against
+# whatever the environment says). Standalone runs of this file still get a
+# dedicated database.
+os.environ.setdefault("USE_SQLITE", "true")
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{TEST_DB_PATH}")
 
 
 try:
