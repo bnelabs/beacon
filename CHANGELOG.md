@@ -248,6 +248,18 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   `docker-compose.simple.yml`) with the precondition each waits on.
 
 ### Fixed
+- **The TypeScript migration briefly shipped an unstyled app.** Tailwind's
+  `content` globs still said `src/**/*.{js,jsx}` after every source file
+  became `.ts`/`.tsx`, so the generated stylesheet contained no app
+  utilities (5.9 kB instead of ~34 kB) and nothing failed: the build
+  succeeds, the dev server starts, and only a browser could see the
+  collapsed layout -- the dispatched Playwright run caught it via a
+  deck.gl canvas covering the sidebar after the risk-map steps. The globs
+  now cover `{js,jsx,ts,tsx}`, and a new fast-gate check
+  (`scripts/check_tailwind_content.mjs`, ~0.2 s, no dependencies) resolves
+  the configured globs against the real tree and fails by name when a
+  src-targeting pattern matches zero files, so a silent-empty-stylesheet
+  can never reach nightly again.
 - **"Save Changes" on a data source was a 200-answering no-op — three ways at
   once.** The frontend nested the edit payload under a `data` key that
   Pydantic dropped; the `DataSourceUpdate` schema lacked the disclosure

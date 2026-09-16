@@ -1,5 +1,11 @@
 export default {
-  content: ['./index.html', './src/**/*.{js,jsx}'],
+  // ts/tsx first among the extensions: the app is all-TypeScript now, and a
+  // glob that matches nothing makes Tailwind emit an (almost) empty sheet
+  // WITHOUT failing the build -- which is how the completed TS migration
+  // briefly shipped an unstyled app: this list still said `{js,jsx}` while
+  // every source file had become `.ts`/`.tsx`. scripts/check_tailwind_content.mjs
+  // runs in the CI gate and fails when the globs stop matching real files.
+  content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],
   theme: {
     extend: {
       /**
