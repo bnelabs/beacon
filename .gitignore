@@ -127,3 +127,5 @@ frontend/yarn-debug.log*
 frontend/yarn-error.log*
 frontend/lerna-debug.log*
 data/predictions/*
+node_modules/
+.next/
