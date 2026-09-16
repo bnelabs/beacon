@@ -371,7 +371,11 @@ export default function DataSources() {
       await createMutation.mutateAsync(payload)
     } else if (formMode === 'edit' && formSource) {
       const sourceId = formSource.id || formSource.source_id
-      await updateMutation.mutateAsync({ sourceId, data: payload })
+      // Flat, not nested under `data`: the PUT body is the mutation
+      // variables minus `sourceId` (see useUpdateDataSource), and the
+      // backend's DataSourceUpdate schema reads top-level keys. The nested
+      // shape Pydantic dropped made "Save Changes" a 200-answering no-op.
+      await updateMutation.mutateAsync({ sourceId, ...payload })
     }
   }
 

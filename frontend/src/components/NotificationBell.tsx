@@ -1,4 +1,4 @@
-import { useState, useEffect, type MouseEvent, type ReactNode } from 'react'
+import { useState, type MouseEvent, type ReactNode } from 'react'
 import Badge from './ui/Badge'
 import Button from './ui/Button'
 import {
@@ -136,21 +136,16 @@ function NotificationItem({ notification, onRead, onDismiss }: NotificationItemP
 
 export default function NotificationBell() {
   const [isOpen, setIsOpen] = useState(false)
-  const { data: notificationsData, refetch } = useNotifications({ unread_only: false, limit: 20 })
+  const { data: notificationsData } = useNotifications({ unread_only: false, limit: 20 })
   const markAsReadMutation = useMarkNotificationAsRead()
   const markAllAsReadMutation = useMarkAllAsRead()
 
   const notifications = notificationsData?.notifications || []
   const unreadCount = notificationsData?.unread_count || 0
 
-  useEffect(() => {
-    // Refresh notifications every 30 seconds
-    const interval = setInterval(() => {
-      refetch()
-    }, 30000)
-
-    return () => clearInterval(interval)
-  }, [refetch])
+  // Polling lives in the hook (useNotifications sets refetchInterval: 30s).
+  // A second component-level setInterval used to refetch on its own 30s
+  // cycle, doubling the request rate out of phase with the hook's.
 
   const handleMarkAsRead = (id: NotificationId) => {
     markAsReadMutation.mutate(id)

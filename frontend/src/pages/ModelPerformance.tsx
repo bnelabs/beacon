@@ -12,15 +12,16 @@ import type { Model } from '../types/api'
 interface MetricCardProps {
   title: string
   value: ReactNode
-  change?: string
-  trend?: 'up' | 'down' | 'flat'
   subtitle?: ReactNode
 }
 
-function MetricCard({ title, value, change, trend, subtitle }: MetricCardProps) {
-  const trendColor = trend === 'up' ? 'text-bne-moss' : trend === 'down' ? 'text-bne-clay' : 'text-bne-muted'
-  const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'
-
+// The card used to render `change`/`trend` chips, and the page fed them
+// hard-coded "+2.3%" / "-1.8%" strings: invented numbers on a page whose
+// entire subject is measured performance. No endpoint reports a
+// period-over-period delta, so the chips are gone rather than fake; if a
+// real comparison series lands in the analytics API, add them back wired
+// to it.
+function MetricCard({ title, value, subtitle }: MetricCardProps) {
   return (
     <Card>
       <CardContent className="py-6">
@@ -30,12 +31,6 @@ function MetricCard({ title, value, change, trend, subtitle }: MetricCardProps) 
             <p className="font-display text-3xl font-semibold tnum text-bne-ink">{value}</p>
             {subtitle && <p className="text-xs text-bne-muted mt-1">{subtitle}</p>}
           </div>
-          {change && (
-            <div className={`flex items-center gap-1 text-sm font-medium ${trendColor}`}>
-              <span>{trendIcon}</span>
-              <span>{change}</span>
-            </div>
-          )}
         </div>
       </CardContent>
     </Card>
@@ -421,15 +416,11 @@ export default function ModelPerformance() {
             title="Average R² Score"
             value={stats.avgAccuracy}
             subtitle="For production-ready models"
-            trend="up"
-            change="+2.3%"
           />
           <MetricCard
             title="Average RMSE"
             value={stats.avgRMSE}
             subtitle="Lower is better"
-            trend="down"
-            change="-1.8%"
           />
           <MetricCard
             title="Best Performer"
