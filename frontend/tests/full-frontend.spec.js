@@ -172,6 +172,12 @@ test('navigates the application and exercises primary interactions', async ({ pa
     page.getByRole('heading', { name: 'Predictive validity — job #104' })
   ).toBeVisible()
   await expect(page.getByText('insufficient stress events in window')).toBeVisible()
+  // Leave the deep link before the Jobs section: Results is a breadcrumb
+  // child of Jobs, so its trail renders a second "Jobs" button and the next
+  // section's sidebar click would resolve to two elements (strict mode).
+  // The dashboard has no trail.
+  await page.evaluate(() => { window.location.hash = '#/dashboard' })
+  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
 
   // Jobs interactions
   await page.getByRole('button', { name: 'Jobs' }).click()
