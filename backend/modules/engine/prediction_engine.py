@@ -726,6 +726,15 @@ class RealPredictionEngine:
         predictions_list = []
         confidence_intervals: Dict[str, tuple] = {}
 
+        # Pass 1: score every source and collect the regime inputs. The
+        # per-source regime nowcast used to run inside this loop, paying a
+        # Python-looped (T, K=2) EM fit per source; the fits are independent,
+        # so they are collected here and run as one batch per window length in
+        # pass 2 (docs/LANGUAGE_STRATEGY.md names this the one order-of-
+        # magnitude lever left on the prediction path).
+        scored_rows = []
+        regime_items = []
+
         for source_code in input_data['source_code'].unique():
             source_data = input_data[input_data['source_code'] == source_code]
             source_data = source_data.sort_values('Date')
@@ -746,7 +755,6 @@ class RealPredictionEngine:
             normalized_prediction = self._score_sequence(sequence, source_id)
             denorm_prediction = self._denormalize_prediction(normalized_prediction, stats)
 
-            regime, regime_method = self._regime_label(values, stats)
             lower, upper, interval_method = self._conformal_interval(
                 values, stats, source_id, normalized_prediction
             )
@@ -758,6 +766,25 @@ class RealPredictionEngine:
             else:
                 conf = (None, None)
 
+            scored_rows.append(
+                (source_code, denorm_prediction, normalized_prediction, interval_method, conf)
+            )
+            regime_items.append((source_code, values, stats))
+
+        # Pass 2: batched regime nowcast — same labels _regime_label produces,
+        # with per-source fallback on any failure (degrades to slow, never to
+        # different).
+        regime_labels = self._regime_labels_batch(regime_items)
+
+        # Pass 3: assemble.
+        for (
+            source_code,
+            denorm_prediction,
+            normalized_prediction,
+            interval_method,
+            conf,
+        ) in scored_rows:
+            regime, regime_method = regime_labels[source_code]
             predictions_list.append({
                 'source': source_code,
                 'prediction': denorm_prediction,
@@ -1017,6 +1044,79 @@ reported here rather than approximated.
         except Exception as exc:  # noqa: BLE001 - regime is advisory, absence is honest
             logger.warning("Regime labelling unavailable: %s", exc)
             return None, f"regime_unavailable:{type(exc).__name__}"
+
+    def _regime_labels_batch(
+        self, items: List[tuple]
+    ) -> Dict[str, tuple]:
+        """Nowcast every source's regime with one batched fit per window length.
+
+        Contract: for each ``(source_code, values, stats)`` item this returns
+        exactly what :meth:`_regime_label` returns for the same input — the
+        same standardisation, the same 40-observation floor, the same
+        higher-variance-state naming, the same honest ``None`` on absence.
+        The only difference is who pays the per-timestep Python overhead:
+        ``fit_viterbi_student_t_batch`` runs one ``(n, T, K)`` recursion per
+        length group instead of ``n`` separate ``(T, K)`` ones.
+
+        Degradation paths, all to the per-source method, never to a guess:
+        sequences the batch declines (degenerate seeding) fall back
+        individually; a length group that raises falls back wholesale.
+        """
+        results: Dict[str, tuple] = {}
+        # (source_code, values, stats, standardized-or-None) per item
+        windows: List[tuple] = []
+        groups: Dict[int, List[int]] = {}
+
+        for source_code, values, stats in items:
+            finite = values[np.isfinite(values)]
+            if finite.size < 40:
+                results[source_code] = (None, "insufficient_history_for_regime")
+                windows.append((source_code, values, stats, None))
+                continue
+            mean = float(stats.get('mean', finite.mean()))
+            std = float(stats.get('std', finite.std())) or 1.0
+            standardized = ((values - mean) / std)[np.isfinite(values)].reshape(-1, 1)
+            groups.setdefault(int(len(standardized)), []).append(len(windows))
+            windows.append((source_code, values, stats, standardized))
+
+        from backend.modules.engine.hidden_markov import fit_viterbi_student_t_batch
+
+        for member_indexes in groups.values():
+            try:
+                stacked = np.stack(
+                    [windows[index][3] for index in member_indexes]
+                )
+                fit = fit_viterbi_student_t_batch(stacked)
+                fallback = set(fit.fallback_indices)
+                for position, window_index in enumerate(member_indexes):
+                    source_code, values, stats, standardized = windows[window_index]
+                    if position in fallback:
+                        results[source_code] = self._regime_label(values, stats)
+                        continue
+                    states = fit.states[position]
+                    variances = np.array(
+                        [
+                            standardized[states == k, 0].var()
+                            if (states == k).any()
+                            else 0.0
+                            for k in range(2)
+                        ]
+                    )
+                    stress_state = int(np.argmax(variances))
+                    label = "stress" if int(states[-1]) == stress_state else "calm"
+                    results[source_code] = (
+                        label,
+                        "student_t_hmm_higher_variance_state",
+                    )
+            except Exception as exc:  # noqa: BLE001 - regime is advisory, absence is honest
+                logger.warning(
+                    "Batched regime labelling unavailable (%s); fitting per source", exc
+                )
+                for window_index in member_indexes:
+                    source_code, values, stats, _ = windows[window_index]
+                    results[source_code] = self._regime_label(values, stats)
+
+        return results
 
     def _conformal_interval(
         self,

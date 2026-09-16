@@ -163,6 +163,69 @@ def bench_regime_nowcast(reps: int) -> None:
         print(json.dumps(result))
 
 
+def bench_regime_nowcast_batched(reps: int, n_sources: int = 20) -> None:
+    """The same nowcast, batched across sources -- the lever LANGUAGE_STRATEGY
+    named and deferred: the per-source fits are independent, and the
+    forward/backward recursions are Python loops over T doing (K, K) numpy
+    work with K=2, a shape dominated by per-timestep numpy overhead rather
+    than arithmetic. ``fit_viterbi_student_t_batch`` runs one (n, T, K)
+    recursion per length group instead of n separate ones, so the loop cost
+    is paid once for the whole job.
+
+    Measured at the monitoring-cycle shape: n=20 sources, T=250 and T=1000,
+    ``n_states=2, seed=0``, default ``max_iterations=100`` -- and against the
+    sequential per-source loop production paid before, on identical windows.
+    Label equality between the two paths is not a benchmark question; it is
+    pinned exactly by backend/tests/test_regime_batch_equivalence.py.
+    """
+    from backend.modules.engine.hidden_markov import (
+        StudentTHMM,
+        fit_viterbi_student_t_batch,
+    )
+
+    for n_observations in (250, 1000):
+        windows = []
+        for index in range(n_sources):
+            rng = np.random.default_rng(11 + index)
+            values = np.cumsum(rng.standard_normal(n_observations))
+            standardized = ((values - values.mean()) / values.std()).reshape(-1, 1)
+            windows.append(standardized)
+        stacked = np.stack(windows)
+
+        def sequential(data=windows):
+            for window in data:
+                model = StudentTHMM(n_states=2, seed=0)
+                model.fit(window)
+                model.viterbi(window)
+
+        def batched(data=stacked):
+            fit_viterbi_student_t_batch(data)
+
+        seq_result = _bench(sequential, max(1, reps // 2))
+        seq_result.update(
+            benchmark="regime_nowcast_student_t_k2_sequential",
+            n_sources=n_sources,
+            n_observations=n_observations,
+        )
+        print(json.dumps(seq_result))
+
+        batch_result = _bench(batched, reps)
+        batch_result.update(
+            benchmark="regime_nowcast_student_t_k2_batched",
+            n_sources=n_sources,
+            n_observations=n_observations,
+        )
+        print(json.dumps(batch_result))
+
+        speedup = seq_result["seconds_per_call"] / max(batch_result["seconds_per_call"], 1e-9)
+        print(json.dumps({
+            "benchmark": "regime_nowcast_batched_speedup",
+            "n_sources": n_sources,
+            "n_observations": n_observations,
+            "speedup": round(speedup, 2),
+        }))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reps", type=int, default=10)
@@ -173,6 +236,9 @@ def main() -> None:
     bench_inference(max(1, args.reps // 5))
     # The nowcast is seconds per call, so it gets the fewest repetitions.
     bench_regime_nowcast(max(1, args.reps // 10))
+    # The batched nowcast pays the loop once for n sources; the sequential
+    # comparison inside it is the expensive leg, hence the smaller budget.
+    bench_regime_nowcast_batched(max(2, args.reps // 5))
 
 
 if __name__ == "__main__":
