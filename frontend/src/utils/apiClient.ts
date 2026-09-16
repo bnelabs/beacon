@@ -17,7 +17,10 @@
 export const API_ORIGIN: string =
   ((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_BASE_URL ?? '') as string
 
-export const API_BASE = `${API_ORIGIN}/api`
+/** Base for `fetchApi` endpoints. Module-internal: callers build URLs from
+ *  `API_ORIGIN` (fetchJson) or go through `fetchApi`; nothing imported this,
+ *  and an unused export is an unmaintained contract. */
+const API_BASE = `${API_ORIGIN}/api`
 
 export interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
   body?: BodyInit | null

@@ -1,79 +1,147 @@
+// Job rows in the exact shape GET /api/v1/jobs answers with (JobResponse:
+// id, celery_task_id, job_type, status, progress, result, error_message,
+// user_friendly_error, created_at, started_at, completed_at,
+// peak_memory_mb, execution_time_seconds + JobBase's parameters).
+//
+// Deliberately absent, because no transport sends them: `job_id` (only the
+// WebSocket job_update payload adds it, alongside `id`), `name`, `model_id`,
+// `config`, `logs`. Earlier fixtures carried all five; the UI grew reads for
+// them, and production rendered "Unknown Model" and empty cards while the
+// suite stayed green. The mock answers as the real API does -- including in
+// what it does NOT say.
 const jobsList = [
   {
     id: 101,
-    job_id: 101,
+    celery_task_id: null,
     job_type: 'data_collection',
     status: 'completed',
-    model_id: 'Liquidity Forecaster',
-    model_name: 'Liquidity Forecaster',
-    created_at: '2024-02-01T10:00:00Z',
-    started_at: '2024-02-01T10:05:00Z',
-    completed_at: '2024-02-01T10:30:00Z',
     progress: 100,
+    parameters: {
+      regions: ['north_america'],
+      start_date: '2023-01-01',
+      end_date: '2023-12-31'
+    },
     result: {
       records_collected: 1850,
       storage_path: '/var/beacon/jobs/101',
       per_source_metrics: {
         fdic: { completeness: 0.95, anomalies: 1 }
       }
-    }
+    },
+    error_message: null,
+    user_friendly_error: null,
+    created_at: '2024-02-01T10:00:00Z',
+    started_at: '2024-02-01T10:05:00Z',
+    completed_at: '2024-02-01T10:30:00Z',
+    peak_memory_mb: null,
+    execution_time_seconds: 1500
   },
   {
     id: 102,
-    job_id: 102,
+    celery_task_id: null,
     job_type: 'training',
     status: 'running',
-    model_id: 'Stress Tester',
-    model_name: 'Stress Tester',
-    created_at: '2024-02-10T08:00:00Z',
-    started_at: '2024-02-10T08:05:00Z',
     progress: 68,
+    parameters: {
+      data_job_id: 101,
+      train_start: '2023-01-01',
+      train_end: '2023-09-30',
+      test_start: '2023-10-01',
+      test_end: '2023-12-31',
+      config: {
+        model: 'temporal_attention',
+        epochs: 25,
+        sequence_length: 30,
+        batch_size: 32,
+        learning_rate: 0.001,
+        dropout: 0.1
+      }
+    },
+    // A running training job streams partial metrics (the WS payload carries
+    // `result`); loss histories are the flat keys job_tasks.py writes.
     result: {
+      model_type: 'temporal_attention',
+      model_version: '1.0.0',
       best_epoch: 9,
       final_train_loss: 0.0023,
       final_val_loss: 0.0031,
       test_rmse: 0.42,
       test_mae: 0.18,
       test_r2: 0.91,
+      train_loss_history: [0.85, 0.54, 0.32, 0.19, 0.12, 0.08],
+      val_loss_history: [0.9, 0.61, 0.4, 0.27, 0.2, 0.14],
       per_source_metrics: {
         fdic: { rmse: 0.41, mae: 0.19 },
         ecb: { rmse: 0.45, mae: 0.2 }
-      },
-      loss_history: {
-        train: [0.85, 0.54, 0.32, 0.19, 0.12, 0.08],
-        val: [0.9, 0.61, 0.4, 0.27, 0.2, 0.14]
       }
-    }
+    },
+    error_message: null,
+    user_friendly_error: null,
+    created_at: '2024-02-10T08:00:00Z',
+    started_at: '2024-02-10T08:05:00Z',
+    completed_at: null,
+    peak_memory_mb: null,
+    execution_time_seconds: null
   },
   {
     id: 103,
-    job_id: 103,
+    celery_task_id: null,
     job_type: 'data_collection',
     status: 'failed',
-    model_id: 'Liquidity Forecaster',
-    model_name: 'Liquidity Forecaster',
-    created_at: '2024-02-14T12:20:00Z',
-    started_at: '2024-02-14T12:25:00Z',
     progress: 0,
-    error: 'Connection timeout while fetching data.',
+    parameters: { regions: ['europe'] },
+    result: null,
+    error_message: 'Connection timeout while fetching data.',
     user_friendly_error:
       'The provider stopped answering mid-download. Nothing was written; retrying is safe.',
+    created_at: '2024-02-14T12:20:00Z',
+    started_at: '2024-02-14T12:25:00Z',
+    completed_at: null,
+    peak_memory_mb: null,
+    execution_time_seconds: null
+  },
+  {
+    // The backtest job the predictive-validity report is served for:
+    // GET /api/v2/reports/validation/{id} answers `validated` only for
+    // backtest jobs whose result carries event_metrics.
+    id: 104,
+    celery_task_id: null,
+    job_type: 'backtest',
+    status: 'completed',
+    progress: 100,
+    parameters: { trained_model_job: 102, event_definition: { direction: 'down', quantile: 0.95, horizon: 5, min_duration: 2 } },
     result: {
-      error: 'Connection timeout while fetching data.'
-    }
+      backtest_metrics: {
+        event_metrics: {
+          definition: { direction: 'down', quantile: 0.95, horizon: 5, min_duration: 2 },
+          by_source: {
+            fdic: {
+              roc_auc: 0.78,
+              average_precision: 0.64,
+              n_events: 9,
+              lead_time: { median_lead: 3, n_zero_lead: 1 }
+            },
+            ecb: { skipped: 'insufficient stress events in window' }
+          }
+        },
+        mse: 0.19,
+        mae: 0.31,
+        rmse: 0.44,
+        r2: 0.83
+      }
+    },
+    error_message: null,
+    user_friendly_error: null,
+    created_at: '2024-02-16T09:00:00Z',
+    started_at: '2024-02-16T09:02:00Z',
+    completed_at: '2024-02-16T09:40:00Z',
+    peak_memory_mb: null,
+    execution_time_seconds: 2280
   }
 ]
 
-const jobDetailsMap = Object.fromEntries(
-  jobsList.map(job => [job.job_id, {
-    ...job,
-    parameters: {
-      region: 'north_america',
-      start_date: '2023-01-01',
-      end_date: '2023-12-31'
-    }
-  }])
-)
+// GET /api/v1/jobs/{id} answers the same JobResponse shape as the list.
+const jobDetailsMap = Object.fromEntries(jobsList.map(job => [job.id, job]))
 
 const jobQualityMap = {
   101: {
@@ -96,135 +164,143 @@ const jobQualityMap = {
   }
 }
 
+// Model rows in the exact shape GET /api/models answers with (ModelSummary):
+// model_id, name, created_at, status, model_type, model_version, metrics
+// {mae, rmse, r2, accuracy, best_val_loss}, tags, data_job_id,
+// predictions_available. The list is completed training jobs, and `name` is
+// the training result's model_type upper-cased -- that is what the route
+// builds, so that is what the fixture says. Earlier fixtures carried
+// description/architecture/input_features/prediction_steps/accuracy/
+// last_trained/data_summary: fields no endpoint sends, which the UI filled
+// with invented defaults ("LSTM", 12, 4).
 const modelsList = [
   {
-    id: 201,
     model_id: 201,
-    name: 'Liquidity Forecaster',
-    description: 'Predicts short-term liquidity stress for major banks.',
-    status: 'ready',
-    architecture: 'Temporal Attention',
-    input_features: 18,
-    prediction_steps: 5,
-    accuracy: 0.92,
-    last_trained: '2024-02-15T10:15:00Z',
-    result: {
-      test_r2: 0.92,
-      test_rmse: 0.43,
-      test_mae: 0.2,
-      per_source_metrics: {
-        fdic: { rmse: 0.43, mae: 0.21 },
-        ecb: { rmse: 0.46, mae: 0.24 }
-      }
-    },
-    metrics: {
-      train_loss: [0.62, 0.41, 0.24, 0.12, 0.08],
-      val_loss: [0.69, 0.48, 0.29, 0.19, 0.13],
-      best_epoch: 8
-    },
-    data_summary: {
-      rows: 14200,
-      features: 35,
-      lookback_days: 365
-    }
+    name: 'TEMPORAL_ATTENTION',
+    created_at: '2024-02-15T10:15:00Z',
+    status: 'completed',
+    model_type: 'temporal_attention',
+    model_version: '1.0.0',
+    metrics: { mae: 0.2, rmse: 0.43, r2: 0.92, accuracy: null, best_val_loss: 0.13 },
+    tags: ['multi-source'],
+    data_job_id: 101,
+    predictions_available: true
   },
   {
-    id: 202,
     model_id: 202,
-    name: 'Stress Tester',
-    description: 'Scenario-driven liquidity risk projections.',
-    status: 'training',
-    architecture: 'Graph Temporal Network',
-    input_features: 24,
-    prediction_steps: 8,
-    accuracy: 0.0,
-    last_trained: '2024-02-12T09:00:00Z',
-    result: {
-      test_r2: 0.86,
-      test_rmse: 0.51,
-      test_mae: 0.27
-    },
-    metrics: {
-      train_loss: [0.9, 0.63, 0.44, 0.32],
-      val_loss: [0.95, 0.68, 0.47, 0.34]
-    },
-    data_summary: {
-      rows: 11800,
-      features: 42,
-      lookback_days: 540
-    }
+    name: 'HGT',
+    created_at: '2024-02-12T09:00:00Z',
+    status: 'completed',
+    model_type: 'hgt',
+    model_version: '0.9.0',
+    metrics: { mae: 0.27, rmse: 0.51, r2: 0.86, accuracy: null, best_val_loss: 0.34 },
+    tags: [],
+    data_job_id: 101,
+    predictions_available: false
   },
   {
-    id: 203,
     model_id: 203,
-    name: 'Capital Adequacy Draft',
-    description: 'Draft model for Basel III capital scenarios.',
-    status: 'draft',
-    architecture: 'LSTM',
-    input_features: 12,
-    prediction_steps: 4,
-    accuracy: 0.0,
-    last_trained: null,
-    result: {},
-    metrics: {
-      train_loss: [],
-      val_loss: []
-    },
-    data_summary: {
-      rows: 6400,
-      features: 18,
-      lookback_days: 270
-    }
+    name: 'LSTM',
+    created_at: '2024-02-08T09:00:00Z',
+    status: 'completed',
+    model_type: 'lstm',
+    model_version: null,
+    metrics: { mae: null, rmse: null, r2: null, accuracy: null, best_val_loss: null },
+    tags: [],
+    data_job_id: null,
+    predictions_available: false
   }
 ]
 
+// The baseline scenario used to seed scenarioDetailMap. It is NOT part of
+// the ModelDetail response (that endpoint sends no `scenarios` array; the
+// Results page fetches each scenario by id), so it lives on its own.
+const baselineScenario = {
+  scenario_id: 301,
+  name: 'Baseline Stress',
+  horizon_days: 30,
+  created_at: '2024-02-05T11:00:00Z',
+  adjustments: [
+    { source: 'FDIC Deposits', type: 'pct', value: -7.5 },
+    { source: 'Wholesale Funding', type: 'pct', value: -12 }
+  ],
+  summary: {
+    num_series: 6,
+    avg_risk_score: 0.38,
+    max_risk_score: 0.52,
+    min_risk_score: 0.21
+  },
+  predictions: [
+    {
+      source: 'Liquidity Buffer',
+      prediction: 0.87,
+      risk_score: 0.42,
+      confidence_lower: 0.74,
+      confidence_upper: 0.95,
+      explanation: 'Buffer dips under stress but recovers within 10 days.'
+    },
+    {
+      source: 'Cash Burn Rate',
+      prediction: 0.21,
+      risk_score: 0.36,
+      confidence_lower: 0.18,
+      confidence_upper: 0.28,
+      explanation: 'Slight acceleration driven by wholesale funding shock.'
+    }
+  ]
+}
+
+// GET /api/models/{id} in the exact ModelDetail shape: model_id, created_at,
+// completed_at, status, parameters (the training job's parameter block --
+// its `config` carries the hyperparameters), metrics, result, data_job_id,
+// predictions_path, visualizations. No `name` here either: the drawer header
+// takes the name from the list row.
 const modelDetailMap = Object.fromEntries(
   modelsList.map(model => [model.model_id, {
-    ...model,
-    scenarios: [
-      {
-        scenario_id: 301,
-        name: 'Baseline Stress',
-        horizon_days: 30,
-        created_at: '2024-02-05T11:00:00Z',
-        adjustments: [
-          { source: 'FDIC Deposits', type: 'pct', value: -7.5 },
-          { source: 'Wholesale Funding', type: 'pct', value: -12 }
-        ],
-        summary: {
-          num_series: 6,
-          avg_risk_score: 0.38,
-          max_risk_score: 0.52,
-          min_risk_score: 0.21,
-          recovery_days: 9
-        },
-        predictions: [
-          {
-            source: 'Liquidity Buffer',
-            key: 'liquidity-buffer',
-            label: 'Liquidity Buffer',
-            prediction: 0.87,
-            risk_score: 0.42,
-            confidence: { lower: 0.74, upper: 0.95 },
-            explanation: 'Buffer dips under stress but recovers within 10 days.'
-          },
-          {
-            source: 'Cash Burn Rate',
-            key: 'cash-burn',
-            label: 'Cash Burn Rate',
-            prediction: 0.21,
-            risk_score: 0.36,
-            confidence: { lower: 0.18, upper: 0.28 },
-            explanation: 'Slight acceleration driven by wholesale funding shock.'
-          }
-        ]
+    model_id: model.model_id,
+    created_at: model.created_at,
+    completed_at: model.created_at,
+    status: model.status,
+    parameters: {
+      data_job_id: model.data_job_id ?? 101,
+      train_start: '2023-01-01',
+      train_end: '2023-09-30',
+      test_start: '2023-10-01',
+      test_end: '2023-12-31',
+      config: {
+        model: model.model_type,
+        epochs: 25,
+        sequence_length: 30,
+        batch_size: 32,
+        learning_rate: 0.001,
+        dropout: 0.1
       }
-    ]
+    },
+    metrics: { ...model.metrics },
+    result: {
+      model_type: model.model_type,
+      model_version: model.model_version,
+      test_r2: model.metrics.r2,
+      test_rmse: model.metrics.rmse,
+      test_mae: model.metrics.mae,
+      per_source_metrics: {
+        fdic: { rmse: 0.41, mae: 0.19, prediction: 0.72, risk_score: 0.38 },
+        ecb: { rmse: 0.45, mae: 0.24, prediction: 0.66, risk_score: 0.44 }
+      },
+      predictions_path: model.predictions_available
+        ? `/var/beacon/models/${model.model_id}/predictions.parquet`
+        : null
+    },
+    data_job_id: model.data_job_id,
+    predictions_path: model.predictions_available
+      ? `/var/beacon/models/${model.model_id}/predictions.parquet`
+      : null,
+    visualizations: {}
   }])
 )
 
 const scenarioDetailMap = {
-  '201:301': modelDetailMap[201].scenarios[0],
+  '201:301': baselineScenario,
   '201:999': {
     scenario_id: 999,
     model_id: 201,
@@ -838,7 +914,7 @@ export async function registerApiMocks(page) {
       if (jobDetailMatch) {
         const jobId = Number(jobDetailMatch[1])
         const detail = jobDetailsMap[jobId]
-        return respond(detail ?? { job_id: jobId, status: 'unknown' })
+        return respond(detail ?? { id: jobId, job_type: 'unknown', status: 'unknown', progress: 0 })
       }
 
       const jobQualityMatch = normalizedPath.match(/\/api\/v1\/results\/(\d+)\/data-quality$/)
@@ -856,13 +932,62 @@ export async function registerApiMocks(page) {
       const modelDetailMatch = normalizedPath.match(/\/api\/models\/(\d+)$/)
       if (modelDetailMatch) {
         const modelId = Number(modelDetailMatch[1])
-        return respond(modelDetailMap[modelId] ?? { model_id: modelId, name: 'Unknown Model' })
+        return respond(modelDetailMap[modelId] ?? { model_id: modelId, status: 'completed' })
       }
 
       const scenarioMatch = normalizedPath.match(/\/api\/models\/(\d+)\/scenarios\/(\d+)$/)
       if (scenarioMatch) {
         const key = `${scenarioMatch[1]}:${scenarioMatch[2]}`
         return respond(scenarioDetailMap[key] ?? null)
+      }
+
+      // Predictive-validity report, with the branch logic of the real route:
+      // status validated only for a backtest job whose result carries
+      // event_metrics, status not_validated (a status, never an error)
+      // otherwise. This is the endpoint the coverage audit kept naming as
+      // declared by useValidationReport but unanswered by the mock.
+      // (Comment style note: the coverage extractor scans this handler body
+      // with a brace/quote matcher that does not parse comments, so comments
+      // in here carry no apostrophes, backticks, or unbalanced braces.)
+      const validationMatch = normalizedPath.match(/\/api\/v2\/reports\/validation\/(\d+)$/)
+      if (validationMatch) {
+        const jobId = Number(validationMatch[1])
+        const job = jobDetailsMap[jobId]
+        const eventMetrics = job?.result?.backtest_metrics?.event_metrics
+        if (job?.job_type === 'backtest' && eventMetrics) {
+          const bySource = eventMetrics.by_source || {}
+          const measured = Object.values(bySource).filter(
+            (payload) => payload && typeof payload === 'object' && 'roc_auc' in payload
+          )
+          const aucs = measured.map((payload) => payload.roc_auc).filter((auc) => auc != null)
+          return respond({
+            job_id: jobId,
+            status: 'validated',
+            validation: {
+              definition: eventMetrics.definition ?? null,
+              sources_measured: measured.length,
+              sources_skipped: Object.fromEntries(
+                Object.entries(bySource).filter(([, payload]) => !(payload && 'roc_auc' in payload))
+              ),
+              mean_roc_auc: aucs.length ? aucs.reduce((a, b) => a + b, 0) / aucs.length : null,
+              by_source: bySource,
+              quant_metrics: {
+                mse: job.result.backtest_metrics.mse ?? null,
+                mae: job.result.backtest_metrics.mae ?? null,
+                rmse: job.result.backtest_metrics.rmse ?? null,
+                r2: job.result.backtest_metrics.r2 ?? null
+              }
+            }
+          })
+        }
+        return respond({
+          job_id: jobId,
+          status: 'not_validated',
+          reason:
+            'this backtest ran without an event_definition, so no stress ' +
+            'events were labelled and no predictive-validity statistics exist',
+          validation: null
+        })
       }
 
       if (normalizedPath === '/api/v1/data-sources/disclosure') {
@@ -997,17 +1122,34 @@ export async function registerApiMocks(page) {
     if (method === 'POST') {
       if (normalizedPath === '/api/v1/jobs') {
         const newJobId = jobsList.length + 100
-        return respond({ job_id: newJobId, status: 'queued' }, 201)
-      }
-
-      const cancelMatch = normalizedPath.match(/\/api\/v1\/jobs\/(\d+)\/cancel$/)
-      if (cancelMatch) {
-        const jobId = Number(cancelMatch[1])
-        return respond({ job_id: jobId, status: 'cancelled' })
+        // The route answers 201 with a full JobResponse, not a bare id.
+        return respond(
+          {
+            id: newJobId,
+            job_type: 'data_collection',
+            status: 'pending',
+            progress: 0,
+            parameters: {},
+            result: null,
+            error_message: null,
+            user_friendly_error: null,
+            created_at: new Date().toISOString(),
+            started_at: null,
+            completed_at: null
+          },
+          201
+        )
       }
 
       if (normalizedPath === '/api/v1/jobs/batch/cancel') {
-        return respond({ cancelled: jobsList.map(job => job.job_id), failed: [] })
+        // BatchCancelResponse: cancelled ids, failed as reason dicts, and
+        // both totals.
+        return respond({
+          cancelled: jobsList.map(job => job.id),
+          failed: [],
+          total_requested: jobsList.length,
+          total_cancelled: jobsList.length
+        })
       }
 
       if (normalizedPath === '/api/v1/data-sources') {
@@ -1120,6 +1262,18 @@ export async function registerApiMocks(page) {
       }
 
       // Default POST success
+      return respond({ ok: true })
+    }
+
+    if (method === 'DELETE') {
+      // Single-job cancellation is DELETE on /api/v1/jobs/<id> -- the POST
+      // cancel route earlier mocks answered does not exist (the real API
+      // answers 405 there, which is how the UI ended up on DELETE).
+      const deleteJobMatch = normalizedPath.match(/\/api\/v1\/jobs\/(\d+)$/)
+      if (deleteJobMatch) {
+        const jobId = Number(deleteJobMatch[1])
+        return respond({ id: jobId, job_type: 'unknown', status: 'cancelled', progress: 0 })
+      }
       return respond({ ok: true })
     }
 

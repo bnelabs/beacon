@@ -84,7 +84,10 @@ function JobRow({ job, onSelect, isSelected, onCheckboxChange, isChecked, showCh
           )}
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1">
-              <h4 className="font-medium text-bne-ink">{job.model_id || 'Unknown Model'}</h4>
+              {/* The list endpoint sends no model reference — every row used
+                  to read "Unknown Model" in production. The job type is the
+                  real identity of a row. */}
+              <h4 className="font-medium text-bne-ink">{job.job_type || 'Job'}</h4>
               <JobStatusBadge status={job.status} />
             </div>
             <p className="text-sm text-bne-muted font-mono">ID: {job.job_id ?? job.id ?? '-'}</p>
@@ -257,8 +260,10 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRet
   const jobResult = job.result || {}
   const isTrainingJob = job.job_type === 'training'
   const isDataCollectionJob = job.job_type === 'data_collection'
+  // No transport sends `model_id` on a job row; the real chain is the result
+  // blob's model reference, else — for training jobs — the job id itself,
+  // which is what the model catalogue keys models by (model_id = job.id).
   const derivedModelId =
-    job.model_id ??
     jobResult.model_id ??
     jobResult?.model?.id ??
     (isTrainingJob ? job.id : undefined)
@@ -294,7 +299,7 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRet
             </div>
             <div>
               <label className="text-sm text-bne-muted">Model</label>
-              <p className="font-medium text-bne-ink mt-1">{job.model_id}</p>
+              <p className="font-medium text-bne-ink mt-1">{derivedModelId ?? '—'}</p>
             </div>
             <div>
               <label className="text-sm text-bne-muted">Status</label>
@@ -448,20 +453,21 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRet
         </Card>
       )}
 
-      {job.config && (
+      {/* The wire field is `parameters` (JobResponse); nothing sends `config`. */}
+      {job.parameters && (
         <Card>
           <CardHeader>
             <CardTitle>Configuration</CardTitle>
           </CardHeader>
           <CardContent>
             <pre className="bg-bne-paper p-4 rounded-lg text-xs font-mono overflow-x-auto">
-              {JSON.stringify(job.config, null, 2)}
+              {JSON.stringify(job.parameters, null, 2)}
             </pre>
           </CardContent>
         </Card>
       )}
 
-      {(job.error || job.user_friendly_error) && (
+      {(job.error || job.error_message || job.user_friendly_error) && (
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between w-full">
@@ -484,32 +490,19 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRet
             {job.user_friendly_error && (
               <p className="text-sm text-bne-clay mb-3">{job.user_friendly_error}</p>
             )}
-            {job.error && (
+            {(job.error || job.error_message) && (
               <div className="bg-bne-clay/5 border border-bne-clay/20 rounded-lg p-4">
-                <p className="text-sm text-bne-clay font-mono">{job.error}</p>
+                {/* REST calls it error_message, the WebSocket calls it error. */}
+                <p className="text-sm text-bne-clay font-mono">{job.error ?? job.error_message}</p>
               </div>
             )}
           </CardContent>
         </Card>
       )}
 
-      {job.logs && job.logs.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Logs</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="bg-bne-ink text-bne-paper p-4 rounded-lg font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto">
-              {job.logs.map((log, i) => (
-                <div key={i} className="mb-1">
-                  <span className="text-bne-muted">[{log.timestamp}]</span>{' '}
-                  <span>{log.message}</span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* The "Logs" card that used to sit here rendered job.logs — a field no
+          transport has ever sent (there is no logs column on the Job model).
+          It is removed rather than kept as a permanently-empty branch. */}
     </div>
   )
 }

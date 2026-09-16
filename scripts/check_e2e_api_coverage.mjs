@@ -42,21 +42,19 @@ const SRC = join(ROOT, 'frontend', 'src')
 const DECLARED_UNMOCKED = {
   // An entry here is a decision, not a silence, in the style of the disposition
   // census in backend/tests/test_reachability.py: the endpoint, and why no e2e
-  // path reaches it. Each of these was verified against the CI trace's network
-  // log for the failing run, which lists every request the suite made -- none of
-  // these four appear in it, so none is fetched during the run. If a spec later
-  // navigates to the page that uses one, this check fails and the right response
-  // is to mock it and delete the declaration, not to widen the declaration.
-  '/api/v1/analytics/distribution/risk-scores':
-    'Analytics risk-score histogram; the spec visits Analytics but this query is ' +
-    'gated behind a control it does not exercise. Not in the failing run\'s network log.',
-  '/api/v1/analytics/models/performance-comparison':
-    'Model performance comparison; reached from the Models/Performance pages, ' +
-    'which the spec does not open. Not in the failing run\'s network log.',
-  '/api/v2/reports/validation/{param}':
-    'Validation report for one job; requires a completed job with a validation ' +
-    'artefact, which the mocked job list does not carry. Not in the failing ' +
-    "run's network log.",
+  // path reaches it. If a spec later navigates to the page that uses one, this
+  // check fails and the right response is to mock it and delete the
+  // declaration, not to widen the declaration.
+  //
+  // This list is deliberately EMPTY: every endpoint the frontend declares is
+  // answered by the mock. The three entries that used to live here were
+  // retired by following exactly the rule above -- the validation report got
+  // a mock (with the real route's validated/not_validated branch logic) and a
+  // spec walk-through via the #/results?jobId=104 deep link, and the two
+  // analytics endpoints stopped being declared when their caller-less hooks
+  // (useRiskScoreDistribution, useModelPerformanceComparison) were deleted as
+  // dead code. An endpoint nothing calls does not need a declaration; it
+  // needs a decision about whether a screen should exist for it.
 }
 
 // ---------------------------------------------------------------------------

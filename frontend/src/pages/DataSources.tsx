@@ -43,7 +43,7 @@ const PROVENANCE_CLASS_META: Record<string, { label: string; variant: BadgeVaria
 /** Stable string key for a source row: property keys are strings at runtime,
  *  and probe results / health rows are looked up by exactly this. */
 function sourceKey(source: DataSource): string {
-  return String(source.id || source.source_id || '')
+  return String(source.id ?? '')
 }
 
 interface DataSourceCardProps {
@@ -81,7 +81,6 @@ function DataSourceCard({
   const lastUpdated =
     source.last_successful_fetch ||
     source.updated_at ||
-    source.last_updated ||
     null
 
   return (
@@ -90,7 +89,7 @@ function DataSourceCard({
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <CardTitle>{source.name || source.source_name}</CardTitle>
+              <CardTitle>{source.name}</CardTitle>
               <Badge variant={statusVariants[source.status ?? ''] || 'default'} size="sm">
                 {source.status || 'active'}
               </Badge>
@@ -105,7 +104,7 @@ function DataSourceCard({
           <div className="flex items-center justify-between text-sm">
             <span className="text-bne-muted">Source Type</span>
             <span className="font-medium text-bne-ink uppercase">
-              {source.plugin_name || source.plugin_type || source.type}
+              {source.plugin_type}
             </span>
           </div>
           <div className="flex items-center justify-between text-sm">
@@ -115,8 +114,11 @@ function DataSourceCard({
             </span>
           </div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-bne-muted">Records</span>
-            <span className="font-medium text-bne-ink">{source.record_count?.toLocaleString() || '-'}</span>
+            {/* The row used to read source.record_count, which no endpoint
+                sends; last_sync_rows is the real column (and the health row
+                shows the same figure with its timestamp). */}
+            <span className="text-bne-muted">Rows (last run)</span>
+            <span className="font-medium text-bne-ink">{source.last_sync_rows?.toLocaleString() || '-'}</span>
           </div>
           <div className="flex items-center justify-between text-sm">
             <span className="text-bne-muted">Schedule</span>
@@ -185,18 +187,10 @@ function DataSourceCard({
               {probeResult.success ? 'Reachable:' : 'Unreachable:'} {probeResult.message}
             </p>
           )}
-          {source.api_endpoint && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-bne-muted">Endpoint</span>
-              <span className="font-mono text-xs text-bne-ink truncate max-w-[200px]">
-                {source.api_endpoint}
-              </span>
-            </div>
-          )}
-          {(source.coverage_description || source.coverage) && (
+          {source.coverage_description && (
             <div className="flex items-center justify-between text-sm">
               <span className="text-bne-muted">Coverage</span>
-              <span className="font-medium text-bne-ink">{source.coverage_description || source.coverage}</span>
+              <span className="font-medium text-bne-ink">{source.coverage_description}</span>
             </div>
           )}
         </div>
@@ -249,7 +243,7 @@ export default function DataSources() {
   }, [healthPayload])
 
   const handleProbe = (source: DataSource) => {
-    const id: EntityId | null | undefined = source.id || source.source_id
+    const id: EntityId = source.id
     probeMutation.mutate(id, {
       onSuccess: (result) => setProbeResults((prev) => ({ ...prev, [sourceKey(source)]: result })),
       onError: (probeError) =>
@@ -262,7 +256,7 @@ export default function DataSources() {
 
   const handleSchedule = (source: DataSource, minutes: number | null) => {
     updateMutation.mutate({
-      sourceId: source.id || source.source_id,
+      sourceId: source.id,
       sync_interval_minutes: minutes
     })
   }
@@ -303,7 +297,7 @@ export default function DataSources() {
   // every render.)
   const lastSyncLabel = useMemo(() => {
     const stamps = (sources || [])
-      .map((s) => s.last_successful_fetch || s.updated_at || s.last_updated)
+      .map((s) => s.last_successful_fetch || s.updated_at)
       .filter((stamp): stamp is string => Boolean(stamp))
       .map((s) => new Date(s).getTime())
       .filter((t) => !Number.isNaN(t))
@@ -345,8 +339,8 @@ export default function DataSources() {
 
   const handleSync = (source: DataSource) => {
     if (!source) return
-    const sourceId = source.id || source.source_id
-    if (!sourceId) return
+    const sourceId = source.id
+    if (sourceId == null) return
     syncMutation.mutate({ sourceId })
   }
 
@@ -370,7 +364,7 @@ export default function DataSources() {
     if (formMode === 'create') {
       await createMutation.mutateAsync(payload)
     } else if (formMode === 'edit' && formSource) {
-      const sourceId = formSource.id || formSource.source_id
+      const sourceId = formSource.id
       // Flat, not nested under `data`: the PUT body is the mutation
       // variables minus `sourceId` (see useUpdateDataSource), and the
       // backend's DataSourceUpdate schema reads top-level keys. The nested
@@ -536,13 +530,13 @@ export default function DataSources() {
                   onSync={handleSync}
                   onConfigure={handleConfigure}
                   onView={handleView}
-                  isSyncing={currentSyncingId === (source.id || source.source_id)}
+                  isSyncing={currentSyncingId === source.id}
                   health={healthById.get(sourceKey(source)) ?? null}
                   onProbe={handleProbe}
                   onSchedule={handleSchedule}
                   probePending={
                     probeMutation.isPending &&
-                    probeMutation.variables === (source.id || source.source_id)
+                    probeMutation.variables === source.id
                   }
                   probeResult={probeResults[sourceKey(source)]}
                 />
@@ -562,13 +556,13 @@ export default function DataSources() {
                   onSync={handleSync}
                   onConfigure={handleConfigure}
                   onView={handleView}
-                  isSyncing={currentSyncingId === (source.id || source.source_id)}
+                  isSyncing={currentSyncingId === source.id}
                   health={healthById.get(sourceKey(source)) ?? null}
                   onProbe={handleProbe}
                   onSchedule={handleSchedule}
                   probePending={
                     probeMutation.isPending &&
-                    probeMutation.variables === (source.id || source.source_id)
+                    probeMutation.variables === source.id
                   }
                   probeResult={probeResults[sourceKey(source)]}
                 />

@@ -127,6 +127,39 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   are deterministic (`derandomize=True`).
 
 ### Changed
+- **The frontend now only reads fields the API actually sends, and a test
+  keeps it that way.** The typed-call audit (`backend/tests/test_frontend_contract.py`,
+  new) parses every `fetchApi<T>`/`fetchJson<T>` call, resolves the endpoint
+  against the app's live OpenAPI schema, and fails when a declared field is
+  absent from the wire — it immediately earned its keep: `Job` declared
+  `name`/`model_id`/`config`/`logs` (no transport sends any of them; the Jobs
+  page rendered "Unknown Model" and a permanently-empty Logs card in
+  production while the e2e mock served all four), `DataSource` declared six
+  invented alternates the cards fell back through (`record_count`,
+  `api_endpoint`, `coverage`, ...), `CatalogueItem` declared
+  `parameters`/`sample_metrics`/`country_code`/... behind unreachable UI
+  branches, and the single `Model` interface conflated two different wire
+  shapes — it is now `ModelSummary` + `ModelDetailData` exactly as the
+  endpoints define them, with the Models cards, the performance tables and
+  the details drawer rewired to real fields (`metrics.r2/rmse/mae`,
+  `parameters.config`, `created_at`) instead of invented defaults ("LSTM",
+  12, 4). `useSyncDataSource` no longer merges the queued **job** (the sync
+  endpoint's actual 202 response) into the cached **source** row. The e2e
+  fixtures were rebuilt to the true wire shapes — including a backtest job
+  and the validation-report route with the real endpoint's
+  validated/not-validated branch logic — and the spec now walks the
+  predictive-validity card through the `#/results?jobId=104` deep link. The
+  coverage audit's `DECLARED_UNMOCKED` list is empty: all 32 endpoints the
+  frontend declares are answered by the mock.
+- **Twelve dead hooks and four dead helpers deleted**, with a millisecond
+  gate to keep the count at zero: `scripts/check_frontend_hook_reachability.mjs`
+  (frontend sibling of `test_reachability.py`) fails CI when any named value
+  export of `src/hooks|utils|data|store` has no consumer. Gone: five country
+  hooks, five notification hooks, `useModelPerformanceComparison`,
+  `useRiskScoreDistribution`, `getRegionById`/`getRegionsByCountry`/
+  `getConnectionsForRegion`, the `API_BASE`/`Region`/notification-type
+  compat re-exports nobody imported. The endpoints stay documented; a hook
+  re-added for a real screen is three typed lines.
 - **Invented states removed from three surfaces**, in the register the
   platform holds itself to everywhere else: the Model Performance page no
   longer prints hard-coded "+2.3%" / "−1.8%" trend chips (no endpoint reports

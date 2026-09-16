@@ -163,6 +163,22 @@ test('navigates the application and exercises primary interactions', async ({ pa
   await closeDrawerButton.click()
   await expect(closeDrawerButton).toHaveCount(0)
 
+  // Predictive validity: the report card on Results, served by
+  // GET /api/v2/reports/validation/{job_id}. The endpoint answers
+  // `validated` only for backtest jobs, so the deep link names the backtest
+  // fixture (104) -- via the same hash route a shared report would use.
+  await page.evaluate(() => { window.location.hash = '#/results?modelId=201&jobId=104' })
+  await expect(
+    page.getByRole('heading', { name: 'Predictive validity — job #104' })
+  ).toBeVisible()
+  await expect(page.getByText('insufficient stress events in window')).toBeVisible()
+  // Leave the deep link before the Jobs section: Results is a breadcrumb
+  // child of Jobs, so its trail renders a second "Jobs" button and the next
+  // section's sidebar click would resolve to two elements (strict mode).
+  // The dashboard has no trail.
+  await page.evaluate(() => { window.location.hash = '#/dashboard' })
+  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+
   // Jobs interactions
   await page.getByRole('button', { name: 'Jobs' }).click()
   await expect(page.getByRole('heading', { name: 'Jobs' })).toBeVisible()
@@ -354,9 +370,11 @@ test('global search finds jobs, models and catalogue items', async ({ page }) =>
   await expect(page.getByText('Job #101 - data_collection')).toBeVisible()
 
   // A model, from the bare array that /api/models returns. Read from
-  // `model_id`/`name`, which is what ModelSummary actually declares.
-  await input.fill('Liquidity Forecaster')
-  await expect(page.getByText('Liquidity Forecaster').first()).toBeVisible()
+  // `model_id`/`name`, which is what ModelSummary actually declares -- and
+  // the fixture now carries the name the route actually builds
+  // (result.model_type upper-cased), not a marketing name it cannot produce.
+  await input.fill('TEMPORAL_ATTENTION')
+  await expect(page.getByText('TEMPORAL_ATTENTION').first()).toBeVisible()
 
   // A catalogue item, from /api/v1/catalogue — the URL that previously 404'd.
   await input.fill('FDIC Liquidity Coverage')

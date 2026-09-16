@@ -93,6 +93,16 @@ jobs:
         working-directory: .
         run: node scripts/check_tailwind_content.mjs
 
+      - name: Every data-layer export has a consumer
+        # why: the frontend sibling of backend/tests/test_reachability.py.
+        # The untyped era accumulated twelve hooks with zero callers; they
+        # were unmaintained contracts that drifted from the API with nothing
+        # exercising them. A named value export of src/hooks, src/utils,
+        # src/data or src/store that no other file references fails here in
+        # milliseconds instead of rotting until the next migration audit.
+        working-directory: .
+        run: node scripts/check_frontend_hook_reachability.mjs
+
       - name: Every frontend endpoint is answered by the e2e mock
         # Runs in every gate, before any browser exists anywhere. An endpoint
         # the frontend calls and frontend/tests/apiMocks.js does not cover

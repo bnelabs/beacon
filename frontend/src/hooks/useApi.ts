@@ -13,7 +13,8 @@ import type {
   Job,
   JobCreatePayload,
   JobDataQualityReport,
-  Model,
+  ModelDetailData,
+  ModelSummary,
   NetworkGraphPayload,
   NormalizedNetworkGraph,
   ProbeResult,
@@ -63,14 +64,14 @@ export function useJob(jobId?: EntityId | null) {
 export function useModels() {
   return useQuery({
     queryKey: ['models'],
-    queryFn: () => fetchApi<Model[]>('/models')
+    queryFn: () => fetchApi<ModelSummary[]>('/models')
   })
 }
 
 export function useModel(modelId?: EntityId | null) {
   return useQuery({
     queryKey: ['models', modelId],
-    queryFn: () => fetchApi<Model>(`/models/${modelId}`),
+    queryFn: () => fetchApi<ModelDetailData>(`/models/${modelId}`),
     enabled: !!modelId
   })
 }
@@ -203,8 +204,13 @@ export function useSyncDataSource() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    // The sync endpoint answers 202 with a JobResponse (the queued
+    // collection job), NOT a data source. The previous onSuccess merged
+    // that job row into the cached source — a job's `status: pending`
+    // landing on a source badge. The queued job is visible under Jobs; the
+    // source row refreshes through onSettled's invalidation.
     mutationFn: ({ sourceId }: { sourceId: SourceKey }) =>
-      fetchApi<DataSource>(`/v1/data-sources/${sourceId}/sync`, {
+      fetchApi<Job>(`/v1/data-sources/${sourceId}/sync`, {
         method: 'POST'
       }),
     onMutate: async ({ sourceId }) => {
@@ -213,31 +219,13 @@ export function useSyncDataSource() {
       if (previous) {
         queryClient.setQueryData<DataSource[]>(['dataSources'], (old) =>
           old?.map((source) =>
-            (source.id || source.source_id) === sourceId
+            source.id === sourceId
               ? { ...source, status: 'syncing' }
               : source
           )
         )
       }
       return { previous }
-    },
-    onSuccess: (updated) => {
-      if (!updated) {
-        return
-      }
-      const updatedId = updated.id ?? updated.source_id
-      if (!updatedId) {
-        return
-      }
-      queryClient.setQueryData<DataSource[]>(['dataSources'], (old) =>
-        old?.map((source) => {
-          const sourceId = source.id ?? source.source_id
-          if (sourceId === updatedId) {
-            return { ...source, ...updated }
-          }
-          return source
-        }) ?? old
-      )
     },
     onError: (_error, _variables, context) => {
       if (context?.previous) {
@@ -300,8 +288,11 @@ export function useBanksByRegion(filters: CatalogueFilters | null) {
         country: item.region,
         region: item.region,
         description: item.description,
-        metadata: item.parameters || {},
-        risk_score: ((item.parameters ?? item.metadata)?.risk_score as number | string | null | undefined) ?? null,
+        // The catalogue schema sends no parameters/metadata blob, so the old
+        // `(item.parameters ?? item.metadata)?.risk_score` read could only
+        // ever yield null in production. Say so instead of implying a
+        // channel that does not exist.
+        risk_score: null,
         source: item.data_source?.name || ''
       }))
     }

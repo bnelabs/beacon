@@ -206,8 +206,16 @@ when touched. It is complete: **zero `.js`/`.jsx` modules remain under
    `src/types/api.ts` from the generated endpoint inventory
    (`docs/api-endpoints.md`) and from every field the UI actually reads, so
    envelope and field-name drift is a compile error rather than an e2e
-   surprise. If a generator is added later, `src/types/api.ts` is the file it
-   must replace.
+   surprise. The hand-derivation is itself machine-checked:
+   `backend/tests/test_frontend_contract.py` parses every typed
+   `fetchApi<T>`/`fetchJson<T>` call and asserts the bound interface's
+   fields all exist on the response schema in the app's own `app.openapi()`
+   (the schema `docs/api-endpoints.md` is generated from), recursing into
+   nested interfaces, with a two-entry allowlist for the WebSocket payload's
+   alternate spellings. A backend field rename now fails the nightly suite
+   naming the type and field, instead of surfacing as `undefined` in a
+   browser. If a generator is added later, `src/types/api.ts` is the file it
+   must replace — and the contract test is what it must keep passing.
 3. **Phase 3 (done, 2026-09):** every page, component and entry point is
    `.tsx` — not one route per PR but one migration to close the ratchet,
    because the incremental batches (PR #64 and its predecessors) had already

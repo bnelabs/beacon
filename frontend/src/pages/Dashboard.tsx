@@ -260,7 +260,9 @@ export default function Dashboard() {
   }, [jobs])
 
   const modelList = Array.isArray(models) ? models : []
-  const activeModels = modelList.filter((m) => m.status === 'active' || m.status === 'ready').length
+  // The catalogue lists completed training jobs; 'active'/'ready' are statuses
+  // the endpoint never emits, so this count used to be permanently 0.
+  const activeModels = modelList.filter((m) => m.status === 'completed').length
   const sourceList = Array.isArray(dataSources) ? dataSources : []
   const enabledSources = sourceList.filter((s) => s.enabled).length
 

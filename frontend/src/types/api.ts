@@ -60,13 +60,6 @@ export interface ModelResultMetrics {
   [key: string]: unknown
 }
 
-/** One line of a job's captured log output. */
-export interface JobLogEntry {
-  timestamp?: string | null
-  message?: string | null
-  [key: string]: unknown
-}
-
 /** Parameters a job was created with (shape varies by job type). */
 export interface JobParameters {
   regions?: string[]
@@ -85,32 +78,44 @@ export interface JobParameters {
   [key: string]: unknown
 }
 
-/** A job row from `/v1/jobs` (bare array envelope) and `/v1/jobs/{id}`. */
+/** A job row from `/v1/jobs` (bare array envelope) and `/v1/jobs/{id}`.
+ *
+ *  Field set = JobResponse (REST) ∪ job_payload (WebSocket), and nothing
+ *  else: an earlier revision of this interface also declared `name`,
+ *  `model_id`, `config` and `logs`, none of which any transport sends — the
+ *  UI read them, the e2e mock dutifully served them, and production rendered
+ *  "Unknown Model" and empty cards. The contract test
+ *  (backend/tests/test_frontend_contract.py) now pins this interface to the
+ *  live OpenAPI schema, with the two WS-only spellings allowlisted. */
 export interface Job {
   id?: EntityId | null
+  /** WebSocket payloads carry both `id` and `job_id` (the two react-query
+   *  caches are keyed differently); REST sends only `id`. */
   job_id?: EntityId | null
-  name?: string | null
   job_type?: string | null
-  /** Legacy camelCase spelling tolerated by the job-type filter. */
-  jobType?: string | null
   status: JobStatus
   progress?: number | null
   created_at?: string | null
   started_at?: string | null
   completed_at?: string | null
-  model_id?: EntityId | null
   result?: ModelResultMetrics | null
-  config?: Record<string, unknown> | null
   parameters?: JobParameters | null
+  /** WebSocket names the technical string `error`; REST names it
+   *  `error_message`. JobDetails reads both. */
   error?: string | null
+  error_message?: string | null
   user_friendly_error?: string | null
-  logs?: JobLogEntry[] | null
 }
+
+/** One entry of a batch-cancel failure: the job id plus the reason it could
+ *  not be cancelled (BatchCancelResponse.failed is a list of dicts, not ids). */
+export type BatchCancelFailure = Record<string, unknown>
 
 /** Response of `POST /v1/jobs/batch/cancel`. */
 export interface BatchCancelResult {
   cancelled: EntityId[]
-  failed: EntityId[]
+  failed: BatchCancelFailure[]
+  total_requested: number
   total_cancelled: number
 }
 
@@ -156,28 +161,49 @@ export interface JobUpdate {
 /* Models                                                              */
 /* ------------------------------------------------------------------ */
 
-/** A model row from `/models` (bare array) and `/models/{id}`. */
-export interface Model {
-  id?: EntityId | null
+/** Evaluation metrics as the model catalogue reports them (`ModelMetrics`). */
+export interface ModelMetrics {
+  mae?: number | null
+  rmse?: number | null
+  r2?: number | null
+  accuracy?: number | null
+  best_val_loss?: number | null
+}
+
+/** A row of `GET /models` (`ModelSummary`): completed training jobs that can
+ *  serve as models. NOTE: the list endpoint only ever returns completed
+ *  training jobs, and it has no `description`, `architecture`,
+ *  `input_features`, `prediction_steps` or `last_trained` — an earlier single
+ *  `Model` interface declared them, and the cards that read them rendered
+ *  invented defaults ("LSTM", 12, 4) in production. */
+export interface ModelSummary {
   model_id: EntityId
-  name?: string | null
-  description?: string | null
+  name: string
+  created_at?: string | null
+  status: string
   model_type?: string | null
   model_version?: string | null
-  architecture?: string | null
-  input_features?: number | null
-  prediction_steps?: number | null
-  status?: string | null
-  accuracy?: number | null
-  last_trained?: string | null
+  metrics?: ModelMetrics | null
+  tags?: string[] | null
+  data_job_id?: EntityId | null
+  predictions_available?: boolean | null
+}
+
+/** `GET /models/{id}` (`ModelDetail`). `parameters` is the training job's
+ *  parameter block (its `config` sub-object carries the hyperparameters);
+ *  `metrics`/`result` are declared Dict[str, Any] on the backend, so they are
+ *  typed structurally here and left open where the engine's output is. */
+export interface ModelDetailData {
+  model_id: EntityId
   created_at?: string | null
   completed_at?: string | null
+  status: string
+  parameters?: (JobParameters & Record<string, unknown>) | null
+  metrics?: ModelMetrics | null
+  result?: ModelResultMetrics | null
   data_job_id?: EntityId | null
   predictions_path?: string | null
-  hyperparameters?: Record<string, unknown> | null
-  metrics?: ModelResultMetrics | null
-  data_summary?: Record<string, unknown> | null
-  result?: ModelResultMetrics | null
+  visualizations?: Record<string, unknown> | null
 }
 
 /* ------------------------------------------------------------------ */
@@ -255,32 +281,33 @@ export interface ValidationReport {
 /* Data sources, catalogue, disclosure                                 */
 /* ------------------------------------------------------------------ */
 
-/** A configured data source row from `/v1/data-sources` (bare array). */
+/** A configured data source row from `/v1/data-sources`
+ *  (`DataSourceResponse` = `DataSourceConfigBase` + status/telemetry). An
+ *  earlier revision also declared source_id, source_name, plugin_name, type,
+ *  record_count, last_updated, coverage and api_endpoint — invented
+ *  alternates the UI fell back through; every one rendered undefined in
+ *  production while the mock served some of them. */
 export interface DataSource {
-  id?: EntityId | null
-  source_id?: EntityId | null
-  name?: string | null
-  source_name?: string | null
-  plugin_type?: string | null
-  plugin_name?: string | null
-  type?: string | null
+  id: EntityId
+  name: string
+  plugin_type: string
+  config?: Record<string, unknown> | null
   description?: string | null
-  status?: string | null
   enabled?: boolean | null
-  record_count?: number | null
-  sync_interval_minutes?: number | null
-  created_at?: string | null
-  updated_at?: string | null
-  last_updated?: string | null
-  last_successful_fetch?: string | null
   registration_url?: string | null
   registration_required?: boolean | null
   free_tier_limits?: string | null
   coverage_description?: string | null
-  coverage?: string | null
-  config?: Record<string, unknown> | null
-  api_endpoint?: string | null
+  status?: string | null
   error_message?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  last_successful_fetch?: string | null
+  sync_interval_minutes?: number | null
+  consecutive_failures?: number | null
+  last_sync_started_at?: string | null
+  last_sync_duration_ms?: number | null
+  last_sync_rows?: number | null
 }
 
 /** Scheduler's view of one feed, from `/v1/data-sources/health`. */
@@ -333,27 +360,38 @@ export interface PluginOption {
   label: string
 }
 
-/** A catalogue dataset row from `/v1/catalogue` (bare array). */
+/** A catalogue dataset row from `/v1/catalogue`
+ *  (`DataCatalogueItemResponse`). An earlier revision also declared
+ *  country/country_code, update_frequency, coverage_end, parameters,
+ *  metadata, sample_metrics and source_name — none of which the schema
+ *  sends — and three screens rendered branches off them that could never
+ *  be true in production. */
 export interface CatalogueItem {
   id: EntityId
-  code?: string | null
-  name?: string | null
+  code: string
+  name: string
+  description?: string | null
   category?: string | null
   region?: string | null
-  description?: string | null
-  country?: string | null
-  country_code?: string | null
-  frequency?: string | null
-  update_frequency?: string | null
-  unit?: string | null
-  last_updated?: string | null
-  coverage_end?: string | null
-  parameters?: Record<string, unknown> | null
-  metadata?: Record<string, unknown> | null
-  sample_metrics?: Record<string, string | number> | null
-  data_source?: { id?: EntityId | null; name?: string | null } | null
+  risk_types?: string[] | null
   data_source_id?: EntityId | null
-  source_name?: string | null
+  data_source?: {
+    id?: EntityId | null
+    name?: string | null
+    plugin_type?: string | null
+    description?: string | null
+  } | null
+  endpoint?: string | null
+  frequency?: string | null
+  granularity?: string | null
+  unit?: string | null
+  enabled?: boolean | null
+  default_selected?: boolean | null
+  priority?: number | null
+  tags?: string[] | null
+  created_at?: string | null
+  updated_at?: string | null
+  last_data_update?: string | null
 }
 
 /** Query filters for the catalogue endpoint. */
@@ -378,8 +416,11 @@ export interface BankSummary {
   country?: string | null
   region?: string | null
   description?: string | null
-  metadata?: Record<string, unknown>
-  /** Dynamic metadata: the backend may report a number or numeric string. */
+  /** The catalogue carries no per-item risk channel (the old mapping read
+   *  `parameters.risk_score` off a field the schema does not send), so this
+   *  is null until an endpoint reports one. The map renders null as its
+   *  neutral colour and the region panel renders it as "—" — a risk score
+   *  is never inferred. */
   risk_score?: number | string | null
   source?: string
 }
