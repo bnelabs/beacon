@@ -66,34 +66,62 @@ class DataSourceService:
         logger.info(f"Created data source: {data_source.name} (type: {data_source.plugin_type})")
         return db_data_source
 
+    #: Columns an explicit JSON null may clear. The remaining fields are
+    #: core identity/behaviour and are only written when the request carries
+    #: a non-null value for them.
+    _NULLABLE_UPDATE_FIELDS = (
+        "description",
+        "registration_url",
+        "registration_required",
+        "free_tier_limits",
+        "coverage_description",
+        "sync_interval_minutes",
+    )
+
     def update_data_source(self, data_source_id: int, update: DataSourceUpdate) -> Optional[DataSource]:
-        """Update an existing data source."""
+        """Update an existing data source.
+
+        ``exclude_unset`` drives the contract: keys absent from the request
+        body leave the stored values untouched; keys present are applied --
+        including explicit nulls for the nullable columns, which is how the
+        UI's "Manual only" schedule option (``sync_interval_minutes: null``)
+        and an emptied description clear a value. The previous
+        ``is not None`` chain could express neither, and it never applied
+        ``sync_interval_minutes`` or the disclosure metadata at all, so the
+        schedule dropdown and the edit form's extra fields wrote nowhere
+        while the API answered 200.
+        """
         db_data_source = self.get_data_source(data_source_id)
         if not db_data_source:
             return None
 
-        # Update fields if provided
-        if update.name is not None:
+        fields = update.model_dump(exclude_unset=True)
+
+        name = fields.get("name")
+        if name is not None and name != db_data_source.name:
             # Check for duplicate name (excluding current record)
             existing = (
                 self.db.query(DataSource)
-                .filter(DataSource.name == update.name, DataSource.id != data_source_id)
+                .filter(DataSource.name == name, DataSource.id != data_source_id)
                 .first()
             )
             if existing:
-                raise ValueError(f"Data source with name '{update.name}' already exists")
-            db_data_source.name = update.name
+                raise ValueError(f"Data source with name '{name}' already exists")
+            db_data_source.name = name
 
-        if update.plugin_type is not None:
-            db_data_source.plugin_type = update.plugin_type
-        if update.config is not None:
-            db_data_source.config = update.config
-        if update.description is not None:
-            db_data_source.description = update.description
-        if update.enabled is not None:
-            db_data_source.enabled = update.enabled
-            if not update.enabled:
+        for field in ("plugin_type", "config"):
+            if fields.get(field) is not None:
+                setattr(db_data_source, field, fields[field])
+
+        enabled = fields.get("enabled")
+        if enabled is not None:
+            db_data_source.enabled = enabled
+            if not enabled:
                 db_data_source.status = "disabled"
+
+        for field in self._NULLABLE_UPDATE_FIELDS:
+            if field in fields:
+                setattr(db_data_source, field, fields[field])
 
         self.db.commit()
         self.db.refresh(db_data_source)

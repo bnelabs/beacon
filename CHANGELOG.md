@@ -127,6 +127,21 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   are deterministic (`derandomize=True`).
 
 ### Changed
+- **Invented states removed from three surfaces**, in the register the
+  platform holds itself to everywhere else: the Model Performance page no
+  longer prints hard-coded "+2.3%" / "−1.8%" trend chips (no endpoint reports
+  a period-over-period delta; when one exists the chips can come back wired to
+  it). Settings' "Linked data credentials" card claimed FRED was "Connected"
+  unconditionally and offered dead "Connect" buttons; it is now "Linked data
+  feeds", reading real configured/enabled state per plugin from the data
+  sources API, with buttons that go to Data Sources — and the "Team access"
+  card (roles, owner badges, invites) is gone, because the same page's own
+  copy says BEACON has no user accounts. On the Models page, the Edit/
+  Duplicate/Delete card menu (every entry opened a "Placeholder for …" card)
+  is removed — no model update/copy/delete endpoint exists — and the
+  Create/Train modals no longer collect hyperparameters into buttons that did
+  nothing: they explain that models are the output of training jobs and hand
+  off to the real training-job flow.
 - **The frontend is now entirely TypeScript.** The ratchet from
   `docs/LANGUAGE_STRATEGY.md` is closed: all 23 remaining `.js`/`.jsx` modules
   under `frontend/src` (every page, the two data hooks, and the remaining
@@ -233,6 +248,36 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   `docker-compose.simple.yml`) with the precondition each waits on.
 
 ### Fixed
+- **The TypeScript migration briefly shipped an unstyled app.** Tailwind's
+  `content` globs still said `src/**/*.{js,jsx}` after every source file
+  became `.ts`/`.tsx`, so the generated stylesheet contained no app
+  utilities (5.9 kB instead of ~34 kB) and nothing failed: the build
+  succeeds, the dev server starts, and only a browser could see the
+  collapsed layout -- the dispatched Playwright run caught it via a
+  deck.gl canvas covering the sidebar after the risk-map steps. The globs
+  now cover `{js,jsx,ts,tsx}`, and a new fast-gate check
+  (`scripts/check_tailwind_content.mjs`, ~0.2 s, no dependencies) resolves
+  the configured globs against the real tree and fails by name when a
+  src-targeting pattern matches zero files, so a silent-empty-stylesheet
+  can never reach nightly again.
+- **"Save Changes" on a data source was a 200-answering no-op — three ways at
+  once.** The frontend nested the edit payload under a `data` key that
+  Pydantic dropped; the `DataSourceUpdate` schema lacked the disclosure
+  metadata columns the form collects (`registration_url`,
+  `registration_required`, `free_tier_limits`, `coverage_description`); and
+  the service never applied `sync_interval_minutes` even though the schema
+  accepted it — so the schedule dropdown, the "Put a feed on a schedule"
+  checklist step and the whole Refresh Cadence feature could never actually
+  turn on. The update path is now `exclude_unset` end to end: absent keys
+  leave stored values untouched, present keys are applied, and an explicit
+  null clears a nullable column (`sync_interval_minutes: null` is the UI's
+  "Manual only"). Pinned by `backend/tests/test_data_source_update.py`.
+- **The notification bell polled twice.** `useNotifications` already refetches
+  every 30 s; the component layered its own out-of-phase 30 s `setInterval`
+  on top. The component timer is gone.
+- **Analytics metric icons never had their tint.** The chip class was built as
+  `bg-${color}/10`, which Tailwind cannot see at build time, so the class did
+  not exist in the CSS. Static class map now.
 - **Frontend CI has been red on every run since #53**, on `main` and on every
   branch cut from it -- so #54, #55, #56 and #57 all merged with the check
   failing. `GET /api/v1/data-sources/disclosure`, added by #53 and called by

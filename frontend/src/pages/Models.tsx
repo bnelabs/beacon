@@ -8,44 +8,27 @@ import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import { useModels, useModel } from '../hooks/useApi'
 import { useRouter } from '../store/useRouter'
+import JobCreationModal from '../components/jobs/JobCreationModal'
 import type { EntityId, Model, ModelResultMetrics, ScenarioResult } from '../types/api'
-
-interface ModelActionsMenuProps {
-  onEdit?: () => void
-  onDuplicate?: () => void
-  onDelete?: () => void
-}
-
-function ModelActionsMenu({ onEdit, onDuplicate, onDelete }: ModelActionsMenuProps) {
-  const [open, setOpen] = useState(false)
-
-  return (
-    <div className="relative">
-      <Button variant="ghost" size="sm" onClick={() => setOpen((prev) => !prev)}>
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-        </svg>
-      </Button>
-      {open && (
-        <div className="absolute right-0 mt-2 w-40 rounded-md border border-bne-line bg-bne-card shadow-bne-card z-20">
-          <button className="w-full px-4 py-2 text-left text-sm hover:bg-bne-paper" onClick={() => { setOpen(false); onEdit?.() }}>Edit Metadata</button>
-          <button className="w-full px-4 py-2 text-left text-sm hover:bg-bne-paper" onClick={() => { setOpen(false); onDuplicate?.() }}>Duplicate</button>
-          <button className="w-full px-4 py-2 text-left text-sm text-bne-clay hover:bg-bne-clay/10" onClick={() => { setOpen(false); onDelete?.() }}>Delete</button>
-        </div>
-      )}
-    </div>
-  )
-}
 
 interface TrainModelModalProps {
   isOpen: boolean
   onClose: () => void
+  /** Hands off to the real training-job flow (JobCreationModal). */
+  onContinue: () => void
   model?: Model | null
 }
 
-function TrainModelModal({ isOpen, onClose, model }: TrainModelModalProps) {
+function TrainModelModal({ isOpen, onClose, onContinue, model }: TrainModelModalProps) {
   if (!isOpen || !model) return null
 
+  // This modal used to collect epochs/learning-rate/batch-size into inputs
+  // that were never submitted — "Start Training" had no handler, and no
+  // endpoint exists that trains a registered model in place. Training in
+  // BEACON is a job: it needs a completed data-collection job to train on,
+  // and it produces a new model rather than mutating this one. The button
+  // now hands off to the real flow (JobCreationModal, training type)
+  // instead of pretending.
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-bne-ink/40">
       <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto" as="div">
@@ -58,34 +41,17 @@ function TrainModelModal({ isOpen, onClose, model }: TrainModelModalProps) {
           </button>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-bne-ink mb-2">Training Job Name</label>
-              <input type="text" defaultValue={`${model.name} Training`} className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-bne-ink mb-2">Epochs</label>
-              <input type="number" defaultValue={25} min={1} className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine" />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-bne-ink mb-2">Learning Rate</label>
-              <input type="number" step="0.0001" defaultValue={0.001} className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-bne-ink mb-2">Batch Size</label>
-              <input type="number" defaultValue={32} className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-bne-ink mb-2">Notes</label>
-            <textarea rows={3} className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine" placeholder="Describe training objective, dataset, or experiment notes." />
-          </div>
+          <p className="text-sm leading-relaxed text-bne-muted">
+            Training runs as a job: pick the completed data-collection job to
+            train on, choose the architecture and hyperparameters, and the run
+            registers a new model when it completes. Nothing is retrained
+            in place — <span className="font-medium text-bne-ink">{model.name}</span> keeps
+            its current weights and history either way.
+          </p>
         </CardContent>
         <CardFooter className="justify-end">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary">Start Training</Button>
+          <Button variant="primary" onClick={onContinue}>Start Training</Button>
         </CardFooter>
       </Card>
     </div>
@@ -360,10 +326,9 @@ interface ModelCardProps {
   model: Model
   onTrain: () => void
   onViewDetails: () => void
-  onShowMenu?: (action: string, model: Model) => void
 }
 
-function ModelCard({ model, onTrain, onViewDetails, onShowMenu }: ModelCardProps) {
+function ModelCard({ model, onTrain, onViewDetails }: ModelCardProps) {
   const statusVariants: Record<string, BadgeVariant> = {
     ready: 'success',
     training: 'primary',
@@ -421,11 +386,11 @@ function ModelCard({ model, onTrain, onViewDetails, onShowMenu }: ModelCardProps
         <Button variant="outline" size="sm" onClick={onViewDetails}>
           View Details
         </Button>
-        <ModelActionsMenu
-          onEdit={() => onShowMenu?.('edit', model)}
-          onDuplicate={() => onShowMenu?.('duplicate', model)}
-          onDelete={() => onShowMenu?.('delete', model)}
-        />
+        {/* The card used to carry an Edit/Duplicate/Delete menu whose every
+            entry opened a card reading "Placeholder for X action". No model
+            update, copy or delete endpoint exists — a model is a training
+            job's output — so the menu promised three operations the product
+            cannot perform. It is gone. */}
       </CardFooter>
     </Card>
   )
@@ -434,11 +399,18 @@ function ModelCard({ model, onTrain, onViewDetails, onShowMenu }: ModelCardProps
 interface NewModelModalProps {
   isOpen: boolean
   onClose: () => void
+  /** Hands off to the real training-job flow (JobCreationModal). */
+  onContinue: () => void
 }
 
-function NewModelModal({ isOpen, onClose }: NewModelModalProps) {
+function NewModelModal({ isOpen, onClose, onContinue }: NewModelModalProps) {
   if (!isOpen) return null
 
+  // The previous version of this modal was a form in name only: name,
+  // architecture, sequence length and a "Create Model" button that had no
+  // handler, because no POST /models endpoint exists — models are the
+  // output of training jobs, never free-standing records. The modal now
+  // says so and continues into the flow that actually creates one.
   return (
     <div className="fixed inset-0 bg-bne-ink/40 flex items-center justify-center z-50">
       <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -457,95 +429,20 @@ function NewModelModal({ isOpen, onClose }: NewModelModalProps) {
         </CardHeader>
 
         <CardContent>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-bne-ink mb-2">
-                Model Name
-              </label>
-              <input
-                type="text"
-                className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
-                placeholder="e.g., FDIC Multi-Scale LSTM"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-bne-ink mb-2">
-                Description
-              </label>
-              <textarea
-                className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
-                rows={3}
-                placeholder="Describe your model..."
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-bne-ink mb-2">
-                  Architecture
-                </label>
-                <select className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine">
-                  <option>LSTM</option>
-                  <option>GRU</option>
-                  <option>Transformer</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-bne-ink mb-2">
-                  Input Features
-                </label>
-                <input
-                  type="number"
-                  className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
-                  defaultValue={12}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-bne-ink mb-2">
-                  Sequence Length
-                </label>
-                <input
-                  type="number"
-                  className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
-                  defaultValue={20}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-bne-ink mb-2">
-                  Prediction Steps
-                </label>
-                <input
-                  type="number"
-                  className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine"
-                  defaultValue={4}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-bne-ink mb-2">
-                Data Source
-              </label>
-              <select className="w-full px-4 py-2 border border-bne-line rounded-lg focus:outline-none focus:ring-2 focus:ring-bne-pine">
-                <option>FDIC</option>
-                <option>ECB Banking</option>
-                <option>FMP</option>
-              </select>
-            </div>
-          </div>
+          <p className="text-sm leading-relaxed text-bne-muted">
+            Models are not free-standing records in BEACON — they are the
+            output of training jobs. Creating one means choosing a completed
+            data-collection job to train on, an architecture and its
+            hyperparameters; the training run registers the model, its
+            metrics and its lineage when it completes.
+          </p>
         </CardContent>
 
         <CardFooter>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary">
+          <Button variant="primary" onClick={onContinue}>
             Create Model
           </Button>
         </CardFooter>
@@ -554,17 +451,12 @@ function NewModelModal({ isOpen, onClose }: NewModelModalProps) {
   )
 }
 
-interface MenuAction {
-  action: string
-  model: Model
-}
-
 export default function Models() {
   const [showNewModel, setShowNewModel] = useState(false)
   const [filter, setFilter] = useState('all')
   const [selectedModelId, setSelectedModelId] = useState<EntityId | null>(null)
   const [trainModelId, setTrainModelId] = useState<EntityId | null>(null)
-  const [menuAction, setMenuAction] = useState<MenuAction | null>(null)
+  const [showTrainingJobModal, setShowTrainingJobModal] = useState(false)
   const [consumedRouteSignature, setConsumedRouteSignature] = useState<string | null>(null)
   const { data: models, isLoading, error, refetch } = useModels()
   const { data: modelDetails } = useModel(selectedModelId)
@@ -695,7 +587,6 @@ export default function Models() {
                   model={model}
                   onTrain={() => setTrainModelId(model.model_id)}
                   onViewDetails={() => setSelectedModelId(model.model_id)}
-                  onShowMenu={(action) => setMenuAction({ action, model })}
                 />
               ))}
             </div>
@@ -703,7 +594,14 @@ export default function Models() {
         </div>
       </PageContainer>
 
-      <NewModelModal isOpen={showNewModel} onClose={() => setShowNewModel(false)} />
+      <NewModelModal
+        isOpen={showNewModel}
+        onClose={() => setShowNewModel(false)}
+        onContinue={() => {
+          setShowNewModel(false)
+          setShowTrainingJobModal(true)
+        }}
+      />
       <ModelDetailsDrawer
         model={modelDetails}
         onClose={() => setSelectedModelId(null)}
@@ -720,24 +618,22 @@ export default function Models() {
           setSelectedModelId(null)
         }}
       />
-      <TrainModelModal isOpen={!!trainModelId} onClose={() => setTrainModelId(null)} model={trainTarget} />
-      {menuAction && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-bne-ink/25">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle>Action: {menuAction.action}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-bne-muted">
-                Placeholder for {menuAction.action} action on model "{menuAction.model?.name}".
-              </p>
-            </CardContent>
-            <CardFooter className="justify-end">
-              <Button variant="ghost" onClick={() => setMenuAction(null)}>Close</Button>
-            </CardFooter>
-          </Card>
-        </div>
-      )}
+      <TrainModelModal
+        isOpen={!!trainModelId}
+        onClose={() => setTrainModelId(null)}
+        onContinue={() => {
+          setTrainModelId(null)
+          setShowTrainingJobModal(true)
+        }}
+        model={trainTarget}
+      />
+      {/* The real creation flow both modals hand off to: a training job,
+          which is the only thing in BEACON that produces a model. */}
+      <JobCreationModal
+        isOpen={showTrainingJobModal}
+        onClose={() => setShowTrainingJobModal(false)}
+        initialJobType="training"
+      />
     </>
   )
 }

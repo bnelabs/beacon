@@ -24,12 +24,27 @@ class DataSourceCreate(DataSourceConfigBase):
 
 
 class DataSourceUpdate(BaseModel):
-    """Schema for updating an existing data source."""
+    """Schema for updating an existing data source.
+
+    Every field is optional and the semantics are ``exclude_unset``: a key
+    absent from the request body leaves the stored value untouched (so the
+    schedule dropdown's ``{"sync_interval_minutes": 60}`` cannot clobber the
+    name), while a key sent as explicit null clears the nullable columns --
+    ``{"sync_interval_minutes": null}`` is how the UI returns a feed to
+    manual-only, and how the edit form clears a description. The disclosure
+    metadata fields mirror ``DataSourceConfigBase``; before they existed here
+    the edit form collected them and Pydantic silently dropped them, so
+    "Save Changes" on those inputs was a no-op that still answered 200.
+    """
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     plugin_type: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
     description: Optional[str] = None
     enabled: Optional[bool] = None
+    registration_url: Optional[str] = None
+    registration_required: Optional[bool] = None
+    free_tier_limits: Optional[str] = None
+    coverage_description: Optional[str] = None
     sync_interval_minutes: Optional[int] = Field(
         None,
         ge=5,

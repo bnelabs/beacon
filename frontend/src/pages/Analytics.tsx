@@ -15,7 +15,18 @@ interface MetricCardProps {
   subtitle?: ReactNode
   trend?: number
   icon?: ReactNode
-  color?: string
+  color?: MetricColor
+}
+
+/** Static class map: Tailwind extracts class names from source text, so the
+ *  previous template literal (`bg-${color}/10`) never existed in the CSS and
+ *  the icon chip rendered without its tint. */
+type MetricColor = 'bne-pine' | 'bne-moss' | 'bne-ochre'
+
+const iconBackgrounds: Record<MetricColor, string> = {
+  'bne-pine': 'bg-bne-pine/10',
+  'bne-moss': 'bg-bne-moss/10',
+  'bne-ochre': 'bg-bne-ochre/10'
 }
 
 function MetricCard({ title, value, subtitle, trend, icon, color = 'bne-pine' }: MetricCardProps) {
@@ -23,7 +34,7 @@ function MetricCard({ title, value, subtitle, trend, icon, color = 'bne-pine' }:
     <Card>
       <CardContent className="p-6">
         <div className="flex items-start justify-between mb-3">
-          <div className={`p-3 rounded-lg bg-${color}/10`}>
+          <div className={`p-3 rounded-lg ${iconBackgrounds[color]}`}>
             {icon}
           </div>
           {trend != null && (

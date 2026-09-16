@@ -4,7 +4,8 @@ import Card, { CardHeader, CardTitle, CardContent, CardFooter } from '../compone
 import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import { cn } from '../utils/cn'
-import { useSystemStatus } from '../hooks/useApi'
+import { useDataSources, useSystemStatus } from '../hooks/useApi'
+import { useRouter } from '../store/useRouter'
 
 const PREFERENCES_KEY = 'beacon.preferences.v1'
 
@@ -73,9 +74,30 @@ function PreferenceToggle({ label, description, value, onChange }: PreferenceTog
   )
 }
 
+/** The provider plugins the credentials card reports on. Rows are rendered
+ *  from what is actually configured under Data Sources — no feed is claimed
+ *  as connected that the registry does not report. */
+const TRACKED_FEEDS: Array<{ name: string; pluginType: string; blurb: string }> = [
+  { name: 'FRED', pluginType: 'fred', blurb: 'Federal Reserve Economic Data API' },
+  { name: 'Alpha Vantage', pluginType: 'alpha_vantage', blurb: 'Equities and FX tick-level signals' },
+  { name: 'SEC Filings', pluginType: 'sec', blurb: 'EDGAR corporate disclosure feed' }
+]
+
 export default function Settings() {
   const { data: systemStatus } = useSystemStatus()
+  const { data: feedSources } = useDataSources()
+  const navigate = useRouter((state) => state.navigate)
   const [preferences, setPreferences] = useState<Preferences>(loadPreferences)
+
+  const feedStatus = (pluginType: string) => {
+    const match = (feedSources ?? []).find((source) => source.plugin_type === pluginType)
+    if (!match) return { label: 'Not configured', configured: false, enabled: false }
+    return {
+      label: match.enabled ? 'Connected' : 'Configured · disabled',
+      configured: true,
+      enabled: Boolean(match.enabled)
+    }
+  }
 
   // Preferences are UI-side state: persisted in this browser, and labelled as
   // such. Nothing here pretends to be a server-side account setting while
@@ -227,52 +249,52 @@ export default function Settings() {
         </Card>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Linked data credentials</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm text-bne-muted">
-            <div className="flex items-center justify-between rounded-md border border-bne-line px-4 py-3">
-              <div>
-                <p className="font-semibold text-bne-ink">FRED</p>
-                <p className="text-xs text-bne-muted">Federal Reserve Economic Data API</p>
+      <Card>
+        <CardHeader>
+          <CardTitle>Linked data feeds</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm text-bne-muted">
+          {/* Live state, read from the configured sources — the previous card
+              printed a static "Connected" badge for FRED and dead "Connect"
+              buttons for the others: invented states of exactly the kind the
+              platform refuses everywhere else. There is no OAuth flow here;
+              connecting a feed means configuring the source, so that is where
+              the button goes. (The "Team access" card that sat beside this
+              one promised roles and invites on a product whose own copy says
+              it has no user accounts; it is gone rather than honest-labelled,
+              because there is nothing true left to say in it.) */}
+          {TRACKED_FEEDS.map((feed) => {
+            const status = feedStatus(feed.pluginType)
+            return (
+              <div key={feed.pluginType} className="flex items-center justify-between rounded-md border border-bne-line px-4 py-3">
+                <div>
+                  <p className="font-semibold text-bne-ink">{feed.name}</p>
+                  <p className="text-xs text-bne-muted">{feed.blurb}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  {status.configured ? (
+                    <span
+                      className={cn(
+                        'rounded-full px-3 py-1 text-xs font-semibold',
+                        status.enabled ? 'bg-bne-moss/10 text-bne-moss' : 'bg-bne-paper-dim text-bne-muted'
+                      )}
+                    >
+                      {status.label}
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-bne-paper-dim px-3 py-1 text-xs font-semibold text-bne-muted">
+                      {status.label}
+                    </span>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => navigate('datasources')}>
+                    {status.configured ? 'Manage' : 'Add in Data Sources'}
+                  </Button>
+                </div>
               </div>
-              <span className="rounded-full bg-bne-moss/10 px-3 py-1 text-xs font-semibold text-bne-moss">Connected</span>
-            </div>
-            <div className="flex items-center justify-between rounded-md border border-bne-line px-4 py-3">
-              <div>
-                <p className="font-semibold text-bne-ink">Alpha Vantage</p>
-                <p className="text-xs text-bne-muted">Equities and FX tick-level signals</p>
-              </div>
-              <Button variant="outline" size="sm">Connect</Button>
-            </div>
-            <div className="flex items-center justify-between rounded-md border border-bne-line px-4 py-3">
-              <div>
-                <p className="font-semibold text-bne-ink">SEC Filings</p>
-                <p className="text-xs text-bne-muted">EDGAR corporate disclosure feed</p>
-              </div>
-              <Button variant="outline" size="sm">Connect</Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Team access</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm text-bne-muted">
-            <p>Beacon is currently configured with a single workspace role (<span className="font-medium text-bne-ink">Administrator</span>). Role-based access control will arrive in the next release.</p>
-            <div className="rounded-md border border-bne-line px-4 py-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-bne-ink">You</span>
-                <span className="text-xs font-semibold rounded-full bg-bne-pine/10 text-bne-pine px-2 py-1">Owner</span>
-              </div>
-              <p className="text-xs text-bne-muted">Invite teammates once directory sync is enabled for your organisation.</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            )
+          })}
+        </CardContent>
+      </Card>
     </PageContainer>
   )
 }

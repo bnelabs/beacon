@@ -82,6 +82,17 @@ jobs:
         # as an `undefined%` in production or an e2e surprise ten minutes in.
         run: npm run typecheck
 
+      - name: Tailwind sees the source tree
+        # why: a Tailwind `content` glob that matches nothing fails nothing --
+        # the build succeeds with an (almost) empty stylesheet and the app
+        # renders unstyled. That is not hypothetical: the TS migration renamed
+        # every source file to .ts/.tsx while tailwind.config.js still globbed
+        # {js,jsx}, and main shipped a 5.9 kB sheet until the nightly e2e run
+        # tripped over the collapsed layout. This resolves the globs against
+        # the real tree in ~0.2s and names the offending pattern.
+        working-directory: .
+        run: node scripts/check_tailwind_content.mjs
+
       - name: Every frontend endpoint is answered by the e2e mock
         # Runs in every gate, before any browser exists anywhere. An endpoint
         # the frontend calls and frontend/tests/apiMocks.js does not cover

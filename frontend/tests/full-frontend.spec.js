@@ -301,7 +301,19 @@ test('navigates the application and exercises primary interactions', async ({ pa
   await page.getByRole('button', { name: /Daily email alerts/ }).click()
   await page.getByRole('button', { name: 'Mute all' }).click()
   await page.getByRole('button', { name: 'Restore defaults' }).click()
-  await page.getByRole('button', { name: 'Connect' }).first().click()
+  // The credentials card used to carry dead "Connect" buttons and a static
+  // FRED "Connected" badge -- invented state on a page whose own copy says
+  // nothing is asserted that is not measured. It now reports real
+  // per-plugin configuration (the mock catalogue registers fdic and
+  // ecb_banking sources only, so the three tracked providers are honestly
+  // "Not configured") and its button navigates to Data Sources, the only
+  // place a feed can actually be added. A removal is a decision, and a
+  // decision gets a test.
+  await expect(page.getByRole('button', { name: 'Connect', exact: true })).toHaveCount(0)
+  await expect(page.getByText('Linked data feeds')).toBeVisible()
+  await page.getByRole('button', { name: 'Add in Data Sources' }).first().click()
+  await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible()
+  await expect(page.getByText('No data sources configured')).toHaveCount(0)
   // The guided tour and the Help page were removed while the platform is still
   // maturing; guided help lands again when the system does. Until then the
   // suite asserts they stay gone, in the same style as the dispositions census:
