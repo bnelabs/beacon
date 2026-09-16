@@ -1405,3 +1405,480 @@ class StudentTHMM(GaussianHMM):
             float(value) for value in self.degrees_of_freedom_per_state
         ]
         return snapshot
+
+
+# ---------------------------------------------------------------------------
+# Batched regime nowcast
+# ---------------------------------------------------------------------------
+
+
+@dataclass(eq=False)
+class BatchStudentTFit:
+    """Result of :func:`fit_viterbi_student_t_batch` for one length group.
+
+    Attributes:
+        states: ``(n, T)`` Viterbi path per sequence — the same integers
+            ``StudentTHMM(n_states, seed=seed).fit(X).viterbi(X)`` returns
+            for each sequence on its own.
+        means: ``(n, n_states, n_features)`` fitted state means.
+        variances: ``(n, n_states, n_features)`` fitted diagonal scales.
+        degrees_of_freedom: ``(n, n_states)`` fitted tail weight per state.
+        transition: ``(n, n_states, n_states)`` fitted transition matrices.
+        initial: ``(n, n_states)`` fitted initial distributions.
+        log_likelihood_histories: Per-sequence EM histories with the same
+            semantics as :attr:`GaussianHMM.log_likelihood_history` (the last
+            entry is the likelihood of the returned parameters).
+        fallback_indices: Indices of sequences the batch declined to run
+            (degenerate k-means++ seeding, where the per-sequence fit consumes
+            a different amount of randomness). The caller must fit those with
+            a per-sequence ``StudentTHMM`` — the labels for them cannot come
+            from this object.
+    """
+
+    states: np.ndarray
+    means: np.ndarray
+    variances: np.ndarray
+    degrees_of_freedom: np.ndarray
+    transition: np.ndarray
+    initial: np.ndarray
+    log_likelihood_histories: List[List[float]]
+    fallback_indices: List[int]
+
+
+def _batch_logsumexp(values: np.ndarray, axis: int) -> np.ndarray:
+    """``_logsumexp`` with an extra leading batch axis, same arithmetic."""
+    peak = np.max(values, axis=axis, keepdims=True)
+    peak = np.where(np.isfinite(peak), peak, 0.0)
+    shifted = values - peak
+    total = np.sum(np.exp(shifted), axis=axis, keepdims=True)
+    result = np.log(total) + peak
+    return np.squeeze(result, axis=axis)
+
+
+def fit_viterbi_student_t_batch(
+    sequences: np.ndarray,
+    *,
+    n_states: int = 2,
+    seed: int = 0,
+    max_iterations: int = 100,
+    tolerance: float = 1e-6,
+    variance_floor: float = 1e-6,
+    degrees_of_freedom: float = 5.0,
+    min_degrees_of_freedom: float = 2.05,
+    max_degrees_of_freedom: float = 200.0,
+) -> BatchStudentTFit:
+    """Fit the production regime nowcast to many equal-length windows at once.
+
+    ``RealPredictionEngine._regime_label`` runs ``StudentTHMM(n_states=2,
+    seed=0).fit(X)`` + ``viterbi(X)`` once per source, and every fit is a
+    Python loop over ``T`` timesteps doing ``(K, K)`` numpy work with K=2 —
+    a shape dominated by per-timestep numpy overhead rather than arithmetic
+    (measured 3.35 s per source at T=1000; see docs/LANGUAGE_STRATEGY.md).
+    The per-source fits are independent, so this function runs the *same*
+    recursion with a leading source axis: one Python loop over ``T`` for the
+    whole batch, ``(n, K, K)`` work per step, and per-source EM bookkeeping
+    (history, convergence freeze) kept exact.
+
+    Equivalence contract, and where it is pinned:
+
+    * Every sequence sees the identical random stream its solo fit would:
+      ``default_rng(seed)`` draws the same shapes in the same order, and
+      because each solo fit restarts the stream, the draws are *broadcast*
+      across the batch — the same normal/uniform/dirichlet values for every
+      sequence — while the data-dependent parts (k-means++ picks, global
+      variance) stay per-sequence.
+    * The EM loop mirrors ``_fit_once``: likelihood recorded before the
+      convergence test, the test scale-relative, the break landing *after*
+      that iteration's M-step, converged sequences frozen, and one final
+      scoring forward pass for the returned parameters.
+    * The Student-t M-step mirrors ``StudentTHMM._maximise`` including the
+      weighted-numerator/unweighted-denominator asymmetry and the per-state
+      ``brentq`` solve for ``nu`` — the root find stays scalar per
+      (sequence, state) because reproducing brentq's exact iteration path
+      vectorised is not a thing one should attempt; it is also cheap: n*K
+      scalar solves against n*T*K recursions.
+    * ``test_regime_batch_equivalence.py`` asserts exact state-sequence and
+      label equality against solo fits over a deterministic corpus.
+
+    Sequences whose k-means++ seeding degenerates (all observations
+    identical: ``total <= 0`` sends the solo fit down an extra
+    ``rng.integers`` branch, which would desynchronise the shared stream)
+    are returned in ``fallback_indices`` instead of being silently fitted
+    on a stream their solo fit would not have seen.
+
+    Args:
+        sequences: ``(n, T, n_features)`` finite observations, one window per
+            row, all the same length (the caller groups by length).
+        n_states, seed, max_iterations, tolerance, variance_floor,
+            degrees_of_freedom, min_degrees_of_freedom,
+            max_degrees_of_freedom: exactly the ``StudentTHMM`` controls;
+            defaults are the production ``_regime_label`` values.
+
+    Returns:
+        A :class:`BatchStudentTFit`.
+
+    Raises:
+        ValueError: If ``sequences`` is malformed or the controls are out of
+            range (the same validation ``StudentTHMM`` performs).
+    """
+    data = np.asarray(sequences, dtype=float)
+    if data.ndim != 3 or data.shape[0] == 0 or data.shape[1] == 0:
+        raise ValueError(
+            f"sequences must be a non-empty (n, T, n_features) array, got shape {data.shape}"
+        )
+    if not np.all(np.isfinite(data)):
+        raise ValueError("sequences contain non-finite values (NaN or inf)")
+    if n_states < 2:
+        raise ValueError(f"the batch path fits regime models; n_states must be >= 2, got {n_states}")
+    if max_iterations < 1:
+        raise ValueError(f"max_iterations must be at least 1, got {max_iterations}")
+    if not np.isfinite(tolerance) or tolerance <= 0.0:
+        raise ValueError(f"tolerance must be a positive finite number, got {tolerance}")
+    if not np.isfinite(variance_floor) or variance_floor <= 0.0:
+        raise ValueError(f"variance_floor must be a positive finite number, got {variance_floor}")
+    if not (min_degrees_of_freedom <= degrees_of_freedom <= max_degrees_of_freedom):
+        raise ValueError("degrees_of_freedom outside its bounds")
+
+    n, n_observations, n_features = data.shape
+    dimension = float(n_features)
+
+    # --- degenerate detection (mirrors the total <= 0 branch of the solo
+    # k-means++ seeding, which consumes a different rng stream) ---
+    rng = np.random.default_rng(seed)
+    first = int(rng.integers(n_observations))
+    choice_uniform = float(rng.random())
+    means_noise = rng.normal(scale=1e-3, size=(n_states, n_features))
+    variance_jitter = rng.uniform(0.5, 1.5, size=(n_states, n_features))
+    persistence = rng.uniform(0.6, 0.95, size=n_states)
+    initial_draw = rng.dirichlet(np.ones(n_states))
+    df_jitter = rng.uniform(0.5, 2.0, size=n_states)  # StudentTHMM's restart jitter
+
+    distance_to_first = np.sum(
+        (data - data[:, first, :][:, None, :]) ** 2, axis=2
+    )  # (n, T)
+    totals = distance_to_first.sum(axis=1)
+    degenerate = ~np.isfinite(totals) | (totals <= 0.0)
+    fallback_indices = [int(i) for i in np.flatnonzero(degenerate)]
+    keep = np.flatnonzero(~degenerate)
+    if keep.size == 0:
+        return BatchStudentTFit(
+            states=np.zeros((n, n_observations), dtype=int),
+            means=np.zeros((0, n_states, n_features)),
+            variances=np.zeros((0, n_states, n_features)),
+            degrees_of_freedom=np.zeros((0, n_states)),
+            transition=np.zeros((0, n_states, n_states)),
+            initial=np.zeros((0, n_states)),
+            log_likelihood_histories=[[] for _ in range(n)],
+            fallback_indices=fallback_indices,
+        )
+
+    kept = data[keep]  # (m, T, d)
+    m = kept.shape[0]
+
+    # --- per-sequence k-means++ second pick, on the shared uniform ---
+    probabilities = distance_to_first[keep] / totals[keep][:, None]
+    cdf = np.cumsum(probabilities, axis=1)
+    cdf = cdf / cdf[:, -1:]
+    # `cdf.searchsorted` is 1-D only; for the (m, T) stack the exact
+    # equivalent of searchsorted(u, side='right') on each sorted row is the
+    # count of entries <= u -- same index, including the out-of-bounds clamp
+    # numpy's Generator.choice applies.
+    second = (cdf <= choice_uniform).sum(axis=1)
+    second = np.minimum(second, n_observations - 1)
+
+    global_variance = np.maximum(kept.var(axis=1), variance_floor)  # (m, d)
+    scale = np.sqrt(global_variance)
+    scale = np.where(scale > 0.0, scale, 1.0)
+
+    chosen = np.stack(
+        [np.full(m, first, dtype=int), second.astype(int)], axis=1
+    ) if n_states == 2 else None
+    if n_states != 2:
+        # The production nowcast is k=2. General k would need the sequential
+        # distance-weighted picks vectorised; refuse rather than approximate.
+        raise ValueError(
+            f"fit_viterbi_student_t_batch implements the k=2 production nowcast, got n_states={n_states}"
+        )
+    picked_points = np.take_along_axis(
+        kept, chosen[:, :, None].repeat(n_features, axis=2), axis=1
+    )  # (m, K, d)
+    means = picked_points + means_noise[None, :, :] * scale[:, None, :]
+    variances = np.maximum(
+        np.tile(global_variance[:, None, :], (1, n_states, 1)) * variance_jitter[None, :, :],
+        variance_floor,
+    )
+    transition_single = np.empty((n_states, n_states), dtype=float)
+    for state in range(n_states):
+        transition_single[state] = (1.0 - persistence[state]) / (n_states - 1)
+        transition_single[state, state] = persistence[state]
+    transition = np.tile(transition_single[None, :, :], (m, 1, 1))
+    initial = np.tile(initial_draw[None, :], (m, 1))
+    df = np.tile(
+        np.clip(
+            degrees_of_freedom * df_jitter,
+            min_degrees_of_freedom,
+            max_degrees_of_freedom,
+        )[None, :],
+        (m, 1),
+    )
+
+    log_transition = _log_probabilities(transition)  # (m, K, K)
+    log_initial = _log_probabilities(initial)  # (m, K)
+
+    def _emission(
+        means_: np.ndarray, variances_: np.ndarray, df_: np.ndarray, data_: np.ndarray
+    ) -> np.ndarray:
+        """(m, T, K) log Student-t density — mirrors StudentTHMM._log_emission."""
+        difference = data_[:, :, None, :] - means_[:, None, :, :]
+        mahalanobis = np.einsum(
+            "ntkd,ntkd->ntk", difference, difference / variances_[:, None, :, :]
+        )
+        log_scale = np.sum(np.log(variances_), axis=2)
+        log_normaliser = (
+            gammaln(0.5 * (df_ + dimension))
+            - gammaln(0.5 * df_)
+            - 0.5 * dimension * np.log(df_ * np.pi)
+            - 0.5 * log_scale
+        )
+        return log_normaliser[:, None, :] - 0.5 * (
+            df_[:, None, :] + dimension
+        ) * np.log1p(mahalanobis / df_[:, None, :])
+
+    def _forward(
+        emission_: np.ndarray, initial_: np.ndarray, log_transition_: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Scaled forward pass — mirrors GaussianHMM._forward per sequence."""
+        count, horizon = emission_.shape[0], emission_.shape[1]
+        states_k = emission_.shape[2]
+        log_alpha = np.empty((count, horizon, states_k), dtype=float)
+        log_scale_steps = np.empty((count, horizon), dtype=float)
+
+        current = initial_ + emission_[:, 0, :]
+        log_scale_steps[:, 0] = _batch_logsumexp(current, axis=1)
+        log_alpha[:, 0, :] = current - log_scale_steps[:, 0:1]
+
+        for step in range(1, horizon):
+            current = (
+                _batch_logsumexp(
+                    log_alpha[:, step - 1, :][:, :, None] + log_transition_, axis=1
+                )
+                + emission_[:, step, :]
+            )
+            log_scale_steps[:, step] = _batch_logsumexp(current, axis=1)
+            log_alpha[:, step, :] = current - log_scale_steps[:, step:step + 1]
+        return log_alpha, log_scale_steps
+
+    def _backward(
+        emission_: np.ndarray, log_scale_: np.ndarray, log_transition_: np.ndarray
+    ) -> np.ndarray:
+        count, horizon, states_k = emission_.shape
+        log_beta = np.zeros((count, horizon, states_k), dtype=float)
+        for step in range(horizon - 2, -1, -1):
+            contribution = emission_[:, step + 1, :] + log_beta[:, step + 1, :]
+            log_beta[:, step, :] = (
+                _batch_logsumexp(
+                    log_transition_ + contribution[:, None, :], axis=2
+                )
+                - log_scale_[:, step + 1][:, None]
+            )
+        return log_beta
+
+    def _expectations(
+        log_alpha_: np.ndarray,
+        log_beta_: np.ndarray,
+        emission_: np.ndarray,
+        log_transition_: np.ndarray,
+        log_scale_: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        log_gamma = log_alpha_ + log_beta_
+        gamma = np.exp(log_gamma)
+        row_totals = gamma.sum(axis=2, keepdims=True)
+        gamma = np.divide(
+            gamma,
+            row_totals,
+            out=np.full_like(gamma, 1.0 / n_states),
+            where=row_totals > 0.0,
+        )
+        if emission_.shape[1] > 1:
+            log_xi = (
+                log_alpha_[:, :-1, :, None]
+                + log_transition_[:, None, :, :]
+                + (emission_[:, 1:, :] + log_beta_[:, 1:, :])[:, :, None, :]
+                - log_scale_[:, 1:, None, None]
+            )
+            xi_sum = np.sum(np.exp(log_xi), axis=1)
+        else:
+            xi_sum = np.zeros((gamma.shape[0], n_states, n_states), dtype=float)
+        return gamma, xi_sum
+
+    histories: List[List[float]] = [[] for _ in range(m)]
+    running = np.ones(m, dtype=bool)
+
+    for _ in range(max_iterations):
+        if not running.any():
+            break
+        idx = np.flatnonzero(running)
+        d_a = kept[idx]
+        m_a = means[idx]
+        v_a = variances[idx]
+        df_a = df[idx]
+
+        emission = _emission(m_a, v_a, df_a, d_a)
+        log_alpha, log_scale_steps = _forward(emission, log_initial[idx], log_transition[idx])
+        likelihood = log_scale_steps.sum(axis=1)  # (na,)
+        log_beta = _backward(emission, log_scale_steps, log_transition[idx])
+        gamma, xi_sum = _expectations(
+            log_alpha, log_beta, emission, log_transition[idx], log_scale_steps
+        )
+
+        # --- Student-t M-step (mirrors StudentTHMM._maximise) ---
+        difference_e = d_a[:, :, None, :] - m_a[:, None, :, :]
+        mahalanobis_e = np.einsum(
+            "ntkd,ntkd->ntk", difference_e, difference_e / v_a[:, None, :, :]
+        )
+        scales = (df_a[:, None, :] + dimension) / (
+            df_a[:, None, :] + mahalanobis_e
+        )
+        weights = gamma * scales
+
+        responsibility = gamma.sum(axis=1)  # (na, K)
+        active_states = responsibility > _ACTIVE_RESPONSIBILITY
+        safe = np.where(active_states, responsibility, 1.0)
+        weight_mass = weights.sum(axis=1)
+        safe_weight_mass = np.where(active_states, weight_mass, 1.0)
+
+        new_means = np.matmul(weights.transpose(0, 2, 1), d_a) / safe_weight_mass[:, :, None]
+        difference_m = d_a[:, :, None, :] - new_means[:, None, :, :]
+        new_variances = (
+            np.einsum("ntk,ntkd->nkd", weights, difference_m**2) / safe[:, :, None]
+        )
+        new_means = np.where(active_states[:, :, None], new_means, m_a)
+        new_variances = np.where(active_states[:, :, None], new_variances, v_a)
+        new_variances = np.maximum(new_variances, variance_floor)
+
+        # nu update: scalar brentq per (sequence, state), exactly as solo.
+        log_scales = digamma(0.5 * (df_a[:, None, :] + dimension)) - np.log(
+            0.5 * (df_a[:, None, :] + mahalanobis_e)
+        )
+        new_df = df_a.copy()
+        for a in range(idx.size):
+            for state in range(n_states):
+                if not active_states[a, state]:
+                    continue
+                mass = float(np.sum(gamma[a, :, state]))
+                if mass <= _ACTIVE_RESPONSIBILITY:
+                    continue
+                target = float(
+                    np.dot(
+                        gamma[a, :, state],
+                        log_scales[a, :, state] - scales[a, :, state],
+                    )
+                    / mass
+                )
+                new_df[a, state] = _solve_degrees_of_freedom(
+                    target, min_degrees_of_freedom, max_degrees_of_freedom
+                )
+
+        # transition + initial (mirror _update_transition / _update_initial)
+        if n_observations > 1:
+            row_mass = gamma[:, :-1, :].sum(axis=1)
+            active_rows = row_mass > _ACTIVE_RESPONSIBILITY
+            safe_rows = np.where(active_rows, row_mass, 1.0)
+            new_transition = xi_sum / safe_rows[:, :, None]
+            new_transition = np.where(
+                active_rows[:, :, None], new_transition, transition[idx]
+            )
+            new_transition = np.maximum(new_transition, 0.0)
+            row_sums = new_transition.sum(axis=2, keepdims=True)
+            new_transition = np.divide(
+                new_transition,
+                row_sums,
+                out=np.full_like(new_transition, 1.0 / n_states),
+                where=row_sums > 0.0,
+            )
+        else:
+            new_transition = transition[idx]
+
+        new_initial = np.maximum(gamma[:, 0, :], 0.0)
+        totals_i = new_initial.sum(axis=1, keepdims=True)
+        new_initial = np.divide(
+            new_initial,
+            totals_i,
+            out=np.full_like(new_initial, 1.0 / n_states),
+            where=totals_i > 0.0,
+        )
+
+        means[idx] = new_means
+        variances[idx] = new_variances
+        transition[idx] = new_transition
+        initial[idx] = new_initial
+        df[idx] = new_df
+        log_transition = _log_probabilities(transition)
+        log_initial = _log_probabilities(initial)
+
+        # --- per-sequence history + convergence freeze (mirrors _fit_once) ---
+        for a, source_row in enumerate(idx):
+            histories[int(source_row)].append(float(likelihood[a]))
+        for a, source_row in enumerate(idx):
+            history = histories[int(source_row)]
+            ll = float(likelihood[a])
+            if len(history) > 1 and (history[-1] - history[-2]) < tolerance * max(
+                1.0, abs(ll)
+            ):
+                running[int(source_row)] = False
+
+    # One final scoring pass for every sequence, exactly as _fit_once ends.
+    final_emission = _emission(means, variances, df, kept)
+    _, final_scale = _forward(final_emission, log_initial, log_transition)
+    final_likelihood = final_scale.sum(axis=1)
+    for row in range(m):
+        histories[row].append(float(final_likelihood[row]))
+
+    # --- Viterbi over the fitted parameters (mirrors GaussianHMM.viterbi) ---
+    log_delta = np.empty((m, n_observations, n_states), dtype=float)
+    backtrack = np.zeros((m, n_observations, n_states), dtype=int)
+    log_delta[:, 0, :] = log_initial + final_emission[:, 0, :]
+    for step in range(1, n_observations):
+        scores = log_delta[:, step - 1, :][:, :, None] + log_transition
+        backtrack[:, step, :] = np.argmax(scores, axis=1)
+        log_delta[:, step, :] = (
+            np.take_along_axis(
+                scores, backtrack[:, step, :][:, None, :], axis=1
+            )[:, 0, :]
+            + final_emission[:, step, :]
+        )
+    paths = np.empty((m, n_observations), dtype=int)
+    paths[:, -1] = np.argmax(log_delta[:, -1, :], axis=1)
+    for step in range(n_observations - 2, -1, -1):
+        paths[:, step] = np.take_along_axis(
+            backtrack[:, step + 1, :], paths[:, step + 1][:, None], axis=1
+        )[:, 0]
+
+    # Scatter kept results back to the caller's indexing; degenerate rows keep
+    # placeholder values and are reported through fallback_indices.
+    states_out = np.zeros((n, n_observations), dtype=int)
+    states_out[keep] = paths
+    means_out = np.zeros((n, n_states, n_features), dtype=float)
+    means_out[keep] = means
+    variances_out = np.zeros((n, n_states, n_features), dtype=float)
+    variances_out[keep] = variances
+    df_out = np.zeros((n, n_states), dtype=float)
+    df_out[keep] = df
+    transition_out = np.zeros((n, n_states, n_states), dtype=float)
+    transition_out[keep] = transition
+    initial_out = np.zeros((n, n_states), dtype=float)
+    initial_out[keep] = initial
+    histories_out: List[List[float]] = [[] for _ in range(n)]
+    for row, source_row in enumerate(keep):
+        histories_out[int(source_row)] = histories[row]
+
+    return BatchStudentTFit(
+        states=states_out,
+        means=means_out,
+        variances=variances_out,
+        degrees_of_freedom=df_out,
+        transition=transition_out,
+        initial=initial_out,
+        log_likelihood_histories=histories_out,
+        fallback_indices=fallback_indices,
+    )

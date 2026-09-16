@@ -127,6 +127,24 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   are deterministic (`derandomize=True`).
 
 ### Changed
+- **The regime nowcast is batched: ~10–11× on a 20-source job, labels
+  provably identical.** `prediction_engine._regime_label` fit a two-state
+  Student-t HMM per source in a Python loop over T doing (K=2, K=2) numpy
+  work — the measured bottleneck of the prediction path (3.35 s per source at
+  T=1 000) and the one lever `docs/LANGUAGE_STRATEGY.md` named but deferred
+  until it had "its own change with its own label-equality test". This is
+  that change: `fit_viterbi_student_t_batch` runs the same recursion with a
+  leading source axis (broadcast seeded stream, per-source convergence
+  freeze, the identical scalar brentq for nu, degenerate seedings handed back
+  for solo fitting), `_predict_single` nowcasts one batch per window length,
+  and `_regime_label` remains the per-source fallback — a batch failure
+  degrades to slow, never to different. `test_regime_batch_equivalence.py`
+  pins exact Viterbi state-sequence and label equality against solo fits
+  across a deterministic corpus including the production T=1 000 shape, and
+  `bench_systemic.py` measures the claim in-session: n=20 × T=250 29.04 s →
+  2.82 s (10.3×), n=20 × T=1 000 111.53 s → 10.27 s (10.9×). The strategy
+  doc's hot-path table and deferred-lever section are updated in the same
+  change, as that doc requires.
 - **The app no longer calls Google Fonts.** `index.html` linked the
   stylesheet and `src/styles/index.css` `@import`ed the same URL — two
   render-path third-party round trips on every load, in a product whose own

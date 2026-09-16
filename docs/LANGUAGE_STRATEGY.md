@@ -29,6 +29,10 @@ where they are the comparison being made.
 | Risk-series inference (batched transformer forwards) | 5 000 windows | 0.669 |
 | **Regime nowcast (Student-t HMM, k=2, fit + Viterbi)** | **T=250** | **0.842** |
 | **Regime nowcast — the prediction path runs this once per source** | **T=1 000** | **3.349** |
+| Regime nowcast, 20 sources sequentially (batching baseline, 2026-09-16 host) | n=20 × T=250 | 29.04 |
+| **Regime nowcast, batched over sources (2026-09-16)** | **n=20 × T=250** | **2.82 (10.3×)** |
+| Regime nowcast, 20 sources sequentially (batching baseline, 2026-09-16 host) | n=20 × T=1 000 | 111.53 |
+| **Regime nowcast, batched over sources (2026-09-16)** | **n=20 × T=1 000** | **10.27 (10.9×)** |
 
 The last row is the newest entry and the only one on the *prediction* path
 rather than the scenario path; the previous six are unchanged in character and
@@ -92,16 +96,45 @@ What the cost actually was, in descending order of what it bought:
    which predictions are blocked. Declined on evidence, in the same register as
    the Stooq and connector decisions.
 
-The lever that remains is **algorithmic and structural, not linguistic**: the
+The lever that remained was **algorithmic and structural, not linguistic**: the
 per-source fits are independent, and the forward/backward recursions are Python
 loops over `T` doing `(K, K)` numpy work with K=2 — a shape dominated by
 per-timestep numpy overhead, not by arithmetic. Batching the sources into one
 `(n_sources, T, K)` recursion amortises that overhead across every source in the
-job and is the only change on this path with an order of magnitude in it. It is
-a contained refactor of `_regime_label`'s call site (collect the windows, fit
-batched, distribute the labels) and it is **not done here**, because it touches
-the per-source loop in `_predict_single` and deserves its own change with its own
-label-equality test. Until it lands, the honest number is 3.349 s per source.
+job and was the only change on this path with an order of magnitude in it.
+
+**It has now landed (2026-09-16), as its own change with its own
+label-equality test** — exactly what this section required before it could be
+built:
+
+* `hidden_markov.fit_viterbi_student_t_batch` runs the *same* recursion with a
+  leading source axis: the seeded stream is broadcast (every solo fit restarts
+  it, so all sources see identical draws), the EM bookkeeping stays per-source
+  (history, scale-relative convergence, freeze after the converging M-step),
+  the `nu` solve is the identical scalar `brentq` per (sequence, state), and a
+  sequence whose degenerate k-means++ seeding would consume a different stream
+  is handed back for solo fitting rather than fitted on a stream its solo fit
+  would not have seen.
+* `_predict_single` collects the windows during its scoring pass and nowcasts
+  them in one batch per window length. `_regime_label` is unchanged and
+  remains the per-source fallback, so a batch failure degrades to slow, never
+  to different.
+* `backend/tests/test_regime_batch_equivalence.py` pins the contract at the
+  bar this document set: **exact** Viterbi state-sequence equality against
+  solo fits — hence label equality, and a label is the input to
+  `NetworkQualityGate`, which fails closed on an unseen label — over a
+  deterministic corpus including the production T=1 000 shape, plus
+  likelihood-history equality at 1e-8 and the degenerate-seeding fallback.
+* Measured with `scripts/bench_systemic.py`'s new
+  `bench_regime_nowcast_batched`, sequential and batched legs on the same
+  host in the same session (not quoted across hosts): **n=20 × T=250:
+  29.04 s → 2.82 s (10.3×)**; **n=20 × T=1 000: 111.53 s → 10.27 s (10.9×)**.
+  The absolute seconds are this host's — a 2-CPU sandbox whose solo
+  per-source cost at T=1 000 is 5.58 s against the 3.349 s recorded above on
+  a quieter one; the ratio is the claim, and it grows with source count
+  because the Python loop over `T` is paid once per job instead of once per
+  source. The 20-source monitoring cycle that paid ~105 s in regime labels
+  when this section was first written now pays one batched pass.
 
 This is the decision rule working as intended rather than being cited at it: a
 measured product path crossed into seconds, the migration unit was examined, and
