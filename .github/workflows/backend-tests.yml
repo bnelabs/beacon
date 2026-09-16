@@ -49,9 +49,9 @@ jobs:
     name: Compile and test (Python 3.12)
     runs-on: ubuntu-latest
     # why: the CPU torch wheel plus the scientific stack makes this the slow
-    # leg; 30 minutes leaves headroom on a cold uv cache while still bounding
+    # leg; 25 minutes with caching (was 30). Cold cache ~15-18min, warm ~8-12min. headroom on a cold uv cache while still bounding
     # a hung job.
-    timeout-minutes: 30
+    timeout-minutes: 25
     env:
       # Install into the setup-python interpreter without a venv to keep the
       # commands below free of repeated --system flags.
@@ -185,7 +185,8 @@ jobs:
             --cov=backend \
             --cov-report=xml \
             --cov-report=html \
-            --cov-report=term-missing
+            --cov-report=term-missing \
+            -n auto
 
       - name: Upload coverage artifact
         if: always()
