@@ -45,7 +45,10 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   backslashes from over-escaped `${{ }}` expressions. It now classifies
   chunks the way `vite.config.js` creates them (vendor / geo data / app /
   route), budgets app total ≤450 kB and largest route chunk ≤40 kB, and
-  reports vendor bytes as informational.
+  reports vendor bytes as informational. A second-pass review added the
+  failure mode the classifier itself needs: if no chunk matches the
+  route classification (renamed `manualChunks`, empty build), the analyzer
+  exits with a named reason instead of passing silently or crashing opaquely.
 - **`test_alert_evaluator.py` survives a second run.** Its `_clean` fixture
   deleted jobs and notifications but not alert rules, and under the
   suite-wide `USE_SQLITE` binding the rules accumulated in the shared
