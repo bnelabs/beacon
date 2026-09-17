@@ -10,6 +10,37 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **The v4 early-warning run executed — family verdict NO (1 of 5), and the
+  line remains parked as its own protocol declared.** One clean run under tag
+  `prereg-early-warning-v4` (tag → fetch → evaluate; attempt 3 is the run of
+  record — attempts 1–2 died pre-metric, one to an environment process-group
+  kill and one to an executor defect, both documented with diffs in the
+  execution log with zero metrics computed or observed; zero retries
+  thereafter). Five testable indicators across three tracks: the daily trio,
+  weekly `FRED_STLFSI4`, and quarterly `BIS_CREDIT_GAP_US` (1957-Q4 onward,
+  keyless SDMX, licence GREEN with attribution) — the credit-gap family the
+  recorded axes named, admitted at last. Skips all by declared rule: KCFSI
+  refused by the weekly track (FRED serves it monthly — no resampling), SOFR
+  (coverage), HY OAS (licence, refused pre-download), CISS (recorded, not
+  substituted). **The record's first criteria-passing pair:** STLFSI4 via the
+  *frozen* hazard logit — AUC 0.9223, AP 0.3836, median lead 2.0 weeks (≈10
+  business days), 0.483 FA/quiet-year vs the ceiling of 4, strictly above
+  both baselines, permutation p=0.001, Holm-surviving across the 20-pair
+  pool. One pair of twenty does not meet the family rule (at least half of
+  the tested family), so the claim gate stays closed and, under the outcome
+  handling frozen before the run, the line **remains parked with a four-run
+  record; there is no planned v5**. Findings published as measured: rolling
+  refits did not rescue the daily family (T10Y3M's rolling TAN got worse —
+  FA 4.20→5.37, lead 10.0→7.5 below the floor; T10Y2Y/VIX rolling ≈ frozen),
+  closing that recorded axis; the quarterly credit gap was weak under this
+  operationalisation (AUC 0.39–0.65, 3 labelled events, no detection within
+  max_lead — under-powered by construction at quarterly resolution); the
+  frozen hazard beat its rolling counterpart on the one passing indicator —
+  the opposite of the v3 diagnosis' expectation, recorded as the finding it
+  is. Reproducibility held a fourth time: all six frozen-scorer × daily pairs
+  match v3's published numbers exactly on a fresh fetch (new SHA-256s in the
+  manifest). README gate updated to the four-run record; execution log
+  carries the full attempt table, defect diffs and provenance.
 - **Early-warning pre-registration v4 — the owner-initiated resumption,
   testing exactly the two recorded axes.** v3's terminal clause parked the
   line and recorded what a resumption would carry: rolling refits (the
@@ -59,6 +90,25 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   evaluate, the v3 sequence).
 
 ### Fixed
+- **Two pre-metric executor defects in the v4 runner, found and fixed before
+  any result existed (diffs recorded in the v4 execution log).** (1) The BIS
+  licence-line extraction recorded JSON-LD page furniture instead of the
+  terms sentence (a loose `licen` pattern matched the page header); fixed and
+  the fetch phase re-run in full before any metric — both fetches produced
+  the same five testable indicators and the same four skips. (2) The
+  per-scorer-grid path ranked rolling scorers against the primary grid's
+  labels (`_score_card` closed over `events` instead of the grid it was
+  handed): the weekly indicator raised a length-mismatch `ValueError` before
+  any metric existed, and the mismatch was structural — every rolling grid
+  differs from the frozen TAN's warm-up-truncated grid, so all five
+  indicators were deterministically doomed. The attempt was terminated
+  rather than burn 35 minutes producing five recorded infrastructure
+  failures; the two-line fix ships with an end-to-end regression test that
+  reconstructs the exact mismatch synthetically and pins criteria on both
+  grids. `git diff prereg-early-warning-v4 HEAD` at the run touched only
+  those hunks and their tests — no protocol constant, criterion, family
+  entry, alarm rule or scorer spec changed (the YAML precedence clause
+  covers the executor).
 - **`docs/api-endpoints.md` regenerated after the 4.0.0 version bump.** The
   generated inventory embeds the application version; the release tooling
   does not regenerate it, so the 4.0.0 cut left it claiming v3.3.0 — invisible
