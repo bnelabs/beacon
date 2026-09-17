@@ -206,6 +206,57 @@ interface PredictionRow {
   risk?: number | null
   confidence?: { lower?: number | null; upper?: number | null } | null
   explanation?: string | null
+  uncertaintyStatus?: string | null
+  uncertaintyReasons?: string | null
+  epistemicShare?: number | null
+}
+
+/* A refused prediction is absence, and the table must show it as absence:
+ * the numbers render as em-dashes (formatNumber maps null/NaN to '—') and
+ * this cell says why, in the clay end of the risk palette. Nothing here may
+ * render a refused score as a number. */
+function UncertaintyCell({ row }: { row: PredictionRow }) {
+  if (row.uncertaintyStatus === 'refused') {
+    return (
+      <span className="inline-flex items-center gap-2 max-w-[22rem]">
+        <span
+          className="shrink-0 rounded bg-bne-clay/15 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-bne-clay"
+          title={row.uncertaintyReasons ?? 'prediction refused by the uncertainty assessment'}
+        >
+          Refused
+        </span>
+        {row.uncertaintyReasons ? (
+          <span className="text-xs text-bne-muted truncate" title={row.uncertaintyReasons}>
+            {row.uncertaintyReasons}
+          </span>
+        ) : null}
+      </span>
+    )
+  }
+  if (row.uncertaintyStatus === 'assessed') {
+    const share = row.epistemicShare
+    return (
+      <span
+        className="font-mono text-xs text-bne-muted"
+        title="share of predictive variance that is model ignorance (deep-ensemble decomposition); the rest is world noise"
+      >
+        {typeof share === 'number' && Number.isFinite(share)
+          ? `epistemic ${(share * 100).toFixed(0)}%`
+          : 'assessed'}
+      </span>
+    )
+  }
+  if (row.uncertaintyStatus === 'not_measurable_single_model') {
+    return (
+      <span
+        className="text-xs text-bne-muted"
+        title="single frozen checkpoint: the aleatoric/epistemic split needs independently trained ensemble members"
+      >
+        not measurable
+      </span>
+    )
+  }
+  return <span className="text-xs text-bne-muted">—</span>
 }
 
 function PredictionsTable({ rows }: { rows: PredictionRow[] }) {
@@ -222,6 +273,7 @@ function PredictionsTable({ rows }: { rows: PredictionRow[] }) {
             <th className="text-left py-3 px-4 font-semibold text-bne-ink">Prediction</th>
             <th className="text-left py-3 px-4 font-semibold text-bne-ink">Risk Score</th>
             <th className="text-left py-3 px-4 font-semibold text-bne-ink">Confidence</th>
+            <th className="text-left py-3 px-4 font-semibold text-bne-ink">Uncertainty</th>
             <th className="text-left py-3 px-4 font-semibold text-bne-ink">Insight</th>
           </tr>
         </thead>
@@ -236,6 +288,7 @@ function PredictionsTable({ rows }: { rows: PredictionRow[] }) {
                   ? `${formatNumber(row.confidence.lower)} – ${formatNumber(row.confidence.upper)}`
                   : '—'}
               </td>
+              <td className="py-3 px-4"><UncertaintyCell row={row} /></td>
               <td className="py-3 px-4 text-sm text-bne-muted">{row.explanation || '—'}</td>
             </tr>
           ))}
@@ -449,10 +502,15 @@ export default function Results({ params = {} }: ResultsProps) {
         prediction: item.prediction ?? item.overall_risk,
         risk: item.risk_score ?? item.overall_risk,
         confidence:
-          item.confidence_lower !== undefined && item.confidence_upper !== undefined
+          // nullish, not just undefined: a refused row carries explicit
+          // nulls, and 'null – null' would render where a dash belongs.
+          item.confidence_lower != null && item.confidence_upper != null
             ? { lower: item.confidence_lower, upper: item.confidence_upper }
             : null,
-        explanation: item.explanation
+        explanation: item.explanation,
+        uncertaintyStatus: item.uncertainty_status,
+        uncertaintyReasons: item.uncertainty_reasons,
+        epistemicShare: item.epistemic_share
       }))
     }
 
@@ -465,7 +523,13 @@ export default function Results({ params = {} }: ResultsProps) {
         entry.confidence_lower !== undefined && entry.confidence_upper !== undefined
           ? { lower: entry.confidence_lower, upper: entry.confidence_upper }
           : null,
-      explanation: entry.explanation
+      explanation: entry.explanation,
+      // PerSourceMetrics carries an unknown-valued index signature; these
+      // keys are the engine's row fields when the payload came from a
+      // post-wiring prediction job, and absent otherwise.
+      uncertaintyStatus: entry.uncertainty_status as string | null | undefined,
+      uncertaintyReasons: entry.uncertainty_reasons as string | null | undefined,
+      epistemicShare: entry.epistemic_share as number | null | undefined
     }))
   })()
 

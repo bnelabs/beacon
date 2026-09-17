@@ -315,3 +315,76 @@ class TestTransparencyCard:
         block = _uncertainty_block({"confidence_methods": {"split_conformal_alpha_0.1": 2}})
         assert "decomposition" not in block
         assert _uncertainty_block({})["status"] == "not_recorded"
+
+
+class TestPredictionReportAbsence:
+    """The v2 predictions API must not fabricate a score for a refused row.
+
+    `_extract_nodes` used to end its fallback chain in "any numeric column,
+    scanned backwards" and to coerce a missing score to 0.0 -- on a refused
+    row (NaN score, uncertainty columns present) that would have served
+    epistemic variance as a risk score, or NaN to a JSON encoder configured
+    to reject it. Absence travels as null, with the reason beside it.
+    """
+
+    def test_refused_row_yields_null_risk_and_carries_its_reason(self):
+        import numpy as np
+        import pandas as pd
+        from backend.api.routes.predictions_v2 import _extract_nodes
+
+        df = pd.DataFrame([
+            {
+                "source": "ASSESSED",
+                "risk_score": 0.42,
+                "prediction": 0.87,
+                "confidence_lower": 0.7,
+                "confidence_upper": 0.95,
+                "confidence_method": "split_conformal_alpha_0.1",
+                "uncertainty_status": "assessed",
+                "aleatoric_var": 0.3,
+                "epistemic_var": 0.04,
+                "epistemic_share": 0.12,
+            },
+            {
+                "source": "REFUSED",
+                "risk_score": float("nan"),
+                "prediction": float("nan"),
+                "confidence_lower": None,
+                "confidence_upper": None,
+                "confidence_method": "refused_uncertainty_assessment",
+                "uncertainty_status": "refused",
+                "uncertainty_reasons": "the model is extrapolating",
+                "aleatoric_var": 0.3,
+                "epistemic_var": 4.2,
+                "epistemic_share": 0.93,
+            },
+        ])
+        nodes = {node.source: node for node in _extract_nodes(df)}
+
+        assessed = nodes["ASSESSED"]
+        assert assessed.risk == 0.42
+        assert assessed.additional["uncertainty_status"] == "assessed"
+        assert assessed.additional["epistemic_share"] == 0.12
+
+        refused = nodes["REFUSED"]
+        assert refused.risk is None  # not 0.0, not NaN, not epistemic_var
+        assert refused.confidence_lower is None
+        assert refused.additional["uncertainty_status"] == "refused"
+        assert refused.additional["uncertainty_reasons"] == "the model is extrapolating"
+        assert refused.additional["confidence_method"] == "refused_uncertainty_assessment"
+
+    def test_nodes_serialise_without_nan(self):
+        """Starlette's JSON encoder rejects NaN; a refused row must not 500."""
+        import json
+        import numpy as np
+        import pandas as pd
+        from backend.api.routes.predictions_v2 import _extract_nodes
+
+        df = pd.DataFrame([{
+            "source": "REFUSED",
+            "risk_score": float("nan"),
+            "prediction": float("nan"),
+            "uncertainty_status": "refused",
+        }])
+        payload = [node.model_dump() for node in _extract_nodes(df)]
+        json.dumps(payload, allow_nan=False)  # raises on any NaN/Infinity

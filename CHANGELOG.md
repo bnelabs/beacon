@@ -10,6 +10,26 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **Refused predictions are visible in the UI.** The Results page's
+  predictions table grew an Uncertainty column with the three states the
+  deep-ensemble wiring can put a row in: `Refused` (clay chip + the
+  assessment's reasons; score, prediction and bounds render as em-dashes —
+  absence, never a number), `epistemic N%` for assessed rows, and `not
+  measurable` for single-checkpoint models. Scenario payload types carry
+  the new optional fields; the e2e mock's baseline scenario exercises all
+  three states.
+- **The Results page has e2e coverage again.** The three-way spec split
+  dropped the entire Models → Scenario Builder → Launch Explainability →
+  Results walk and the predictive-validity report card — no split spec
+  mentioned Results, so the platform's headline output screen had no
+  browser guard at all. `frontend/tests/results.spec.js` restores the
+  monolith's walk (including the drawer-close race it documented) and adds
+  the refusal-rendering contract; the deep e2e workflow picks it up
+  automatically (`npm test` runs every spec).
+- **`GET /api/v2/predictions/{job_id}` carries the uncertainty state.**
+  `PredictionNode.risk` is optional now and absence travels as null with
+  the reason beside it (`uncertainty_status`, `uncertainty_reasons`,
+  `confidence_method`, decomposition variances in `additional`).
 - **The BoE endpoint probe was executed** (2026-09-17, ~9 polite requests)
   and its findings recorded in `docs/probes/boe_endpoint_probe.md` against
   the pre-written criteria: the guessed balance-sheet file 404s,
@@ -64,6 +84,13 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   this prevents the task-snapshot class of leak at the index level.
 
 ### Fixed
+- **The v2 predictions API no longer fabricates scores.** `_extract_nodes`
+  coerced a missing score to `0.0` and, worse, fell back to "any numeric
+  column, scanned backwards" — on a refused row (NaN score, uncertainty
+  columns present) that would have served epistemic variance as a risk
+  score, or handed NaN to a JSON encoder configured to reject it (a 500
+  the moment the first refusal shipped). Scores are now `risk_score`, else
+  `prediction`, else null; the refused-row contract has tests.
 - **The README's semantics-register bullet was stale in the third
   direction.** It claimed "no per-indicator semantics registry" exists, but
   `backend/modules/data/semantics.py` (round-eight adoption) declares stress
