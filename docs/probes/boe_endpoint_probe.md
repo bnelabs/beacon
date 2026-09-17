@@ -1,10 +1,74 @@
 # Bank of England Endpoint Probe
 
-> **Status: planned, not executed.** This document is the probe methodology
-> and decision criteria. No probe has been run yet, so it records no
-> findings — every response code and outcome below is *expected*, not
-> *observed*. When the probe runs, its results get appended here with the
-> date and the raw responses, or this stays a plan and says so.
+> **Status: EXECUTED 2026-09-17 — findings recorded below.** The
+> methodology and decision criteria follow, as written before the run; the
+> "Expected Outcomes" sections are left untouched so the pre-registered
+> criteria can be read against what was actually observed. Classification:
+> **YELLOW (requires work)** — see Findings.
+
+## Probe Findings (executed 2026-09-17, ~9 requests, all observed)
+
+Raw results, recorded as returned:
+
+| # | Request | Observed |
+|---|---|---|
+| 1 | `HEAD https://www.bankofengland.co.uk/-/media/boe/files/statistics/uk-banks-balance-sheet-data.xlsx` | **404**, redirected to `/error/404.html`. The file path this methodology guessed does not exist. |
+| 2 | `GET https://api.bankofengland.co.uk/` | **DNS NXDOMAIN** — no REST API host exists at that name. |
+| 3 | `GET https://www.bankofengland.co.uk/boeapps/database/` | **200** (25 kB). The Interactive Database is live; the page's data forms post to `FromShowColumns.asp`; category indices (COUNTRY / INSTRUMENTS / SECTOR / A–Z) are linked from it. |
+| 4 | `GET …/boeapps/database/fromshowcolumns.asp?csv.x=yes&Datefrom=02/Jan/2024&Dateto=05/Jan/2024&SeriesCodes=IUDBEDR&CSVF=CNF&UsingCodes=Y&VPD=Y&VFD=N` | **200**, 40 kB **HTML** (not CSV, despite `csv.x=yes`), containing a clean data table: *Official Bank Rate* (`IUDBEDR`) = **5.25** on 02/03/04/05 Jan 2024 — real values, matching the published history for that week. **No authentication, no API key, no registration.** |
+| 5 | `GET https://www.bankofengland.co.uk/statistics` | **200** — statistics hub reachable. |
+
+A first attempt at #4 with ISO dates (`Datefrom=2024-01-02`) redirected to
+`ErrorPage.asp`; the `DD/Mon/YYYY` form is what the interface accepts. The
+date format is the only parameter sensitivity found.
+
+### Assessment against the named preconditions
+
+1. **Machine-readable access** — *partial*. Real series data is served
+   without auth, but as HTML tables at the probed URL; the `csv.x=yes`
+   switch did not produce `text/csv`. Either a CSV variant exists behind
+   parameters/headers not probed here, or ingestion needs an HTML-table
+   parser with strict schema validation (the table structure is regular:
+   date/value cell pairs under a labelled series header).
+2. **Bank-level exposure data or aggregate systemic indicators** —
+   *aggregate: yes* (the database covers UK monetary and financial
+   statistics — Bank Rate, rates and FX series, with sector/instrument
+   category indices). *Bank-level: not found* — the guessed balance-sheet
+   file 404'd, and bank-level prudential data would live with the PRA, not
+   probed here.
+3. **Regular update cadence** — *yes* for the rates family (daily
+   observations returned for a 4-day window).
+4. **Rate limits** — not hit at ~9 polite requests; no published automated-
+   collection terms were found in this probe. A production plugin must
+   cache aggressively and identify itself (User-Agent was set for this
+   probe).
+
+### Classification: YELLOW (requires work)
+
+Endpoint exists, serves real data, no registration — but no formal
+machine-readable contract at the probed URL. Per this document's own
+decision paths, the actions are:
+
+1. Discovery follow-up (bounded): probe the site's own XHR/JSON endpoints
+   behind `FromShowColumns.asp` and CSV parameter variants before writing
+   any parser.
+2. If no CSV/JSON contract surfaces: implement `boe_database_plugin.py`
+   with an HTML-table parser, strict schema validation, typed
+   `SchemaValidationError`/`DataSourceUnavailableError` on any drift, and
+   the platform's usual no-synthetic-fallback rules. Series to register
+   first: Official Bank Rate (`IUDBEDR`); candidates for the semantics
+   registry: SONIA-family rates (direction: rising = tightening = stress,
+   consistent with `FRED_SOFR`).
+3. Bank-level UK exposures: separate probe against the PRA, out of this
+   document's scope.
+4. Licensing/attribution: confirm terms for redistribution in derived
+   reports before shipping (BoE statistical data is normally free to use
+   with attribution; the exact licence was not captured by this probe).
+
+*Probe discipline: every status code, redirect and value above was
+observed on 2026-09-17; nothing is inferred from documentation alone.*
+
+---
 
 ## Purpose
 Phase 5 evidence-first external: probe the Bank of England (BoE) API endpoint to assess feasibility as a data source for UK banking sector exposures and systemic risk indicators.
@@ -85,4 +149,6 @@ Upon completion:
 - Plugin implementation (if green): 1-2 days
 
 ---
-*Phase 5 deliverable — the methodology; the evidence comes when the probe runs*
+*Phase 5 deliverable — methodology first, evidence second: the run happened
+2026-09-17 and its findings are recorded at the top, against these
+pre-registered criteria.*
