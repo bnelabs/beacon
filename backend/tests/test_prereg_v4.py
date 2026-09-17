@@ -205,6 +205,15 @@ class TestBisLicenceScreen:
         assert prohibited is True
         assert "prohibited" in reason.lower()
 
+    def test_page_furniture_is_not_recorded_as_terms(self, runner):
+        noisy = ('<html><head><script type="application/ld+json">{"@context":"https://schema.org",'
+                 '"legalName":"BIS","license":"https://example.org"}</script></head><body>'
+                 + self.PERMISSION + '</body></html>')
+        with self._get(noisy):
+            prohibited, reason, lines = runner._bis_licence_screen()
+        assert prohibited is False
+        assert lines and all("unrestricted" in ln or "cited" in ln for ln in lines)
+
     def test_drifted_page_refuses_as_unconfirmed(self, runner):
         with self._get("<html><body><p>Something else entirely.</p></body></html>"):
             prohibited, reason, _ = runner._bis_licence_screen()
@@ -250,3 +259,57 @@ class TestRollingHazardAbsence:
             assert scored_pos.min() >= pos[0]
             assert scored_pos.max() <= pos[-1]
             assert np.all(np.isfinite(scores))
+
+
+class TestPerGridScoringEndToEnd:
+    """The per-scorer-grid path, end to end through the real evaluator.
+
+    Regression pin for the attempt-2 pre-metric defect: ``_score_card`` once
+    ranked against the closure's primary-grid labels while handed a rolling
+    scorer's grid (939 scores vs 910 labels -> ValueError before ANY
+    indicator could report a metric). The synthetic series below guarantees
+    the mismatch by construction: the rolling TAN scores every eval step
+    (warm-up comes from pre-eval history) while the frozen TAN's eval-only
+    warm-up drops the first ``sequence_length`` steps.
+    """
+
+    def test_frozen_and_rolling_grids_both_score(self, runner, tmp_path):
+        import shutil
+
+        import pandas as pd
+
+        dates = pd.bdate_range("2005-01-03", "2008-12-31")
+        rng = np.random.default_rng(11)
+        values = rng.normal(0.0, 1.0, len(dates)).cumsum() * 0.05
+        jump = (dates >= pd.Timestamp("2007-06-01")) & (dates <= pd.Timestamp("2007-08-31"))
+        values[jump] += np.linspace(0.0, 8.0, int(jump.sum()))  # a labelled stress run-up
+        csv_rel = "data/prereg/v4/work/_test_synthetic.csv"
+        csv_path = runner.REPO / csv_rel
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame({"Date": dates, "Value": values}).to_csv(csv_path, index=False)
+
+        proto = dict(runner.PROTOCOLS["v4"])
+        proto["name"] = "test_v4_grid"
+        proto["tracks"] = {}          # exercise the daily track parameters
+        proto["data_dir"] = runner.REPO / "data/prereg/v4/work/_test_wd"
+        proto["report_dir"] = tmp_path
+        entry = {"csv": csv_rel, "episodes_covered": []}
+        # a registry code supplies the direction; the bytes are synthetic and local
+        try:
+            out = runner._evaluate_indicator("FRED_STLFSI4", entry, proto)
+        finally:
+            shutil.rmtree(runner.REPO / "data/prereg/v4/work/_test_wd", ignore_errors=True)
+            csv_path.unlink(missing_ok=True)
+
+        assert out.get("status") == "evaluated", out.get("error") or out.get("skip_reason")
+        scorers = out["scorers"]
+        for name in ("tan_frozen", "tan_rolling", "hazard_logit", "hazard_logit_rolling"):
+            assert name in scorers, name
+        assert "card" in scorers["tan_frozen"] and "card" in scorers["tan_rolling"]
+        # the grids genuinely differ: rolling covers steps the frozen warm-up drops
+        assert scorers["tan_rolling"]["grid_n"] > out["n_steps"]
+        # every declared scorer was graded on its own grid, criteria present
+        for name in ("tan_frozen", "tan_rolling"):
+            crit = scorers[name]["criteria"]
+            assert set(crit) == {"median_lead_ge_10", "fa_per_quiet_year_le_4",
+                                 "beats_both_baselines_auc_and_ap", "ap_above_base_rate"}

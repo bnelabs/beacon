@@ -91,6 +91,30 @@ out-of-sample collapse (L-4) is the measured cost of that choice. Recorded as
 the finding it is; rolling refits are a v4 axis, deliberately outside the
 frozen protocols' discipline. Status: **RECORDED** — v3 report, README gate.
 
+**L-26. Crisis early-warning v4: family NO (1 of 5) — the line stays parked,
+and both recorded axes are now empirically closed.** The owner-initiated
+resumption tested rolling annual refits and weekly/quarterly tracks (the BIS
+credit-to-GDP gap admitted at last, 1957-Q4 onward, licence GREEN). Verdict:
+1 of 5 indicators passed against a rule requiring at least half — the claim
+gate stays closed. The run produced the record's **first criteria-passing
+pair** (`FRED_STLFSI4` weekly via the *frozen* hazard logit: AUC 0.922,
+0.48 FA/quiet-year, 2-week median lead, both baselines beaten, p=0.001,
+Holm-surviving) — published as a fact, never upgraded into a system claim.
+Measured findings, all pre-declared as possible outcomes: rolling refits did
+not rescue the daily family (T10Y3M's rolling TAN got *worse*), closing the
+regime-drift hypothesis for these indicators; the quarterly credit gap was
+weak under this operationalisation (3 labelled events — under-powered by
+construction); the frozen hazard beat its rolling counterpart on the passing
+indicator, the opposite of the v3 diagnosis' expectation. Reproducibility
+held a fourth time (6/6 shared frozen pairs byte-identical to v3). Two
+pre-metric executor defects (licence-line extraction; a grid mismatch that
+doomed every indicator) were found, fixed with pinned tests, and documented
+with diffs — attempts 1–2 produced zero metrics, so the restarts are within
+the run rules' documented-defect clause, recorded in full in the execution
+log. Status: **PARKED** (four-run record; no planned v5 — resumption needs a
+new owner decision and new recorded axes) — tag `prereg-early-warning-v4`,
+`docs/prereg/runs/early_warning_v4/report.md` + `execution_log.md`.
+
 ## B. Data and licence compliance
 
 **L-7. The repo committed data its licence prohibits reproducing.**

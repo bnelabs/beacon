@@ -218,11 +218,11 @@ register now, and it is kept short on purpose:
   are computed per source wherever the payload's own held-out residuals
   support a calibration window, and are `null` — with `confidence_method`
   recording why — wherever they do not.
-- **No event target — line parked after three pre-registered runs.** Crisis
+- **No event target — line parked after four pre-registered runs.** Crisis
   early-warning needs a labelled stress-event target and a pre-registered
   evaluation; until a run passes one, the platform is a data-governance and
   scenario laboratory, not a demonstrated early-warning system, and it does
-  not claim to be one. Three protocol versions were frozen, tagged, run once
+  not claim to be one. Four protocol versions were frozen, tagged, run once
   each, and published unchanged:
   [v1](docs/prereg/runs/early_warning_v1/report.md) — under-powered NO (one
   testable indicator, below the declared family minimum);
@@ -231,23 +231,28 @@ register now, and it is kept short on purpose:
   false-alarm ceiling was unreachable for any indicator;
   [v3](docs/prereg/runs/early_warning_v3/report.md) — the declared-final
   run: coherent q98 alarm point plus a second frozen scorer (onset-hazard
-  logit, the crisis literature's architecture), every grading criterion
-  untouched. Verdict 0/3, and under its terminal clause **this line is
-  parked**. What the three-run record establishes: the coherent alarm point
-  fixed the false-alarm criterion (9–10 → 2.7–4.7 per quiet year) and
-  consumed lead time exactly as declared (medians 42→10, 18.5→10, 11.5→8 —
-  VIX fell through the 10-day floor); `FRED_T10Y3M`'s frozen TAN missed
-  passing on the FA criterion alone, by 0.2 alarms per quiet year (4.2 vs
-  4.0 — published as a fail; loosening it afterwards would be the
-  goalpost-move the protocol exists to forbid); the frozen hazard logit
-  failed out-of-sample on both spreads (AUC 0.39/0.44 — an 18-year
-  extrapolation of a pre-2006 fit does not survive the QE-era regime
-  change); and persistence remains unbeaten on `VIXCLS` (AUC 0.9265 vs
-  0.9257). Reproducibility held throughout: alarm-independent metrics are
-  byte-identical across versions. Any resumption is a new protocol (the
-  recorded v4 axes: rolling refits — the discipline the hazard architecture
-  actually needs — and weekly/monthly tracks admitting the credit-gap
-  family), owner-initiated, frozen before its run, like all three of these.
+  logit), verdict 0/3, line parked under its terminal clause;
+  [v4](docs/prereg/runs/early_warning_v4/report.md) — the owner-initiated
+  resumption testing exactly v3's two recorded axes (annual rolling refits;
+  weekly + quarterly tracks admitting the BIS credit-to-GDP gap). Family
+  verdict NO again — **1 of 5 indicators passed** against a rule requiring at
+  least half — so **the line remains parked with a four-run record and there
+  is no planned v5**. The run produced the record's first criteria-passing
+  pair: `FRED_STLFSI4` (weekly) via the *frozen* hazard logit — AUC 0.922,
+  AP 0.384, median lead 2.0 weeks (≈10 business days), 0.48 false alarms per
+  quiet year, strictly above both baselines, permutation p=0.001,
+  Holm-surviving across the 20-pair pool. One pair of twenty is published as
+  a fact, not upgraded into a system claim. What v4 else established: rolling
+  refits did not rescue the daily family (T10Y3M's rolling TAN got worse —
+  FA 4.2→5.4/quiet-yr, lead below the floor; T10Y2Y and VIX rolling ≈
+  frozen), closing that recorded axis; the quarterly credit gap was weak
+  under this operationalisation (AUC 0.39–0.65, 3 labelled events, no
+  detection within max_lead — under-powered by construction); and the frozen
+  scorers reproduced v3's published numbers exactly on all six shared pairs —
+  byte-identical reproducibility across four runs. Any resumption is a new
+  owner decision plus a new protocol with new recorded axes, frozen before
+  its run, like all four of these.
+
 - **No cross-source score aggregation.** A per-indicator stress *direction*
   registry does exist (`backend/modules/data/semantics.py`, used by the
   event labelling in backtests; an undeclared orientation is a refusal, not
