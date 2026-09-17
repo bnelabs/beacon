@@ -10,6 +10,40 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **Early-warning pre-registration v2 — same frozen criteria, better-powered
+  family.** v1's published NO carried its own diagnosis (one testable
+  indicator; the registry skews to operator-reported and low-frequency
+  series), so v2 changes the family and nothing else: `FRED_T10Y3M` (the
+  short-end curve spread the recession literature documents) and
+  `FRED_VIXCLS` (the standard equity-stress gauge, licence-checked) join the
+  candidates with registry directions declared before any fetch. Every
+  criterion, labelling parameter, alarm rule, model config, seed, window,
+  baseline and run rule is frozen identical to v1 — enforced structurally by
+  one shared constant block and one shared evaluation path in the runner.
+  New mechanics are data-availability only: keyed FRED transport
+  (`FRED_API_KEY` from the environment, never written to any file, endpoints
+  recorded with `api_key=<redacted>`) and a licence screen that reads each
+  series' own FRED notes and refuses to download — let alone commit — any
+  series whose terms prohibit reproduction. `docs/prereg/early_warning_v2.md`
+  + `configs/event_eval_v2.yaml`, to be tagged `prereg-early-warning-v2`
+  before the single run.
+- **Two new codes in the semantics registry, directions declared pre-fetch:**
+  `FRED_T10Y3M` (-1, same term-structure convention as `FRED_T10Y2Y`) and
+  `FRED_VIXCLS` (+1, rising implied equity volatility = stress).
+
+### Removed
+- **`data/prereg/FRED_BAMLH0A0HYM2.csv` — licence violation, withdrawn.**
+  The v1 fetch captured 339 rows of the ICE BofA High Yield OAS keylessly
+  (the series was skipped pre-metric for coverage, so no result ever used
+  it). The v2 licence screen read the series' own terms: ICE Data Indices
+  prohibits reproduction in any form and furnishing the data to third
+  parties. Committing the capture as "provenance" was itself the violation;
+  the file is removed at HEAD (published history is not rewritten), with
+  `data/prereg/REMOVAL_NOTE.md` recording the facts, and v2 screens licences
+  BEFORE downloading so this cannot recur. FRED also now serves only a
+  rolling 3-year window of the series (metadata observed 2026-09-17), which
+  independently disqualifies it from an 18-year evaluation.
+
 - **GARCH(1,1) is priced — the last unblocked `wire` disposition.** The
   module shipped complete but unconsumed because "level baselines price
   levels, not variance"; scoring it against level targets would have been a

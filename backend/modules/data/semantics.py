@@ -41,6 +41,14 @@ STRESS_DIRECTION = {
     "FRED_RRPONTSYD": +1,
     # Term structure: inversion (falling spread) precedes funding pressure.
     "FRED_T10Y2Y": -1,
+    # 10y-3m spread: the short-end spread the yield-curve/recession literature
+    # (Harvey et al.; Engstrom) documents as the stronger predictor; same
+    # falling = stress convention as T10Y2Y. Added for pre-registration v2.
+    "FRED_T10Y3M": -1,
+    # CBOE VIX close: implied equity volatility, rising = stress. The standard
+    # market-stress gauge; FRED serves it "reprinted with permission" with no
+    # reproduction prohibition (series notes checked 2026-09-17). Added for v2.
+    "FRED_VIXCLS": +1,
     # Liquidity levels and coverage: falling = deterioration.
     "HQLA_LEVEL": -1,
     "LCR_RATIO": -1,
