@@ -10,7 +10,7 @@ request and response bodies are not reproduced here; read them from the live
 schema at `/openapi.json` or the Swagger UI at `/docs`.
 
 
-Application: **BEACON API - Banking Network Engine** v3.3.0
+Application: **BEACON API - Banking Network Engine** v4.0.0
 
 **122 operations across 22 tags.**
 

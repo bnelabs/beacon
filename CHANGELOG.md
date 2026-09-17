@@ -9,6 +9,65 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Added
+- **Early-warning pre-registration v4 — the owner-initiated resumption,
+  testing exactly the two recorded axes.** v3's terminal clause parked the
+  line and recorded what a resumption would carry: rolling refits (the
+  discipline the frozen hazard logit's out-of-sample collapse diagnosed) and
+  weekly/monthly tracks admitting the credit-gap family (the literature's
+  best EWS variables, which a frozen daily step could never admit). v4 tests
+  those axes and **changes no grading criterion** — the four frozen criteria,
+  labeller quantile, windows, model config, seed protocol, baselines,
+  permutation test, Holm level, family rule and single-run rule are identical
+  to v1–v3 by shared code, pinned by tests (`TRACK_PARAMS["daily"]` restates
+  the frozen constants and `test_prereg_v4.py` asserts the equality). New
+  mechanics, all declared pre-run: three tracks (daily/weekly/quarterly) with
+  per-track step semantics translating the same design intent at each grid's
+  coarsest granularity (weekly lead floor 2 steps ≈ 10 bd; quarterly 1 step
+  ≈ 63 bd — stricter, declared not hidden); two rolling scorers
+  (`tan_rolling`, `hazard_logit_rolling`) refit at every calendar-year
+  boundary on the expanding window strictly before it, causality pinned by
+  test, a window that cannot support a fit contributing declared absence
+  rather than zeros; per-scorer grids with baselines recomputed on each
+  scorer's own grid; the uniform q98 alarm point with per-track arithmetic
+  from published facts (weekly/quarterly: the FA ceiling cannot bind — lift
+  and lead bind, declared consequence); Holm pools all four scorers × tested
+  indicators. Family: the daily trio as v2/v3, weekly STLFSI4/KCFSI
+  (directions predate v4) with the declared CISS keyless attempt
+  recorded-not-substituted, and quarterly `BIS_CREDIT_GAP_US`
+  (`WS_CREDIT_GAP/Q.US.P.A.C.E` — the GAP variant, US private non-financial,
+  1957-Q4 onward, keyless, licence GREEN with attribution), its registry
+  direction (+1, credit boom = risk build-up) declared BEFORE any fetch. The
+  BIS debt service ratio was probed fetchable but YELLOW (US history from
+  1999-Q1 — ~32 pre-2007 quarters cannot honestly train the declared
+  architecture) and is **excluded pre-fetch** under the probe's declared
+  disposition rule. Transport: keyed FRED (env-only, redacted) + keyless BIS
+  SDMX CSV (quarter-end date convention; a payload mixing dimension values is
+  a format-drift refusal); the licence screen extends to BIS — the live terms
+  page must show its permission sentence or the series is refused as
+  `licence_unconfirmed` (the BoE-404 precedent: unconfirmed is never
+  assumed). Outcome handling frozen before the run: pass → the README gate
+  moves carrying these numbers; fail → the line stays parked with a four-run
+  record and there is no planned v5. Probes executed criteria-first and
+  recorded: `docs/probes/prereg_v4_source_probe.md` (BIS GREEN / DSR YELLOW /
+  CISS RED with verbatim evidence) and `docs/probes/pra_endpoint_probe.md`
+  (**YELLOW**: aggregate PRA-sourced releases exist; bank-level exposures are
+  supervisory-confidential — the operator-onboarding route is the only path;
+  this closes the last open action of the BoE probe's YELLOW path).
+  `docs/prereg/early_warning_v4.md` + `configs/event_eval_v4.yaml`, to be
+  tagged `prereg-early-warning-v4` before the single run (tag → fetch →
+  evaluate, the v3 sequence).
+
+### Fixed
+- **`docs/api-endpoints.md` regenerated after the 4.0.0 version bump.** The
+  generated inventory embeds the application version; the release tooling
+  does not regenerate it, so the 4.0.0 cut left it claiming v3.3.0 — invisible
+  to the fast CI gates (the inventory check runs in the deep suite) and
+  caught here by the first full-suite run after the release, before any
+  nightly. One-line regeneration; the release checklist now carries the step,
+  and the failure is recorded as ledger L-25 with the durable tooling guard
+  deliberately deferred until the class recurs.
+
 ## [4.0.0] - 2026-09-17
 
 ### Added

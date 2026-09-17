@@ -129,10 +129,14 @@ when its mitigation is merged and verified.
 3. `python scripts/release.py major|minor|patch --tag` — moves the changelog
    block, bumps `VERSION`, syncs `frontend/package.json`, commits atomically,
    tags locally.
-4. **Push the commit and the tag.** A release cut without its tag is a stranded
+4. **Regenerate `docs/api-endpoints.md` immediately after** (`PYTHONPATH=.
+   python scripts/generate_api_docs.py`) — the inventory embeds the new
+   version and goes stale the moment `VERSION` moves; the deep suite guards
+   it (ledger L-25 — it happened to 4.0.0). Land it with the release.
+5. **Push the commit and the tag.** A release cut without its tag is a stranded
    release (ledger L-23 — it happened to v3.3.0).
-5. Verify CI on the release commit; verify `git tag -l` contains the new
-   version.
+6. Verify CI on the release commit; verify `git tag -l` contains the new
+   version; run the full suite once before the next nightly does.
 
 ---
 

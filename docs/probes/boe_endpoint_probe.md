@@ -124,8 +124,11 @@ boundary), and one live smoke through the plugin parsed 63 recent rows and
 a January-2024 window of 22 business days at 5.25. Caching note: the
 platform's per-source sync scheduler provides the cadence; the plugin adds
 no private cache, so nothing can serve stale bytes silently. Action 3
-(PRA probe for bank-level exposures) remains open; action 4 (licence) is
-**RESOLVED** — see below.
+(PRA probe for bank-level exposures) is **CLOSED (2026-09-18)** — executed
+and classified YELLOW in [`pra_endpoint_probe.md`](pra_endpoint_probe.md):
+aggregate PRA-sourced releases exist; bank-level exposures are
+supervisory-confidential, and the operator-onboarding route is the only
+path. Action 4 (licence) is **RESOLVED** — see below.
 
 ### Licence resolution (executed 2026-09-18, one page fetch)
 
