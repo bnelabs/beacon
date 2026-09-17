@@ -129,3 +129,8 @@ frontend/lerna-debug.log*
 data/predictions/*
 node_modules/
 .next/
+
+# Pre-registered evaluation work products (checkpoints, intermediates).
+# The data CSVs and manifest.json under data/prereg/ ARE committed: they are
+# the frozen provenance of the tagged protocol.
+data/prereg/work/

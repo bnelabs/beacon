@@ -1,0 +1,171 @@
+{
+  "protocol": "early_warning_v1",
+  "fetched_at": "2026-09-17T12:13:02+00:00",
+  "eval_window": [
+    "2007-01-01",
+    "2024-12-31"
+  ],
+  "entries": {
+    "FRED_STLFSI4": {
+      "status": "skipped",
+      "source": "fred_plugin (keyless fredgraph.csv)",
+      "series_id": "STLFSI4",
+      "endpoint": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=STLFSI4",
+      "csv": "data/prereg/FRED_STLFSI4.csv",
+      "sha256": "7a931813d6e603bde0efb14f512944f18e4859bc7de4faed9ebeae3964ebccbb",
+      "rows_total": 1618,
+      "rows_eval": 939,
+      "series_start": "1993-12-31",
+      "series_end": "2024-12-27",
+      "median_gap_days": 7.0,
+      "frequency": "weekly",
+      "coverage_frac": 0.1999,
+      "episodes_covered": [
+        "E1_gfc",
+        "E2_euro_area",
+        "E3_em_outflows",
+        "E4_repo_spike",
+        "E5_dash_for_cash",
+        "E6_uk_ldi",
+        "E7_regional_banks"
+      ],
+      "nan_ratio_eval": 0.0,
+      "skip_reason": "frequency_not_daily",
+      "detail": "median observation gap 7 days (weekly); the protocol step is one business day"
+    },
+    "FRED_KCFSI": {
+      "status": "skipped",
+      "source": "fred_plugin (keyless fredgraph.csv)",
+      "series_id": "KCFSI",
+      "endpoint": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=KCFSI",
+      "csv": "data/prereg/FRED_KCFSI.csv",
+      "sha256": "ea0d6c98eae20029698caa66a5ee0c4f0e62299301a4cdef730f9dde9f2d1f34",
+      "rows_total": 419,
+      "rows_eval": 216,
+      "series_start": "1990-02-01",
+      "series_end": "2024-12-01",
+      "median_gap_days": 31.0,
+      "frequency": "monthly",
+      "coverage_frac": 0.046,
+      "episodes_covered": [
+        "E1_gfc",
+        "E2_euro_area",
+        "E3_em_outflows",
+        "E4_repo_spike",
+        "E5_dash_for_cash",
+        "E6_uk_ldi",
+        "E7_regional_banks"
+      ],
+      "nan_ratio_eval": 0.0,
+      "skip_reason": "frequency_not_daily",
+      "detail": "median observation gap 31 days (monthly); the protocol step is one business day"
+    },
+    "FRED_SOFR": {
+      "status": "skipped",
+      "source": "fred_plugin (keyless fredgraph.csv)",
+      "series_id": "SOFR",
+      "endpoint": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SOFR",
+      "csv": "data/prereg/FRED_SOFR.csv",
+      "sha256": "87419cd18cfbb32e4b082c5553ef5b5638ac3d77011bad1fcdba3870838c3a4d",
+      "rows_total": 1686,
+      "rows_eval": 1686,
+      "series_start": "2018-04-03",
+      "series_end": "2024-12-31",
+      "median_gap_days": 1.0,
+      "frequency": "daily",
+      "coverage_frac": 0.359,
+      "episodes_covered": [
+        "E4_repo_spike",
+        "E5_dash_for_cash",
+        "E6_uk_ldi",
+        "E7_regional_banks"
+      ],
+      "nan_ratio_eval": 0.0,
+      "skip_reason": "insufficient_coverage",
+      "detail": "coverage 0.36 < 0.6 or 4 covered episodes < 3"
+    },
+    "FRED_BAMLH0A0HYM2": {
+      "status": "skipped",
+      "source": "fred_plugin (keyless fredgraph.csv)",
+      "series_id": "BAMLH0A0HYM2",
+      "endpoint": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAMLH0A0HYM2",
+      "csv": "data/prereg/FRED_BAMLH0A0HYM2.csv",
+      "sha256": "2f8a3f7d666766367984c1bb41d4d17df193edcd8356bf08ed67c850c03a88d1",
+      "rows_total": 339,
+      "rows_eval": 339,
+      "series_start": "2023-09-18",
+      "series_end": "2024-12-31",
+      "median_gap_days": 1.0,
+      "frequency": "daily",
+      "coverage_frac": 0.0722,
+      "episodes_covered": [],
+      "nan_ratio_eval": 0.0,
+      "skip_reason": "insufficient_coverage",
+      "detail": "coverage 0.07 < 0.6 or 0 covered episodes < 3"
+    },
+    "FRED_T10Y2Y": {
+      "status": "testable",
+      "source": "fred_plugin (keyless fredgraph.csv)",
+      "series_id": "T10Y2Y",
+      "endpoint": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=T10Y2Y",
+      "csv": "data/prereg/FRED_T10Y2Y.csv",
+      "sha256": "87cd1a7d395c02f2eb162ca257e4010c01f53801e06f67ab1a402d8f147f8079",
+      "rows_total": 12143,
+      "rows_eval": 4504,
+      "series_start": "1976-06-01",
+      "series_end": "2024-12-31",
+      "median_gap_days": 1.0,
+      "frequency": "daily",
+      "coverage_frac": 0.9589,
+      "episodes_covered": [
+        "E1_gfc",
+        "E2_euro_area",
+        "E3_em_outflows",
+        "E4_repo_spike",
+        "E5_dash_for_cash",
+        "E6_uk_ldi",
+        "E7_regional_banks"
+      ],
+      "nan_ratio_eval": 0.0
+    },
+    "ECB_CISS": {
+      "status": "skipped",
+      "source": "fred_plugin (keyless fredgraph.csv)",
+      "series_id": "CISS",
+      "endpoint": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=CISS",
+      "skip_reason": "fetch_failed",
+      "detail": "empty payload"
+    },
+    "FRED_RRPONTSYD": {
+      "status": "excluded",
+      "reason": "owner decision: the registry itself flags its direction as a funding-sense judgement (proposal section 6)"
+    },
+    "HQLA_LEVEL": {
+      "status": "excluded",
+      "reason": "operator-reported series; no public source in the evaluation environment"
+    },
+    "LCR_RATIO": {
+      "status": "excluded",
+      "reason": "operator-reported series; no public source in the evaluation environment"
+    },
+    "NSFR_RATIO": {
+      "status": "excluded",
+      "reason": "operator-reported series; no public source in the evaluation environment"
+    },
+    "BANK_EQUITY_INDEX": {
+      "status": "excluded",
+      "reason": "operator-reported series; no public source in the evaluation environment"
+    },
+    "FX_SWAP_BASIS": {
+      "status": "excluded",
+      "reason": "operator-reported series; no public source in the evaluation environment"
+    },
+    "CDS_PREMIUM": {
+      "status": "excluded",
+      "reason": "operator-reported series; no public source in the evaluation environment"
+    }
+  },
+  "testable_family": [
+    "FRED_T10Y2Y"
+  ]
+}
