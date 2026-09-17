@@ -124,6 +124,27 @@ const jobsList = [
             ecb: { skipped: 'insufficient stress events in window' }
           }
         },
+        volatility_baselines: {
+          by_source: {
+            fdic: {
+              n_folds: 4,
+              n_scored_folds: 4,
+              n_fit_failures: 0,
+              n_nonstationary_fits: 0,
+              n_nonconverged_fits: 0,
+              garch: { mse_var: 0.0000081, mae_vol: 0.0021 },
+              unconditional: { mse_var: 0.0000097, mae_vol: 0.0026 },
+              lift: { mse_var: 0.0000016, mae_vol: 0.0005 },
+              folds: []
+            },
+            ecb: {
+              skipped: 'no fold produced a usable GARCH fit',
+              n_folds: 4,
+              n_fit_failures: 4,
+              folds: []
+            }
+          }
+        },
         mse: 0.19,
         mae: 0.31,
         rmse: 0.44,
@@ -988,6 +1009,40 @@ export async function registerApiMocks(page) {
             'this backtest ran without an event_definition, so no stress ' +
             'events were labelled and no predictive-validity statistics exist',
           validation: null
+        })
+      }
+
+      // Full backtest report, with the branch logic of the real route: a
+      // completed backtest job answers the metrics blob (the Results page
+      // reads the volatility track from it), anything else answers the
+      // progress payload -- status plus progress, no metrics. Absence is a
+      // status here too, never an error.
+      // (Comment style note: the coverage extractor scans this handler body
+      // with a brace/quote matcher that does not parse comments, so comments
+      // in here carry no apostrophes, backticks, or unbalanced braces.)
+      const backtestReportMatch = normalizedPath.match(/\/api\/v2\/reports\/backtest\/(\d+)$/)
+      if (backtestReportMatch) {
+        const jobId = Number(backtestReportMatch[1])
+        const job = jobDetailsMap[jobId]
+        if (job?.job_type === 'backtest' && job.status === 'completed') {
+          return respond({
+            job_id: jobId,
+            status: 'completed',
+            metrics: job.result?.backtest_metrics || {},
+            metadata: {
+              train_samples: job.result?.train_samples ?? null,
+              test_samples: job.result?.test_samples ?? null,
+              completed_at: job.result?.completed_at ?? null
+            },
+            quant_metrics: job.result?.quant_metrics ?? null,
+            walk_forward: job.result?.walk_forward ?? null
+          })
+        }
+        return respond({
+          job_id: jobId,
+          status: job?.status ?? 'not_found',
+          progress: job?.progress ?? 0,
+          current_step: null
         })
       }
 

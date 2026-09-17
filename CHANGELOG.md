@@ -10,6 +10,23 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **The volatility track is visible: a Results-page card prices GARCH(1,1)
+  against unconditional variance per source.** `run_backtest` has computed it
+  since the garch wiring, but nothing rendered it — the claim "does
+  complexity earn its keep for volatility?" existed only in job JSON. The
+  Results page now fetches the existing (previously frontend-unconsumed)
+  `GET /api/v2/reports/backtest/{job_id}` report via `useBacktestReport` and
+  renders a per-source table beside the predictive-validity card: MSE of
+  variance and MAE of volatility for GARCH vs unconditional, the lift on both
+  losses, folds scored, and the fit-health counts (failures, non-stationary,
+  non-converged) travelling with the verdict — "earns its keep" only when the
+  lift is positive on BOTH declared losses. Declared skips and recorded
+  failures render as states, never as zeros; an in-progress or pre-wiring job
+  answers "No volatility track" rather than an error wall. E2e: the mock now
+  answers the backtest-report route with the real branch logic, the 104
+  fixture carries one measured and one skipped source, and a spec
+  walk-through asserts both rows (mock-coverage audit stays at zero
+  unanswered endpoints).
 - **The BoE licence question is resolved — OGL v3, confirmed against the
   source.** The probe's two candidate terms URLs were 404s; the real page is
   `bankofengland.co.uk/legal` (accessed 2026-09-18), whose "Bank of England

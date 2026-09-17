@@ -287,6 +287,53 @@ export interface ValidationReport {
   validation?: ValidationBlock | null
 }
 
+/** One loss cell of the volatility track: mean squared error of the one-step
+ *  conditional variance, and mean absolute error of volatility, both averaged
+ *  over the held-out steps of embargoed walk-forward folds. */
+export interface VolatilityLossCell {
+  mse_var?: number | null
+  mae_vol?: number | null
+}
+
+/** Per-source entry of run_backtest's volatility track (wired in job_tasks
+ *  from backtesting.compare_volatility_baselines into
+ *  result.backtest_metrics.volatility_baselines.by_source). A source either
+ *  gets the summary — positive lift means GARCH(1,1) beat unconditional
+ *  variance on that loss — or a declared skip, or a recorded failure. The
+ *  three states the track can honestly be in; none of them is an error. */
+export interface VolatilityBaselineEntry {
+  skipped?: string | null
+  failed?: string | null
+  n_folds?: number | null
+  n_scored_folds?: number | null
+  n_fit_failures?: number | null
+  n_nonstationary_fits?: number | null
+  n_nonconverged_fits?: number | null
+  garch?: VolatilityLossCell | null
+  unconditional?: VolatilityLossCell | null
+  lift?: VolatilityLossCell | null
+  folds?: unknown[] | null
+  [key: string]: unknown
+}
+
+/** GET /api/v2/reports/backtest/{job_id} — the full backtest report
+ *  (backend/schemas/predictions_v2.BacktestReport). Jobs that are not
+ *  completed answer the progress payload instead: status + progress, no
+ *  metrics. Absence of metrics is a status, never an error wall. */
+export interface BacktestReport {
+  job_id?: EntityId | null
+  status?: string | null
+  progress?: number | null
+  current_step?: string | null
+  metrics?: (Record<string, unknown> & {
+    volatility_baselines?: { by_source?: Record<string, VolatilityBaselineEntry | null> | null } | null
+  }) | null
+  metadata?: Record<string, unknown> | null
+  quant_metrics?: Record<string, unknown> | null
+  walk_forward?: Record<string, unknown> | null
+  [key: string]: unknown
+}
+
 /* ------------------------------------------------------------------ */
 /* Data sources, catalogue, disclosure                                 */
 /* ------------------------------------------------------------------ */

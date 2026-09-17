@@ -118,6 +118,24 @@ test('predictive validity report card on Results', async ({ page }) => {
   await expect(page.getByText('insufficient stress events in window')).toBeVisible()
 })
 
+test('volatility baselines card on Results', async ({ page }) => {
+  await page.goto('/')
+
+  // Served by GET /api/v2/reports/backtest/{job_id}; the fixture job (104)
+  // carries a volatility track with one measured source (GARCH beats the
+  // unconditional variance on both losses) and one declared skip -- the two
+  // states the card must render honestly.
+  await page.evaluate(() => { window.location.hash = '#/results?modelId=201&jobId=104' })
+  await expect(
+    page.getByRole('heading', { name: 'Volatility baselines — job #104' })
+  ).toBeVisible()
+  await expect(page.getByText('1 of 2 measured')).toBeVisible()
+  const measuredRow = page.locator('tr', { hasText: 'fdic' })
+  await expect(measuredRow.getByText('earns its keep')).toBeVisible()
+  const skippedRow = page.locator('tr', { hasText: 'ecb' })
+  await expect(skippedRow.getByText('no fold produced a usable GARCH fit')).toBeVisible()
+})
+
 test('a refused prediction renders as absence, never as a number', async ({ page }) => {
   await page.goto('/')
 
