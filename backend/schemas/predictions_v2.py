@@ -10,7 +10,11 @@ from pydantic import BaseModel
 
 class PredictionNode(BaseModel):
     source: str
-    risk: float
+    # Optional because a refused prediction has no score: NaN is not a number
+    # this API may turn into 0.0 (a fabricated calm) or into "whatever numeric
+    # column happens to be last" -- absence travels as null, per the platform
+    # rule. `additional` carries why (uncertainty_status/uncertainty_reasons).
+    risk: Optional[float]
     confidence_lower: Optional[float]
     confidence_upper: Optional[float]
     additional: Dict[str, Any] = {}

@@ -237,6 +237,11 @@ const baselineScenario = {
       risk_score: 0.42,
       confidence_lower: 0.74,
       confidence_upper: 0.95,
+      confidence_method: 'split_conformal_alpha_0.1',
+      uncertainty_status: 'assessed',
+      aleatoric_var: 0.42,
+      epistemic_var: 0.05,
+      epistemic_share: 0.11,
       explanation: 'Buffer dips under stress but recovers within 10 days.'
     },
     {
@@ -245,7 +250,27 @@ const baselineScenario = {
       risk_score: 0.36,
       confidence_lower: 0.18,
       confidence_upper: 0.28,
+      confidence_method: 'split_conformal_alpha_0.1',
+      uncertainty_status: 'not_measurable_single_model',
       explanation: 'Slight acceleration driven by wholesale funding shock.'
+    },
+    {
+      // A refused prediction: the ensemble disagreed on this window more than
+      // on any calibration window, so the score, the point prediction and the
+      // bounds are all absent -- the row must render dashes and the reason,
+      // never a number.
+      source: 'FX Swap Basis',
+      prediction: null,
+      risk_score: null,
+      confidence_lower: null,
+      confidence_upper: null,
+      confidence_method: 'refused_uncertainty_assessment',
+      uncertainty_status: 'refused',
+      uncertainty_reasons: 'epistemic uncertainty exceeds the calibrated ceiling; the model is extrapolating',
+      aleatoric_var: 0.31,
+      epistemic_var: 4.2,
+      epistemic_share: 0.93,
+      explanation: null
     }
   ]
 }

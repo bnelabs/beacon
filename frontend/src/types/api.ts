@@ -232,7 +232,17 @@ export interface ScenarioPrediction {
   overall_risk?: number | null
   confidence_lower?: number | null
   confidence_upper?: number | null
+  confidence_method?: string | null
   explanation?: string | null
+  /* Uncertainty decomposition (deep-ensemble runs; absent on scenarios
+   * saved before the wiring or from single-checkpoint models, where the
+   * status says the split is not measurable). A refused row carries null
+   * prediction/risk_score/bounds and the reasons here -- absence, not 0. */
+  uncertainty_status?: string | null
+  uncertainty_reasons?: string | null
+  aleatoric_var?: number | null
+  epistemic_var?: number | null
+  epistemic_share?: number | null
 }
 
 /** Response of `POST /api/models/{id}/simulate` and

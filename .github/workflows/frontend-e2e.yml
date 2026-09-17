@@ -2,7 +2,7 @@ name: Frontend e2e (deep)
 
 # why: the production build and the Playwright suite are the deep frontend
 # validation: browser download, Vite bundling and the three mocked
-# navigation specs (dashboard/pages/search) -- measured ~1 min on the runner
+# navigation specs (dashboard/pages/results/search) -- measured ~1 min on the runner
 # with warm caches, a few minutes cold -- which used to run on every push
 # and pull request. That wait is
 # what made CI feel slower than the work, so the suite moved here -- nightly
@@ -31,7 +31,7 @@ jobs:
   build-and-e2e:
     name: Build and Playwright e2e (Node 24)
     runs-on: ubuntu-latest
-    # why: browser download + vite build + the three mocked navigation specs;
+    # why: browser download + vite build + the four mocked navigation specs;
     # 30 minutes gives headroom on a cold cache while bounding a hung run
     # (measured: ~1.1 min on warm runs of this exact job).
     timeout-minutes: 30
@@ -58,7 +58,8 @@ jobs:
       # Postgres/Redis) is started for this job. The Playwright suite is fully
       # self-mocked:
       #   * every spec under frontend/tests/ (dashboard.spec.js,
-      #     pages.spec.js, search.spec.js) calls registerApiMocks(page)
+      #     pages.spec.js, results.spec.js, search.spec.js) calls
+      #     registerApiMocks(page)
       #     in beforeEach; frontend/tests/apiMocks.js registers
       #     `page.route('**/api/**', ...)` and serves every
       #     catalogue/jobs/countries/analytics/data-quality response from

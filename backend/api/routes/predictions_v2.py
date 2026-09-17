@@ -69,25 +69,33 @@ def _extract_nodes(df: pd.DataFrame) -> List[PredictionNode]:
         return nodes
 
     for _, row in df.iterrows():
+        # The score is risk_score, or the prediction when no risk score was
+        # recorded. A refused row carries NaN in both, and NaN is not a
+        # number: it travels as null. The old fallback chain ended in "any
+        # numeric column, scanned backwards" -- which on a row with uncertainty
+        # columns would have served epistemic variance as if it were a risk
+        # score. Absence is reported as absence.
         risk_value = None
-        if "risk_score" in row:
-            risk_value = row["risk_score"]
-        elif "prediction" in row:
-            risk_value = row["prediction"]
-        else:
-            for col in row.index[::-1]:
-                if isinstance(row[col], (int, float)):
-                    risk_value = row[col]
-                    break
+        for candidate in ("risk_score", "prediction"):
+            if candidate in row and pd.notna(row[candidate]):
+                risk_value = row[candidate]
+                break
 
         node = PredictionNode(
             source=str(row["source"]),
-            risk=float(risk_value) if risk_value is not None else 0.0,
+            risk=float(risk_value) if risk_value is not None else None,
             confidence_lower=float(row.get("confidence_lower", 0.0)) if pd.notna(row.get("confidence_lower")) else None,
             confidence_upper=float(row.get("confidence_upper", 0.0)) if pd.notna(row.get("confidence_upper")) else None,
             additional={
                 key: row[key]
-                for key in ["bank_id", "bank_name", "risk_level", "overall_risk"]
+                for key in [
+                    "bank_id", "bank_name", "risk_level", "overall_risk",
+                    # Why a score is absent (or what it carries): the refusal
+                    # state and the decomposition travel with the node.
+                    "confidence_method", "uncertainty_status",
+                    "uncertainty_reasons", "aleatoric_var", "epistemic_var",
+                    "epistemic_share",
+                ]
                 if key in df.columns and pd.notna(row.get(key))
             },
         )
