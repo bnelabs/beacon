@@ -15,6 +15,7 @@ import type {
   JobDataQualityReport,
   ModelDetailData,
   ModelSummary,
+  BacktestReport,
   NetworkGraphPayload,
   NormalizedNetworkGraph,
   ProbeResult,
@@ -380,6 +381,22 @@ export function useValidationReport(jobId?: EntityId | null) {
   return useQuery({
     queryKey: ['validation', jobId],
     queryFn: () => fetchApi<ValidationReport>(`/v2/reports/validation/${jobId}`),
+    enabled: !!jobId
+  })
+}
+
+/**
+ * Full backtest report for a backtest job (GET /v2/reports/backtest/{id}).
+ * The Results page reads the volatility track from here: GARCH(1,1) priced
+ * against unconditional variance per source — the does-complexity-earn-its-keep
+ * question for volatility claims, computed in every run_backtest since the
+ * garch wiring. Jobs that are not completed answer the progress payload (no
+ * metrics); absence is a status, never an error wall.
+ */
+export function useBacktestReport(jobId?: EntityId | null) {
+  return useQuery({
+    queryKey: ['backtest-report', jobId],
+    queryFn: () => fetchApi<BacktestReport>(`/v2/reports/backtest/${jobId}`),
     enabled: !!jobId
   })
 }

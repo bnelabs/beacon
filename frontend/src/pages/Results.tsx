@@ -5,10 +5,10 @@ import Button from '../components/ui/Button'
 import Badge from '../components/ui/Badge'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
-import { useModel, useValidationReport } from '../hooks/useApi'
+import { useModel, useValidationReport, useBacktestReport } from '../hooks/useApi'
 import { useRouter, type RouteParams } from '../store/useRouter'
 import EmptyState from '../components/ui/EmptyState'
-import type { ModelResultMetrics, PerSourceMetrics, ScenarioResult, ValidationSourceStats } from '../types/api'
+import type { ModelResultMetrics, PerSourceMetrics, ScenarioResult, ValidationSourceStats, VolatilityBaselineEntry } from '../types/api'
 
 /** The error `detail` FastAPI answers with: a plain string, or the typed
  *  {user_friendly, technical} envelope the backend raises on pipeline errors. */
@@ -119,6 +119,108 @@ function ValidationReportCard({ jobId }: { jobId: string }) {
                       ) : (
                         <td className="py-1.5 text-bne-faint" colSpan={5}>
                           {payload?.skipped || 'not measured'}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+/** The honest one-liner for a measured volatility entry: does the 3-parameter
+ *  GARCH(1,1) beat "assume average chaos" (unconditional variance) on the
+ *  declared losses? Fit-health counts travel with the verdict, never hidden
+ *  (the backend counts non-stationary and non-converged fits rather than
+ *  dropping them). */
+function volatilityVerdict(entry: VolatilityBaselineEntry): string {
+  const notes: string[] = []
+  if (entry.n_fit_failures) notes.push(`${entry.n_fit_failures} fit failure(s)`)
+  if (entry.n_nonstationary_fits) notes.push(`${entry.n_nonstationary_fits} non-stationary`)
+  if (entry.n_nonconverged_fits) notes.push(`${entry.n_nonconverged_fits} non-converged`)
+  const suffix = notes.length ? ` · ${notes.join(', ')}` : ''
+  const mseLift = Number(entry.lift?.mse_var)
+  const maeLift = Number(entry.lift?.mae_vol)
+  if (!Number.isFinite(mseLift) || !Number.isFinite(maeLift)) return `not scored${suffix}`
+  if (mseLift > 0 && maeLift > 0) return `earns its keep${suffix}`
+  if (mseLift > 0 || maeLift > 0) return `mixed lift${suffix}`
+  return `no lift${suffix}`
+}
+
+function VolatilityBaselinesCard({ jobId }: { jobId: string }) {
+  const { data, isLoading } = useBacktestReport(jobId)
+  const bySource = data?.metrics?.volatility_baselines?.by_source || {}
+  const sources = Object.entries(bySource)
+  const measuredCount = sources.filter(
+    ([, entry]) => entry && entry.garch && entry.unconditional && entry.lift
+  ).length
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base">Volatility baselines — job #{jobId}</CardTitle>
+          {sources.length > 0 ? (
+            <Badge variant="success" size="sm">{measuredCount} of {sources.length} measured</Badge>
+          ) : (
+            <Badge size="sm">not measured</Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-bne-muted">Loading volatility track…</p>
+        ) : sources.length === 0 ? (
+          <EmptyState
+            compact
+            title="No volatility track for this backtest"
+            hint="GARCH(1,1) is priced against unconditional variance per source on backtests whose data carries a source column; in-progress or pre-wiring jobs answer with no metrics — a status, not a zero."
+          />
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-bne-muted">
+              One-step conditional variances from past information only, embargoed walk-forward
+              folds, each source on its own contiguous span. Positive lift means GARCH(1,1) beat
+              the unconditional variance on that loss — MSE of variance and MAE of volatility.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[13px]">
+                <thead>
+                  <tr className="bne-micro">
+                    <th className="py-1 pr-4">Source</th>
+                    <th className="py-1 pr-4">MSE(var) GARCH</th>
+                    <th className="py-1 pr-4">MSE(var) uncond.</th>
+                    <th className="py-1 pr-4">MSE lift</th>
+                    <th className="py-1 pr-4">MAE(vol) GARCH</th>
+                    <th className="py-1 pr-4">MAE(vol) uncond.</th>
+                    <th className="py-1 pr-4">MAE lift</th>
+                    <th className="py-1 pr-4">Folds</th>
+                    <th className="py-1">Verdict</th>
+                  </tr>
+                </thead>
+                <tbody className="text-bne-ink-soft">
+                  {sources.map(([source, entry]: [string, VolatilityBaselineEntry | null]) => (
+                    <tr key={source} className="border-t border-bne-line-soft">
+                      <td className="py-1.5 pr-4 font-mono text-xs">{source}</td>
+                      {entry && entry.garch && entry.unconditional && entry.lift ? (
+                        <>
+                          <td className="py-1.5 pr-4 tnum">{formatNumber(entry.garch.mse_var, 6)}</td>
+                          <td className="py-1.5 pr-4 tnum">{formatNumber(entry.unconditional.mse_var, 6)}</td>
+                          <td className="py-1.5 pr-4 tnum">{formatNumber(entry.lift.mse_var, 6)}</td>
+                          <td className="py-1.5 pr-4 tnum">{formatNumber(entry.garch.mae_vol, 6)}</td>
+                          <td className="py-1.5 pr-4 tnum">{formatNumber(entry.unconditional.mae_vol, 6)}</td>
+                          <td className="py-1.5 pr-4 tnum">{formatNumber(entry.lift.mae_vol, 6)}</td>
+                          <td className="py-1.5 pr-4 tnum">{entry.n_scored_folds ?? '—'}/{entry.n_folds ?? '—'}</td>
+                          <td className="py-1.5 text-xs">{volatilityVerdict(entry)}</td>
+                        </>
+                      ) : (
+                        <td className="py-1.5 text-bne-faint" colSpan={8}>
+                          {entry?.skipped || entry?.failed || 'not measured'}
                         </td>
                       )}
                     </tr>
@@ -645,6 +747,7 @@ export default function Results({ params = {} }: ResultsProps) {
     >
       <div className="space-y-6">
         {validationJobId && <ValidationReportCard jobId={validationJobId} />}
+        {validationJobId && <VolatilityBaselinesCard jobId={validationJobId} />}
         {scenarioError && (
           <ErrorMessage
             title="Unable to load scenario"
