@@ -446,8 +446,10 @@ def test_the_guards_skip_only_what_exists(database):
             ) is False
             assert guards.create_table_if_missing("data_sources", sa.Column("id", sa.Integer)) is False
 
-            # A genuine error must still surface rather than be swallowed.
-            with pytest.raises(Exception):
+            # A genuine error must still surface rather than be swallowed --
+            # as the DB-API error it is, not as "some Exception", which a bug
+            # in the guard itself would also satisfy.
+            with pytest.raises(sa.exc.DBAPIError):
                 guards.create_index_if_missing(
                     "idx_on_a_column_that_does_not_exist",
                     "data_sources",

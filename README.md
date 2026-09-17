@@ -198,14 +198,17 @@ Two honesty rules govern every reported number:
    any date; a revised figure never silently rewrites what yesterday's
    decision could have seen.
 
-The calibration roadmap (event labelling, per-indicator semantics, conformal
-intervals) used to live in a round-by-round review narrative. That narrative
-was development history, not user documentation, and it was deleted; this list
-is the register now, and it is kept short on purpose:
+The calibration roadmap (event labelling, per-indicator semantics) used to
+live in a round-by-round review narrative. That narrative was development
+history, not user documentation, and it was deleted; this list is the
+register now, and it is kept short on purpose:
 
 - **No calibrated risk scale.** Risk levels are reported as *uncalibrated*;
-  confidence bounds stay `null` until split-conformal calibration is wired per
-  source. Nothing bands a standardized score against an invented 0–100 scale.
+  nothing bands a standardized score against an invented 0–100 scale.
+  Prediction *intervals* are a separate, wired matter: split-conformal bounds
+  are computed per source wherever the payload's own held-out residuals
+  support a calibration window, and are `null` — with `confidence_method`
+  recording why — wherever they do not.
 - **No event target yet.** Crisis early-warning needs a labelled stress-event
   target (event labeller) and a pre-registered evaluation — lift over
   persistence/AR baselines under CPCV, event precision and lead time. Until

@@ -134,7 +134,7 @@ TOKEN_OVERRIDES = {
     "philippines": {"ph", "phl", "php"},
     "mongolia": {"mn", "mng", "mnt"},
     "nepal": {"np", "npl", "npr"},
-    "bhutan": {"bt", "btn", "btn", "nu"},
+    "bhutan": {"bt", "btn", "nu"},
     "hong_kong": {"hk", "hkg", "hkd"},
     "taiwan": {"tw", "twn", "twd"},
     "papua_new_guinea": {"pg", "png", "pgk"},
