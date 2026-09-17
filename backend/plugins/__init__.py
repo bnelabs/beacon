@@ -56,6 +56,9 @@ def _load_plugins() -> Dict[str, str]:
         (".fdic_plugin", "FDICPlugin"),
         (".cftc_cot_plugin", "CFTCCotPlugin"),
         (".nyfed_plugin", "NYFedPlugin"),
+        # Added with the executed BoE probe (docs/probes/boe_endpoint_probe.md):
+        # keyless HTML-table reader for the Interactive Database.
+        (".boe_database_plugin", "BoEDatabasePlugin"),
     )
 
     loaded: Dict[str, str] = {}

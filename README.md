@@ -67,7 +67,7 @@ Frontend (React 18 + Vite + Deck.gl + Tailwind)
   └── Error boundary per view: a failing page degrades, the shell never blanks
 
 Backend (FastAPI + Celery + Redis)
-  └── DATA: 17 plugins → validation → cleaning → formatting → quality gate
+  └── DATA: 18 plugins → validation → cleaning → formatting → quality gate
   └── ENGINE: training, inference, backtesting, systemic scenario modules
   └── RESULTS: reports (JSON/Excel/PDF), prediction artefacts
   └── Jobs API (v1) + WebSocket progress relayed over Redis

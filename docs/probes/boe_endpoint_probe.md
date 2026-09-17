@@ -95,8 +95,33 @@ date/value cell pairs. A `boe_database_plugin.py` should therefore:
 3. register first series: Official Bank Rate (`IUDBEDR`), then SONIA-family
    candidates for the semantics registry (direction per `FRED_SOFR`
    convention);
-4. confirm BoE reuse/attribution terms before shipping (still open — this
-   probe captured no licence statement).
+4. confirm BoE reuse/attribution terms before shipping — **STILL OPEN.**
+   Attempted 2026-09-17: `bankofengland.co.uk/copyright` → **404** and
+   `/terms-and-conditions` → **404**; no reuse terms could be located at
+   the standard paths, so the licence is recorded as *unconfirmed* here, in
+   the plugin's docstring and in its curated provenance record. Operators
+   should resolve it (likely via the BoE enquiries route) before production
+   deployment; nothing claims a permission that was not observed.
+
+### Implementation status (2026-09-17): action 2 is DONE
+
+`backend/plugins/boe_database_plugin.py` (registry name `boe_database`)
+implements exactly this contract: strict stdlib HTML-table reader (no new
+dependencies), typed `BoEDatabaseError` on HTTP status / ErrorPage redirect
+/ missing table / unparseable date / non-numeric value — drift fails
+loudly, never as empty data — empty window returns `None` per the plugin
+contract, identifying User-Agent, one request per fetch, evidence-first
+catalogue (only the probe-verified `IUDBEDR` built in; additional codes
+must be operator-declared in the source's `series` config, the plugin
+never guesses), and a declared boundary-tested century pivot for
+two-digit years (Bank Rate history reaches 1694; Python's `%y` pivot would
+read `57` as 2057). Tests parse the **real captured table bytes** from
+this probe (19 tests: registration, provenance, drift paths, pivot
+boundary), and one live smoke through the plugin parsed 63 recent rows and
+a January-2024 window of 22 business days at 5.25. Caching note: the
+platform's per-source sync scheduler provides the cadence; the plugin adds
+no private cache, so nothing can serve stale bytes silently. Action 3
+(PRA probe for bank-level exposures) and action 4 (licence) remain open.
 
 *Probe discipline: every status code, redirect and value above was
 observed on 2026-09-17; nothing is inferred from documentation alone.*
