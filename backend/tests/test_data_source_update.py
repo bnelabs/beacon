@@ -40,8 +40,14 @@ if TEST_DB_PATH.exists():
 # overwriting DATABASE_URL here would not move any session, it would only
 # leave a stale value in os.environ for later modules that read it at
 # import time (test_pipeline_integration reloads backend.database against
-# whatever the environment says). Standalone runs of this file still get a
-# dedicated database.
+# whatever the environment says).
+#
+# Note what these lines do NOT do: conftest.py pins USE_SQLITE=true before
+# any module import, and backend.database under that flag ignores
+# DATABASE_URL entirely and binds the shared ``./beacon.db`` (which conftest
+# deletes at session start). So TEST_DB_PATH above is never opened, in
+# suite runs *and* standalone runs alike; it is kept only so the stale-file
+# cleanup keeps working for databases left behind by older revisions.
 os.environ.setdefault("USE_SQLITE", "true")
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{TEST_DB_PATH}")
 

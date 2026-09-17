@@ -16,20 +16,15 @@ never silently change are asserted here:
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
-os.environ.setdefault(
-    "DATABASE_URL",
-    f"sqlite:///{Path(__file__).resolve().parent / 'test_sync_scheduler.sqlite3'}",
-)
-
-# A leftover database from a crashed run would fail the unique-name inserts
-# below for reasons that have nothing to do with the scheduler.
-(Path(__file__).resolve().parent / "test_sync_scheduler.sqlite3").unlink(missing_ok=True)
+# No private DATABASE_URL here: conftest.py pins USE_SQLITE=true suite-wide,
+# and backend.database under that flag ignores DATABASE_URL and binds the
+# shared on-disk ``./beacon.db`` -- which conftest also deletes at session
+# start, so every run begins cold. Isolation inside a run comes from the
+# fixtures below, not from a private file that would never be opened.
 
 from fastapi.testclient import TestClient  # noqa: E402
 

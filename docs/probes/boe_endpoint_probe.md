@@ -1,5 +1,11 @@
 # Bank of England Endpoint Probe
 
+> **Status: planned, not executed.** This document is the probe methodology
+> and decision criteria. No probe has been run yet, so it records no
+> findings — every response code and outcome below is *expected*, not
+> *observed*. When the probe runs, its results get appended here with the
+> date and the raw responses, or this stays a plan and says so.
+
 ## Purpose
 Phase 5 evidence-first external: probe the Bank of England (BoE) API endpoint to assess feasibility as a data source for UK banking sector exposures and systemic risk indicators.
 
@@ -69,8 +75,8 @@ Based on findings, determine:
 
 ## Documentation Updates
 Upon completion:
-1. Add findings to `/docs/data-sources.md`
-2. Update plugin registry if integration proceeds
+1. Record findings in this file (there is no `docs/data-sources.md` today; create one only if the findings justify it)
+2. Update the plugin registry (`backend/plugins/`) if integration proceeds
 3. Note any API keys in deployment documentation
 
 ## Timeline
@@ -79,4 +85,4 @@ Upon completion:
 - Plugin implementation (if green): 1-2 days
 
 ---
-*Phase 5 deliverable — evidence before commitment*
+*Phase 5 deliverable — the methodology; the evidence comes when the probe runs*

@@ -4,10 +4,10 @@
 Phase 5/6 parked feature: Temporal Graph Neural Network for dynamic systemic risk propagation modeling.
 
 ## Prerequisite Now Available
-**PIT (Point-in-Time) exposure vintages** — the platform now holds exposure snapshots with:
-- Timestamped interbank liability matrices
-- Historical exposure networks per prediction cycle
-- Versioned balance sheet data in prediction store
+**PIT (Point-in-Time) exposure vintages** — the *machinery* now exists:
+- `backend.services.bilateral_exposure_store` persists uploaded bilateral matrices as Parquet + JSON manifest, one vintage per upload (`as_of`), with duplicate aggregation reported rather than hidden
+- As-of queries (`load_as_of`) never substitute a current matrix for one that did not exist yet, behind the network graph
+- Caveat the plan must respect: the store is fed **only** by operator uploads (`POST /api/v1/network/exposures`) and maximum-entropy estimates (`POST /api/v1/network/estimate`). Nothing writes a vintage per prediction cycle, and no balance sheets are versioned anywhere; a deployment that has not been uploading matrices has an empty store and therefore no temporal graph to learn from
 
 ## Temporal GNN Architecture Proposal
 
@@ -60,9 +60,9 @@ exposure_vintages = [
 ## Implementation Requirements
 
 ### Current State ✅
-- PIT exposure vintages stored
-- Prediction engine produces timestamped snapshots
-- Graph utilities exist (`backend.modules.risk.clearing`)
+- PIT exposure vintages can be stored and queried as-of (store starts empty; it holds only what operators have uploaded or estimated)
+- Prediction job results are persisted with timestamps in `jobs.result` (per-source rows, regime-labelled) — not a queryable prediction store
+- The multiplex layer + Eisenberg–Noe clearing engine exist (`backend.modules.engine.multiplex`, `backend.modules.risk.clearing`)
 
 ### Missing Pieces ⚠️
 1. **Temporal batch loader**: Sequences of (A_t, X_t, y_t) tuples
