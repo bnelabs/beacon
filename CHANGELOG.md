@@ -10,6 +10,25 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **The v2 early-warning run executed — a better-powered NO, published
+  unchanged.** Under tag `prereg-early-warning-v2`, one clean run (zero
+  retries, zero infrastructure defects), on licence-screened hashed data
+  fetched through the keyed FRED transport: all three testable indicators
+  evaluated, **0 of 3 passed** the criteria frozen since before v1, family
+  claim **NO** — the README gate did not move. The numbers are now
+  informative rather than merely honest: `FRED_T10Y2Y` reproduced v1's
+  result byte-identically (same hashes, seed and code path — the frozen
+  pipeline is reproducible); `FRED_T10Y3M` validated the literature-backed
+  selection (AUC 0.663 vs 0.555, 5 of 7 declared episodes flagged vs 2, and
+  the run's only lift-criterion pass — strictly above persistence AND AR(1)
+  on both AUC and AP); `FRED_VIXCLS` discriminates its own stress episodes
+  strongly (AUC 0.926, AP ≈ 9× base rate, all permutation p=0.001 and
+  Holm-surviving) with the endogenous-labels caveat recorded. What binds
+  every indicator is the false-alarm criterion (8.9–10.3 per quiet year vs
+  the frozen ≤4): the q95 alarm quantile fires on ~5% of days by
+  construction — a knob/criterion coherence fact for v3's *pre-declared*
+  design, never a post-hoc tuning target. Report + execution log:
+  `docs/prereg/runs/early_warning_v2/`.
 - **Early-warning pre-registration v2 — same frozen criteria, better-powered
   family.** v1's published NO carried its own diagnosis (one testable
   indicator; the registry skews to operator-reported and low-frequency
