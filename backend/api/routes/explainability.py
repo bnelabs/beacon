@@ -86,11 +86,22 @@ def _uncertainty_block(result: dict) -> dict:
     keeps this card honest in both directions -- it no longer claims bounds
     are universally null (they are not, when a source's residual history
     supports split conformal), and it does not claim calibrated intervals
-    for sources whose method says otherwise.
+    for sources whose method says otherwise. ``uncertainty_decomposition``,
+    when present, carries the aleatoric/epistemic state of the run (deep
+    ensemble, or single-model where the split is not measurable); it is
+    attached verbatim rather than summarised, so the card cannot drift from
+    the engine's own record.
     """
+    decomposition = result.get("uncertainty_decomposition")
+    if not isinstance(decomposition, dict) or not decomposition:
+        decomposition = None
+
     methods = result.get("confidence_methods")
     if not isinstance(methods, dict) or not methods:
-        return dict(_UNCERTAINTY_NOT_RECORDED)
+        block = dict(_UNCERTAINTY_NOT_RECORDED)
+        if decomposition is not None:
+            block["decomposition"] = decomposition
+        return block
 
     conformal = {m: c for m, c in methods.items() if str(m).startswith("split_conformal")}
     status = "split_conformal_per_source" if conformal else "not_calibrated"
@@ -103,12 +114,15 @@ def _uncertainty_block(result: dict) -> dict:
         "exists: standardized scores are not banded into risk-level "
         "percentages."
     )
-    return {
+    block = {
         "status": status,
         "confidence_methods": methods,
         "reason": reason,
         "roadmap": _UNCERTAINTY_ROADMAP,
     }
+    if decomposition is not None:
+        block["decomposition"] = decomposition
+    return block
 
 
 @router.get("/{job_id}/explanation")

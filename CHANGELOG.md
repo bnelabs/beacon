@@ -10,6 +10,33 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **Aleatoric/epistemic decomposition is wired — the census's oldest `wire`
+  disposition.** A training job with `ensemble_size >= 2` (single-source path)
+  now trains that many independently seeded members via
+  `trainer.train_ensemble` — each in its own directory, member 0 promoted to
+  the canonical `best_model.pt`/`predictions.csv`/`training_history.json` so
+  every existing consumer reads an ensembled job exactly like a single-model
+  one, members 1..M-1 saved beside it as `ensemble_member_{k}.pt`. The
+  prediction engine discovers the members at load and, per source, decomposes
+  the final window's variance on exactly the held-out slice the
+  split-conformal interval calibrates on: aleatoric from the members'
+  residuals, the epistemic ceiling from their disagreement across the slice
+  (`EpistemicReference`, level 0.99). An assessment that finds the members
+  disagreeing more than the ceiling — the model extrapolating — or model
+  ignorance dominating the variance **refuses the source**: score,
+  prediction and interval withheld as null/NaN, the reasons recorded on the
+  row, `confidence_method` set to `refused_uncertainty_assessment`, and the
+  refusal counted in the executive summary and the job result's
+  `uncertainty_decomposition` (which the explainability card attaches
+  verbatim). A single-checkpoint model reports the split **not measurable**
+  rather than a fabricated zero, because a one-member epistemic term is
+  identically zero by construction and a reliability flag on that zero would
+  understate ignorance — the module's own stated failure direction. The
+  multi-scale trainer does not train independent members yet; an
+  `ensemble_size` request it cannot honour is recorded in the job result with
+  a note instead of being silently dropped. Point scores stay the primary
+  frozen model's: the decomposition informs the reliability verdict, it does
+  not quietly swap in an ensemble mean.
 - **Tracked build artifacts now fail the fast gate.** `backend-ci.yml` gains
   a milliseconds-long index check (`git ls-files` against
   `__pycache__`/`.pyc`/`beacon.db`/`dist`/`node_modules` patterns): the
@@ -17,6 +44,14 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   this prevents the task-snapshot class of leak at the index level.
 
 ### Fixed
+- **Two more stale "not wired" claims corrected** (found by the whole-repo
+  audit, same drift class as the transparency card): the README's Storage
+  section said nothing writes `RiskScorePoint`/`ModelMetricPoint`, but
+  prediction jobs persist risk scores (`persist_risk_scores`) and backtest
+  jobs persist metrics (`persist_model_metrics`); and the prediction
+  engine's key-findings line claimed "calibrated prediction intervals are
+  not reported" while every supported row carries a split-conformal
+  interval. Both now state what the code does.
 - **The transparency card reports what the job actually carries.** The
   explainability endpoint's uncertainty block asserted a blanket
   `not_calibrated` — "the confidence fields are null" — for every job, but

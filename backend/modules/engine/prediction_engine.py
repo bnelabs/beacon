@@ -43,7 +43,7 @@ import torch
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 import logging
 from pathlib import Path
 import json
@@ -86,6 +86,12 @@ class PredictionResult:
 
     # User-friendly summary
     executive_summary: str
+
+    # Aleatoric/epistemic decomposition state for this run (deep ensemble when
+    # members exist beside the checkpoint; single-model otherwise, where the
+    # split is reported not measurable rather than approximated). Defaulted so
+    # existing constructor calls and the bank-level path are unaffected.
+    uncertainty_summary: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -143,6 +149,29 @@ class RiskSeriesResult:
         }
 
 
+class _EnsembleMemberAdapter:
+    """Adapt a frozen checkpoint to the ``predict(X)`` member interface that
+    :class:`~backend.modules.engine.uncertainty.DeepEnsemble` requires.
+
+    Windows are scored through the engine's own batched forward pass, with the
+    same source id and in the same standardised space the point score uses, so
+    members are compared with each other -- and with the primary model -- on
+    exactly the inputs production feeds the primary. No member gets a private
+    scoring path that could drift from the one being decomposed.
+    """
+
+    def __init__(self, engine: "RealPredictionEngine", model: torch.nn.Module, source_id: int):
+        self._engine = engine
+        self._model = model
+        self._source_id = int(source_id)
+
+    def predict(self, X: Any) -> np.ndarray:  # noqa: N803 - harness duck type
+        windows = np.asarray(X, dtype=np.float32)
+        if windows.ndim == 1:
+            windows = windows.reshape(1, -1)
+        return self._engine._score_windows(windows, self._source_id, 256, model=self._model)
+
+
 class RealPredictionEngine:
     """
     Prediction engine backed by a trained model.
@@ -194,6 +223,14 @@ class RealPredictionEngine:
         # Load trained model
         self.model = self._load_model(model_path)
         self.model.eval()
+
+        # Ensemble members for the aleatoric/epistemic decomposition
+        # (modules/engine/uncertainty.py). Present only when the training job
+        # declared ensemble_size >= 2; with a single frozen checkpoint the
+        # epistemic term is identically zero by construction, so the
+        # decomposition reports itself not measurable rather than manufacturing
+        # a number. See _uncertainty_for_source.
+        self.ensemble_members: List[torch.nn.Module] = self._load_ensemble_members()
 
         # BankRiskAnalyzer scores institutions directly from the model and runs
         # clearing on supplied exposures. There is no separate explainer: local
@@ -387,9 +424,6 @@ class RealPredictionEngine:
         """Load trained PyTorch model."""
         checkpoint = safe_torch_load(model_path, map_location=self.device)
 
-        # Recreate model architecture
-        from backend.modules.engine.multi_scale_trainer import MultiScaleTemporalAttentionModel
-
         # Get config from checkpoint
         config = checkpoint.get('config', {})
         self.model_config = config
@@ -398,7 +432,18 @@ class RealPredictionEngine:
         self.sources = checkpoint.get('sources', []) or []
         self.source_to_id = {src: idx for idx, src in enumerate(self.sources)}
 
-        sources = checkpoint.get('sources', [])
+        return self._build_model_from_checkpoint(checkpoint)
+
+    def _build_model_from_checkpoint(self, checkpoint: Dict[str, Any]) -> torch.nn.Module:
+        """Reconstruct the architecture a checkpoint dict describes and load it.
+
+        Shared by the primary checkpoint and any ensemble members beside it,
+        so a member is loaded through exactly the path the primary is.
+        """
+        from backend.modules.engine.multi_scale_trainer import MultiScaleTemporalAttentionModel
+
+        config = checkpoint.get('config', {})
+        sources = checkpoint.get('sources', []) or self.sources or []
         num_sources = max(len(sources), 1)
 
         model = MultiScaleTemporalAttentionModel(
@@ -414,6 +459,35 @@ class RealPredictionEngine:
         model.to(self.device)
 
         return model
+
+    def _load_ensemble_members(self) -> List[torch.nn.Module]:
+        """Load ``ensemble_member_*.pt`` checkpoints beside the primary model.
+
+        Written by :func:`backend.modules.engine.trainer.train_ensemble` when a
+        training job declares ``ensemble_size >= 2``. Members exist solely for
+        the aleatoric/epistemic decomposition
+        (:mod:`backend.modules.engine.uncertainty`): the point score stays the
+        primary frozen model's, and a member that fails to load shrinks the
+        ensemble loudly (logged, and the decomposition reports the real member
+        count) rather than silently pretending to a size it does not have.
+        """
+        members: List[torch.nn.Module] = []
+        directory = Path(self.model_path).parent
+        for path in sorted(directory.glob('ensemble_member_*.pt')):
+            try:
+                checkpoint = safe_torch_load(str(path), map_location=self.device)
+                member = self._build_model_from_checkpoint(checkpoint)
+                member.eval()
+                members.append(member)
+            except Exception as exc:  # noqa: BLE001 - a broken member shrinks the ensemble, it does not kill the prediction
+                logger.error("Skipping unloadable ensemble member %s: %s", path, exc)
+        if members:
+            logger.info(
+                "Loaded %d ensemble member(s) beside %s; the uncertainty "
+                "decomposition is measurable for this checkpoint",
+                len(members), self.model_path,
+            )
+        return members
 
     @property
     def quality_attestation(self) -> Optional[QualityAttestation]:
@@ -701,12 +775,22 @@ class RealPredictionEngine:
         )
 
     def _score_windows(
-        self, windows: np.ndarray, source_id: int, batch_size: int
+        self,
+        windows: np.ndarray,
+        source_id: int,
+        batch_size: int,
+        model: Optional[torch.nn.Module] = None,
     ) -> np.ndarray:
-        """Run the frozen model over pre-normalised windows, in batches."""
+        """Run a frozen model over pre-normalised windows, in batches.
+
+        ``model`` defaults to the primary checkpoint; ensemble members are
+        scored through the identical path so the decomposition compares
+        members on exactly the windows and normalisation the point score uses.
+        """
+        active = model if model is not None else self.model
         total = int(windows.shape[0])
         scores = np.empty(total, dtype=float)
-        self.model.eval()
+        active.eval()
         with torch.no_grad():
             for start in range(0, total, batch_size):
                 chunk = np.asarray(windows[start:start + batch_size], dtype=np.float32)
@@ -717,7 +801,7 @@ class RealPredictionEngine:
                     dtype=torch.long,
                     device=self.device,
                 )
-                outputs = self.model(inputs, source_ids)
+                outputs = active(inputs, source_ids)
                 flat = outputs.detach().cpu().numpy().astype(float).reshape(chunk.shape[0], -1)
                 scores[start:start + chunk.shape[0]] = flat[:, 0]
         return scores
@@ -769,8 +853,15 @@ class RealPredictionEngine:
             else:
                 conf = (None, None)
 
+            # Aleatoric/epistemic decomposition on the same held-out evidence
+            # the conformal interval uses. A single-checkpoint engine gets a
+            # not-measurable status; an ensemble whose members disagree more
+            # on this window than they ever did on the calibration slice gets
+            # a refusal, applied in pass 3.
+            uncertainty = self._uncertainty_for_source(sequence, values, stats, source_id)
+
             scored_rows.append(
-                (source_code, denorm_prediction, normalized_prediction, interval_method, conf)
+                (source_code, denorm_prediction, normalized_prediction, interval_method, conf, uncertainty)
             )
             regime_items.append((source_code, values, stats))
 
@@ -780,14 +871,26 @@ class RealPredictionEngine:
         regime_labels = self._regime_labels_batch(regime_items)
 
         # Pass 3: assemble.
+        uncertainty_records: Dict[str, Dict[str, Any]] = {}
         for (
             source_code,
             denorm_prediction,
             normalized_prediction,
             interval_method,
             conf,
+            uncertainty,
         ) in scored_rows:
             regime, regime_method = regime_labels[source_code]
+            uncertainty_records[source_code] = uncertainty
+            if uncertainty.get('status') == 'refused':
+                # An unreliable prediction is absence, not a number: the score,
+                # the point prediction and the interval are all withheld, and
+                # the row says why. Downstream consumers (risk-score
+                # persistence, summary statistics) skip null scores by design.
+                denorm_prediction = float('nan')
+                normalized_prediction = float('nan')
+                conf = (None, None)
+                interval_method = 'refused_uncertainty_assessment'
             predictions_list.append({
                 'source': source_code,
                 'prediction': denorm_prediction,
@@ -802,6 +905,17 @@ class RealPredictionEngine:
                 'confidence_method': interval_method,
                 'regime': regime,
                 'regime_method': regime_method,
+                # Uncertainty decomposition (modules/engine/uncertainty.py):
+                # measured only when independently trained ensemble members
+                # exist beside the checkpoint; otherwise the status says the
+                # split is not measurable and the variance fields are absent.
+                'uncertainty_status': uncertainty.get('status'),
+                'uncertainty_reasons': (
+                    "; ".join(uncertainty.get('reasons') or []) or None
+                ),
+                'aleatoric_var': uncertainty.get('aleatoric'),
+                'epistemic_var': uncertainty.get('epistemic'),
+                'epistemic_share': uncertainty.get('epistemic_share'),
             })
             confidence_intervals[source_code] = conf
 
@@ -814,6 +928,49 @@ class RealPredictionEngine:
             min_risk = float(predictions_df['risk_score'].min())
         else:
             avg_risk = max_risk = min_risk = 0.0
+
+        # A refused source carries no score (NaN), and pandas skips NaN in
+        # these reductions -- so the averages describe the assessed sources.
+        # When every source was refused there is no average to print, and
+        # printing 0.000 would be a number the run did not produce.
+        def _fmt_score(value: float) -> str:
+            return f"{value:+.3f}" if np.isfinite(value) else "n/a (no source carried a score)"
+
+        n_refused = sum(
+            1 for record in uncertainty_records.values() if record.get('status') == 'refused'
+        )
+        refused_sources = sorted(
+            source for source, record in uncertainty_records.items()
+            if record.get('status') == 'refused'
+        )
+        statuses: Dict[str, int] = {}
+        for record in uncertainty_records.values():
+            key = str(record.get('status'))
+            statuses[key] = statuses.get(key, 0) + 1
+        uncertainty_summary = {
+            'mode': 'deep_ensemble' if self.ensemble_members else 'single_model',
+            'n_members': len(self.ensemble_members) + 1,
+            'statuses': statuses,
+            'refused_sources': refused_sources,
+        }
+        if self.ensemble_members:
+            uncertainty_line = (
+                f"deep ensemble, {len(self.ensemble_members) + 1} members: "
+                f"{statuses.get('assessed', 0)} source(s) assessed reliable, "
+                f"{n_refused} refused. A refusal means the members disagreed on "
+                "this window more than they ever did on the calibration slice "
+                "(epistemic spike -- the model is extrapolating), or model "
+                "ignorance dominates the variance; the withheld score is "
+                "absence, not a number. Per-source variances are in the "
+                "prediction rows."
+            )
+        else:
+            uncertainty_line = (
+                "not measurable with the single frozen checkpoint this engine "
+                "loaded: the aleatoric/epistemic split needs independently "
+                "trained members (train with ensemble_size >= 2). No "
+                "decomposition is approximated in its place."
+            )
 
         # What the summary says about intervals must match what the rows
         # carry: count the per-source confidence methods actually recorded
@@ -829,9 +986,10 @@ class RealPredictionEngine:
         executive_summary = f"""
 LIQUIDITY STRESS FORECAST SUMMARY
 
-Overall model score: {avg_risk:+.3f} (standardized units, uncalibrated)
-Maximum model score: {max_risk:+.3f} (standardized units, uncalibrated)
+Overall model score: {_fmt_score(avg_risk)} (standardized units, uncalibrated)
+Maximum model score: {_fmt_score(max_risk)} (standardized units, uncalibrated)
 Data Sources Analyzed: {len(predictions_df)}
+Sources refused by uncertainty assessment: {n_refused}{f" ({', '.join(refused_sources)})" if refused_sources else ""}
 
 The model score is a one-step-ahead prediction of each indicator's
 standardized next value. It is not a probability, it is not bounded to
@@ -850,6 +1008,9 @@ confidence_method; no interval is invented or zero-width.
 Local feature attribution is not reported: SubgraphX requires a liability
 network and a game value this payload does not carry, and nothing is
 approximated in its place.
+
+UNCERTAINTY DECOMPOSITION:
+{uncertainty_line}
 """
 
         return PredictionResult(
@@ -869,7 +1030,8 @@ approximated in its place.
                 'max_prediction_value': float(predictions_df['prediction'].max()) if not predictions_df.empty else 0.0,
                 'min_prediction_value': float(predictions_df['prediction'].min()) if not predictions_df.empty else 0.0
             },
-            executive_summary=executive_summary
+            executive_summary=executive_summary,
+            uncertainty_summary=uncertainty_summary
         )
 
     def _predict_multi_bank(
@@ -1137,6 +1299,44 @@ approximated in its place.
 
         return results
 
+    def _calibration_windows(
+        self,
+        values: np.ndarray,
+        stats: Dict[str, float],
+        calibration_window: int = 120,
+        minimum_window: int = 30,
+    ) -> Optional[tuple]:
+        """Held-out rolling windows and their next-value targets, standardised.
+
+        The shared evidence slice for both per-source calibrations: the
+        split-conformal interval fits its residual quantile on it, and the
+        ensemble decomposition (when members exist) calibrates its aleatoric
+        term and builds its epistemic reference on exactly the same windows.
+        Returns ``(cal_windows, residual_targets)`` or ``None`` when the
+        payload cannot support a calibration window -- absence, never a
+        substitute slice.
+        """
+        finite = values[np.isfinite(values)]
+        mean = float(stats.get('mean', finite.mean() if finite.size else 0.0))
+        std = float(stats.get('std', finite.std() if finite.size else 1.0)) or 1.0
+        normalized = (values - mean) / std
+        normalized = np.where(np.isfinite(normalized), normalized, 0.0)
+
+        sequence_length = int(self.sequence_length)
+        n_windows = normalized.size - sequence_length
+        if n_windows < minimum_window + 1:
+            return None
+
+        holdout = min(calibration_window, n_windows - 1)
+        windows = np.lib.stride_tricks.sliding_window_view(normalized, sequence_length)
+        first = n_windows - holdout
+        cal_windows = windows[first:n_windows]
+        # target for window i (ending at i+L-1) is normalized[i+L]
+        residual_targets = normalized[first + sequence_length: first + sequence_length + cal_windows.shape[0]]
+        if residual_targets.size < minimum_window:
+            return None
+        return cal_windows, residual_targets
+
     def _conformal_interval(
         self,
         values: np.ndarray,
@@ -1156,27 +1356,14 @@ approximated in its place.
         space and the method string, or (None, None, reason) when the payload
         cannot support a calibration window.
         """
-        finite = values[np.isfinite(values)]
-        mean = float(stats.get('mean', finite.mean() if finite.size else 0.0))
-        std = float(stats.get('std', finite.std() if finite.size else 1.0)) or 1.0
-        normalized = (values - mean) / std
-        normalized = np.where(np.isfinite(normalized), normalized, 0.0)
-
-        sequence_length = int(self.sequence_length)
-        n_windows = normalized.size - sequence_length
-        if n_windows < minimum_window + 1:
+        calibration = self._calibration_windows(
+            values, stats, calibration_window=calibration_window, minimum_window=minimum_window
+        )
+        if calibration is None:
             return None, None, "insufficient_history_for_calibration"
+        cal_windows, residual_targets = calibration
 
-        holdout = min(calibration_window, n_windows - 1)
-        windows = np.lib.stride_tricks.sliding_window_view(normalized, sequence_length)
-        first = n_windows - holdout
-        cal_windows = windows[first:n_windows]
         scores = self._score_windows(cal_windows, source_id, 256)
-        # target for window i (ending at i+L-1) is normalized[i+L]
-        idx = np.arange(first, first + scores.size)
-        residual_targets = normalized[idx + sequence_length]
-        if residual_targets.size < minimum_window:
-            return None, None, "insufficient_history_for_calibration"
 
         from backend.modules.engine.conformal import SplitConformalCalibrator
 
@@ -1184,6 +1371,100 @@ approximated in its place.
         calibrator.fit(residual_targets, scores[: residual_targets.size])
         interval = calibrator.interval(float(final_score))
         return interval.lower, interval.upper, f"split_conformal_alpha_{alpha}"
+
+    def _uncertainty_for_source(
+        self,
+        sequence: Any,
+        values: np.ndarray,
+        stats: Dict[str, float],
+        source_id: int,
+    ) -> Dict[str, Any]:
+        """Aleatoric/epistemic decomposition for one source's point score.
+
+        Computable only with two or more independently trained members
+        (``ensemble_member_*.pt`` beside the checkpoint, written by
+        :func:`backend.modules.engine.trainer.train_ensemble`). A single
+        frozen model's epistemic term is identically zero by construction,
+        and a reliability flag built on that zero would understate model
+        ignorance -- the wrong direction to be wrong in (see
+        :mod:`backend.modules.engine.uncertainty`). So a single checkpoint
+        reports the decomposition *not measurable* rather than approximated.
+
+        When members exist, the decomposition is calibrated on exactly the
+        held-out windows the split-conformal interval uses
+        (:meth:`_calibration_windows`): aleatoric variance from the members'
+        residuals on that slice, the epistemic reference from the members'
+        disagreement across it. The final window is then decomposed and
+        assessed; ``assess_uncertainty`` decides reliability (epistemic spike
+        over the calibrated ceiling, optional epistemic-share bound, and --
+        because a gate that cannot measure should not certify -- a missing
+        reference counts as a failure). A refused source's prediction is
+        treated downstream as absence, never as a number.
+
+        The point score itself stays the primary frozen model's: the
+        decomposition describes the ensemble's spread around that score and
+        drives the reliability verdict, but it does not silently replace the
+        contracted prediction with an ensemble mean.
+        """
+        if not self.ensemble_members:
+            return {
+                "status": "not_measurable_single_model",
+                "n_members": 1,
+                "reason": (
+                    "one frozen checkpoint: the epistemic term of the law of "
+                    "total variance is identically zero by construction, so no "
+                    "reliability verdict is derived from it. Train with "
+                    "ensemble_size >= 2 (trainer.train_ensemble) to enable the "
+                    "decomposition."
+                ),
+            }
+
+        calibration = self._calibration_windows(values, stats)
+        if calibration is None:
+            return {
+                "status": "insufficient_history_for_decomposition",
+                "n_members": len(self.ensemble_members) + 1,
+            }
+        cal_windows, cal_targets = calibration
+
+        from backend.modules.engine.uncertainty import (
+            DeepEnsemble,
+            EpistemicReference,
+            assess_uncertainty,
+        )
+
+        members = [
+            _EnsembleMemberAdapter(self, model, source_id)
+            for model in (self.model, *self.ensemble_members)
+        ]
+        ensemble = DeepEnsemble(members)
+        ensemble.calibrate_residual_variance(cal_windows, cal_targets)
+        reference = EpistemicReference(
+            [d.epistemic for d in ensemble.decompose(cal_windows)],
+            level=float(self.config.get('epistemic_reference_level', 0.99)),
+        )
+        final_window = np.asarray(
+            sequence.detach().cpu().numpy() if hasattr(sequence, "detach") else sequence,
+            dtype=float,
+        ).reshape(-1)
+        decomposition = ensemble.decompose_one(final_window)
+        assessment = assess_uncertainty(
+            decomposition,
+            reference,
+            require_epistemic_reference=True,
+            max_epistemic_share=self.config.get('max_epistemic_share'),
+        )
+
+        record = decomposition.to_dict()
+        record.update({
+            "status": "assessed" if assessment.reliable else "refused",
+            "reliable": bool(assessment.reliable),
+            "epistemic_spiked": bool(assessment.epistemic_spiked),
+            "reasons": [str(reason) for reason in assessment.reasons],
+            "n_calibration_windows": int(cal_windows.shape[0]),
+            "epistemic_reference_threshold": float(reference.threshold),
+        })
+        return record
 
     def _generate_key_findings(self, predictions_df: pd.DataFrame) -> str:
         """Summarise the scored sources without inventing drivers.
@@ -1216,8 +1497,9 @@ approximated in its place.
             findings.append("- No valid risk predictions available")
 
         findings.append(
-            "- Per-feature attribution and calibrated prediction intervals are not "
-            "reported (see the module docstring)"
+            "- Per-feature attribution is not reported; prediction intervals "
+            "are split-conformal per source where the payload supports a "
+            "calibration window (see each row's confidence_method)"
         )
         return "\n".join(findings)
 
