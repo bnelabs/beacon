@@ -1,0 +1,124 @@
+# Pre-registered early-warning evaluation — protocol v3 (FROZEN)
+#
+# Machine-readable half of docs/prereg/early_warning_v3.md. Committed and
+# git-tagged `prereg-early-warning-v3` BEFORE the evaluation runs. After the
+# tag, any change requires protocol v4 plus a CHANGELOG entry. Runner:
+# scripts/run_preregistered_eval.py --protocol v3. On disagreement between
+# this file and the runner, this file and the tag win.
+
+protocol: early_warning_v3
+supersedes: early_warning_v2
+status: frozen-pending-run
+
+# --- WHAT CHANGED FROM v2 (derived from PUBLISHED v1/v2 facts only) --------
+# v2's report showed the false-alarm criterion binding every indicator
+# (~9-10 FA/quiet-year vs ceiling 4) at the q95 alarm point. The arithmetic,
+# from published numbers: FA/yr = alarms/yr * (1 - precision); q95 alarms
+# fire on ~5% of ~252 days (~12.6/yr) and measured precision at that
+# operating point was 23-29% (even for the AUC-0.93 indicator), giving
+# ~9-10 FA/qy -- unreachable for ANY indicator, however good, at that
+# operating point. v3 therefore declares a coherent alarm point, and adds
+# the scorer the crisis-prediction literature actually uses. NOTHING ELSE
+# CHANGES: criteria thresholds, labelling, windows, model config, seeds,
+# baselines, permutation test, Holm level, minimum family, single-run rule
+# are identical to v1/v2 by shared code, not by promise.
+# ---------------------------------------------------------------------------
+
+# --- windows (identical to v1/v2) ---
+train_end: "2006-12-31"
+eval_start: "2007-01-01"
+eval_end: "2024-12-31"
+
+# --- labelling (identical to v1/v2) ---
+labelling:
+  quantile: 0.95
+  horizon: 21
+  min_duration: 5
+  decay: 0.5
+  threshold_span: full evaluation window (declared historical mode)
+  direction: per-indicator, from backend/modules/data/semantics.py
+
+# --- alarm rule (CHANGED in v3, declared arithmetic above) -----------------
+alarm:
+  score_quantile: 0.98          # ~2% of days ~ 5 alarms/yr; ceiling 4 FA/qy
+                                # then requires precision >= ~20% at the
+                                # operating point -- measured 23-29% at the
+                                # EASIER q95 point, so demanding, not soft
+  applies_to: model scorers AND both baselines, identically, on the same grid
+  max_lead: 42
+  declared_risk: rarer alarms can shorten median lead; the >=10 business-day
+    criterion stays frozen and may bind (VIX measured 11.5d at q95). Accepted
+    before the run, not adjusted after.
+
+# --- scorers (v3 declares two; both frozen, both graded identically) -------
+scorers:
+  tan_frozen:
+    what: the v1/v2 scorer -- tiny Temporal Attention Network, config and
+      seed 11 identical, trained on <=2006 only, out-of-sample per-timestep
+      risk series via predict_risk_series, sign-adjusted by registry
+      direction, joined via row_offset
+  hazard_logit:
+    what: the crisis-literature EWS architecture -- P(episode onset within
+      horizon | indicator state), not next-level forecasting
+    features (2, declared): direction-signed standardized level z_t; and
+      z_t - z_{t-63} (63 business days ~ one quarter, clamped at series
+      start; past information only). Non-finite z imputed at 0 (the
+      standardized training mean -- the engine's documented gap convention).
+    fit labels: onsets within the next 21 steps, from label_events on the
+      TRAIN span with the train span as threshold span (labels never cross
+      into the evaluation span; features never see labels)
+    estimator: sklearn LogisticRegression at library defaults (L2, C=1.0,
+      lbfgs, no class weighting), fitted once on <=2006. No knob is exposed,
+      so none can be turned after seeing results.
+    score: decision_function on the evaluation grid (criteria are rank-based;
+      nothing claims these are calibrated probabilities)
+    absence rule: no onsets in the training span -> scorer skipped as
+      declared absence for that indicator, never zero-signal
+
+# --- baselines (identical to v1/v2, at the v3 alarm point) -----------------
+baselines: [persistence, ar1]
+
+# --- criteria (IDENTICAL to v1/v2 -- frozen since before v1's run) ---------
+criteria:
+  min_median_lead_business_days: 10
+  max_false_alarms_per_quiet_year: 4
+  beat_baselines: AUC and AP strictly above BOTH persistence and AR(1)
+  ap_above_base_rate: true
+  significance: permutation p (1000 shuffles, seed 20260917) surviving
+    Holm-Bonferroni at alpha 0.05
+
+# --- multiplicity (declared) -----------------------------------------------
+verdict_rules:
+  holm_pool: ALL scorer-indicator pairs the protocol runs (two scorers
+    double the hypotheses; pooling only one would understate multiplicity)
+  indicator_pass: ANY declared scorer passes all four criteria with a
+    Holm-surviving AP (declared before the run, both scorers frozen)
+  family_claim: ">= half of tested indicators pass AND >= 3 testable (identical to v1/v2)"
+
+# --- family (IDENTICAL dispositions to v2; rules re-derive every skip on a
+# --- fresh fetch into data/prereg/v3/ -- nothing skipped from memory) ------
+family: same as configs/event_eval_v2.yaml (candidates incl. T10Y3M/VIXCLS
+  with their pre-fetch rationales; RRPONTSYD owner-excluded; six
+  operator-reported codes excluded)
+
+# --- skip rules (identical to v2, incl. the licence screen) ----------------
+skip_rules: same as configs/event_eval_v2.yaml
+
+# --- transport (identical to v2) -------------------------------------------
+transport:
+  api_key: FRED_API_KEY from the environment; never written to any file;
+    recorded endpoints carry api_key=<redacted>
+  licence_screen: before download; prohibition patterns declared in
+    scripts/run_preregistered_eval.py (LICENCE_PROHIBITION_RE)
+
+# --- run rules (identical, plus the terminal clause) ------------------------
+run_rules:
+  single_run: one evaluation run per tagged protocol; re-runs only for
+    documented pre-metric infrastructure defects, logged with diffs
+  negative_results: published unchanged
+  terminal_clause: v3 is the LAST planned iteration of this line. Pass ->
+    the README claim gate moves, carrying these numbers. Fail -> the
+    early-warning line is parked with a three-run documented record, and
+    the platform's claims rest on what it demonstrably is (governance,
+    scenario laboratory, honest reporting). Either outcome is publishable.
+  execution: in-process (declared deviation, as v1/v2)

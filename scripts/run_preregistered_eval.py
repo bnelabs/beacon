@@ -166,6 +166,9 @@ PROTOCOLS: Dict[str, Dict[str, Any]] = {
         "report_dir": REPO / "docs" / "prereg" / "runs" / "early_warning_v1",
         "keyed": False,
         "licence_screen": False,
+        # Frozen at tag time; never re-derived.
+        "alarm_quantile": 0.95,
+        "scorers": ("tan_frozen",),
     },
     "v2": {
         "name": "early_warning_v2",
@@ -175,6 +178,30 @@ PROTOCOLS: Dict[str, Dict[str, Any]] = {
         "report_dir": REPO / "docs" / "prereg" / "runs" / "early_warning_v2",
         "keyed": True,
         "licence_screen": True,
+        "alarm_quantile": 0.95,
+        "scorers": ("tan_frozen",),
+    },
+    "v3": {
+        "name": "early_warning_v3",
+        "tag": "prereg-early-warning-v3",
+        # Family = v2's, unchanged: the rules re-derive every skip at fetch
+        # time on a fresh, self-contained manifest. v3 changes the alarm
+        # operating point (declared from published v1/v2 arithmetic) and adds
+        # the literature-standard hazard scorer -- nothing else.
+        "family": FAMILY_V2,
+        "data_dir": REPO / "data" / "prereg" / "v3",
+        "report_dir": REPO / "docs" / "prereg" / "runs" / "early_warning_v3",
+        "keyed": True,
+        "licence_screen": True,
+        # Declared arithmetic (published v1/v2 facts only): at q95 alarms fire
+        # on ~5% of days (~12.6/yr) with measured precision ~23-29%, giving
+        # ~9-10 false alarms per quiet year against a ceiling of 4 -- the
+        # criterion was unreachable at that operating point for ANY indicator.
+        # FA/yr = alarms/yr * (1 - precision); at q98 (~2% of days, ~5/yr) the
+        # ceiling of 4 requires precision >= ~20%, about what was measured at
+        # q95 and plausibly better at a rarer point. Demanding, not soft.
+        "alarm_quantile": 0.98,
+        "scorers": ("tan_frozen", "hazard_logit"),
     },
 }
 
@@ -421,6 +448,76 @@ def _permutation_ap_pvalue(labels: np.ndarray, scores: np.ndarray, observed_ap: 
     return (1 + count) / (1 + PERM_ITERATIONS)
 
 
+# Hazard-scorer constants (protocol v3; declared, never tuned)
+HAZARD_LOOKBACK = 63  # business-day gap feature, ~ one quarter
+
+
+def _hazard_logit_scores(
+    train_values: np.ndarray,
+    train_mean: float,
+    train_std: float,
+    direction_sign: float,
+    definition: Any,
+    eval_values: np.ndarray,
+    offsets: np.ndarray,
+) -> Optional[np.ndarray]:
+    """The frozen hazard-logit scorer (protocol v3's second declared scorer).
+
+    The crisis-prediction literature's standard EWS architecture: instead of
+    forecasting the indicator's next *level* (the TAN scorer's task, and a
+    weak proxy for warning), estimate P(a stress episode ONSETS within
+    `horizon` steps | the indicator's current state).
+
+    Everything is declared, nothing tuned:
+
+    * features (2): the direction-signed standardized level ``z_t`` and its
+      ``HAZARD_LOOKBACK``-step change ``z_t - z_{t-lookback}`` (clamped at
+      the series start; past information only). Non-finite ``z`` is imputed
+      at 0 -- the standardized training mean -- matching the engine's
+      documented gap convention in ``_prepare_sequence``;
+    * fit labels: episode onsets within the next ``horizon`` steps, computed
+      by the same labeller on the TRAIN span with the train span as its
+      threshold span -- labels look forward *within training* and never
+      cross into the evaluation span;
+    * estimator: ``sklearn.linear_model.LogisticRegression`` at library
+      defaults (L2, C=1.0, lbfgs, no class weighting), fitted once on the
+      training span -- the same frozen-small-model discipline as the TAN.
+      No knob is exposed, so none can be turned after seeing results;
+    * score: ``decision_function`` over the evaluation grid. The criteria
+      are rank-based (AUC, AP, quantile alarms), so the monotone logit
+      scale is the honest score; nothing claims these are calibrated
+      probabilities.
+
+    Returns ``None`` when the training span contains no onsets at all --
+    nothing to learn from is declared absence, not zero signal.
+    """
+    from sklearn.linear_model import LogisticRegression
+
+    from backend.modules.data.event_labeller import label_events
+
+    def _features(values: np.ndarray, idx: np.ndarray) -> np.ndarray:
+        z = direction_sign * (values - train_mean) / train_std
+        z = np.where(np.isfinite(z), z, 0.0)
+        look = np.maximum(idx - HAZARD_LOOKBACK, 0)
+        return np.column_stack([z[idx], z[idx] - z[look]])
+
+    train_labelling = label_events(
+        train_values, definition, threshold_span=(0, train_values.size)
+    )
+    if train_labelling.onsets.size == 0:
+        return None
+
+    horizon = int(definition.horizon)
+    y = np.zeros(train_values.size, dtype=int)
+    for onset in train_labelling.onsets:
+        o = int(onset)
+        y[max(0, o - horizon):o] = 1  # onset in (t, t+horizon]  <=>  t in [o-horizon, o-1]
+
+    logit = LogisticRegression(max_iter=1000)
+    logit.fit(_features(train_values, np.arange(train_values.size)), y)
+    return logit.decision_function(_features(eval_values, np.asarray(offsets, dtype=int)))
+
+
 def _evaluate_indicator(code: str, entry: Dict[str, Any], proto: Dict[str, Any]) -> Dict[str, Any]:
     import torch
 
@@ -525,8 +622,14 @@ def _evaluate_indicator(code: str, entry: Dict[str, Any], proto: Dict[str, Any])
     slope, intercept = np.polyfit(z_train[:-1], z_train[1:], 1)
     ar1_scores = direction_sign * (intercept + slope * z_eval)
 
+    # The alarm quantile is a PROTOCOL constant: each tagged version declares
+    # its own (v1/v2: 0.95; v3: 0.98, derived from published v1/v2 operating-
+    # point arithmetic). Applying a newer version's rule to an older run would
+    # rewrite history; the lookup gives every run its own tag's rule.
+    alarm_q = float(proto.get("alarm_quantile", ALARM_QUANTILE))
+
     def _score_card(sc: np.ndarray) -> Dict[str, Any]:
-        alarms = sc >= float(np.quantile(sc, ALARM_QUANTILE))
+        alarms = sc >= float(np.quantile(sc, alarm_q))
         lead = lead_time_stats(events, alarms, max_lead=MAX_LEAD)
         fa = false_alarm_stats(alarms, events, horizon=HORIZON)
         return {
@@ -537,27 +640,58 @@ def _evaluate_indicator(code: str, entry: Dict[str, Any], proto: Dict[str, Any])
             "n_alarms": int(alarms.sum()),
         }
 
-    model_card = _score_card(scores)
     pers_card = _score_card(persistence_scores)
     ar1_card = _score_card(ar1_scores)
-
     base_rate = float(events.mean())
-    ap_obs = model_card["average_precision"]
-    p_value = _permutation_ap_pvalue(events.astype(bool), scores, ap_obs) if np.isfinite(ap_obs) else 1.0
-
-    n_true = int(model_card["false_alarms"].get("n_true_alarms", 0))
-    n_false = int(model_card["false_alarms"].get("n_false_alarms", 0))
     quiet_years = float((events.size - events.sum())) / BUSINESS_DAYS_PER_YEAR
-    precision_ci = _wilson_ci(n_true, n_true + n_false)
-    median_lead = model_card["lead_time"].get("median_lead")
-    fa_per_quiet_year = (n_false / quiet_years) if quiet_years > 0 else float("nan")
 
-    # 6. Frozen criteria (identical across protocol versions).
-    c_lead = median_lead is not None and float(median_lead) >= MIN_MEDIAN_LEAD
-    c_fa = np.isfinite(fa_per_quiet_year) and fa_per_quiet_year <= MAX_FALSE_ALARMS_PER_QUIET_YEAR
-    c_lift = (ap_obs > pers_card["average_precision"]) and (ap_obs > ar1_card["average_precision"]) \
-        and (model_card["roc_auc"] > pers_card["roc_auc"]) and (model_card["roc_auc"] > ar1_card["roc_auc"])
-    c_ap = bool(np.isfinite(ap_obs) and ap_obs > base_rate)
+    # Declared scorers, each graded identically on the identical grid with
+    # the identical frozen criteria. v1/v2 declare one (the frozen TAN); v3
+    # adds the hazard logit -- both declared in the tagged protocol pre-run.
+    scorer_series: Dict[str, Optional[np.ndarray]] = {"tan_frozen": scores}
+    if "hazard_logit" in proto.get("scorers", ()):
+        scorer_series["hazard_logit"] = _hazard_logit_scores(
+            train_values, mean, std, direction_sign, definition, values_eval, offsets
+        )
+
+    scorers_out: Dict[str, Any] = {}
+    for scorer_name in proto.get("scorers", ("tan_frozen",)):
+        sc = scorer_series.get(scorer_name)
+        if sc is None:
+            scorers_out[scorer_name] = {"skipped": "no_onsets_in_training_span"}
+            continue
+        card = _score_card(sc)
+        ap_obs = card["average_precision"]
+        p_value = (
+            _permutation_ap_pvalue(events.astype(bool), sc, ap_obs)
+            if np.isfinite(ap_obs) else 1.0
+        )
+        n_true = int(card["false_alarms"].get("n_true_alarms", 0))
+        n_false = int(card["false_alarms"].get("n_false_alarms", 0))
+        precision_ci = _wilson_ci(n_true, n_true + n_false)
+        median_lead = card["lead_time"].get("median_lead")
+        fa_per_quiet_year = (n_false / quiet_years) if quiet_years > 0 else float("nan")
+
+        # Frozen criteria (identical for every scorer and protocol version).
+        c_lead = median_lead is not None and float(median_lead) >= MIN_MEDIAN_LEAD
+        c_fa = np.isfinite(fa_per_quiet_year) and fa_per_quiet_year <= MAX_FALSE_ALARMS_PER_QUIET_YEAR
+        c_lift = (ap_obs > pers_card["average_precision"]) and (ap_obs > ar1_card["average_precision"]) \
+            and (card["roc_auc"] > pers_card["roc_auc"]) and (card["roc_auc"] > ar1_card["roc_auc"])
+        c_ap = bool(np.isfinite(ap_obs) and ap_obs > base_rate)
+
+        scorers_out[scorer_name] = {
+            "card": card,
+            "ap_permutation_p": p_value,
+            "precision_at_alarm_ci95": [round(precision_ci[0], 4), round(precision_ci[1], 4)],
+            "fa_per_quiet_year": round(float(fa_per_quiet_year), 3) if np.isfinite(fa_per_quiet_year) else None,
+            "criteria": {
+                "median_lead_ge_10": bool(c_lead),
+                "fa_per_quiet_year_le_4": bool(c_fa),
+                "beats_both_baselines_auc_and_ap": bool(c_lift),
+                "ap_above_base_rate": c_ap,
+            },
+            "passed_pre_holm": bool(all([c_lead, c_fa, c_lift, c_ap])),
+        }
 
     # 7. Episode-overlap context (reported, not a criterion).
     dates = eval_frame["Date"]
@@ -569,29 +703,31 @@ def _evaluate_indicator(code: str, entry: Dict[str, Any], proto: Dict[str, Any])
         rel = rel[(rel >= 0) & (rel < events.size)]
         overlap[name] = bool(events[rel].any()) if rel.size else False
 
+
+    # Legacy top-level view = the TAN scorer, so v1/v2's published report
+    # shape stays byte-stable; v3's report renders the scorer table too.
+    tan = scorers_out["tan_frozen"]
+    tan_card = tan["card"]
     out.update(
         status="evaluated",
         n_steps=int(events.size),
         base_rate=round(base_rate, 5),
         n_events=int(labelling.n_events),
         labelling_threshold=float(labelling.threshold),
-        model=model_card, persistence_baseline=pers_card, ar1_baseline=ar1_card,
-        ap_permutation_p=p_value,
-        precision_at_alarm_ci95=[round(precision_ci[0], 4), round(precision_ci[1], 4)],
-        fa_per_quiet_year=round(float(fa_per_quiet_year), 3) if np.isfinite(fa_per_quiet_year) else None,
+        model=tan_card, persistence_baseline=pers_card, ar1_baseline=ar1_card,
+        ap_permutation_p=tan["ap_permutation_p"],
+        precision_at_alarm_ci95=tan["precision_at_alarm_ci95"],
+        fa_per_quiet_year=tan["fa_per_quiet_year"],
         quiet_years=round(quiet_years, 2),
-        criteria={
-            "median_lead_ge_10": bool(c_lead),
-            "fa_per_quiet_year_le_4": bool(c_fa),
-            "beats_both_baselines_auc_and_ap": bool(c_lift),
-            "ap_above_base_rate": c_ap,
-        },
+        criteria=tan["criteria"],
+        alarm_quantile=alarm_q,
+        scorers=scorers_out,
         episode_overlap=overlap,
         train_span=[str(train_frame['Date'].min().date()), str(train_frame['Date'].max().date())],
         eval_span=[str(dates.iloc[offsets[0]].date()), str(dates.iloc[offsets[-1]].date())],
         model_config=MODEL_CONFIG,
     )
-    out["passed"] = all([c_lead, c_fa, c_lift, c_ap])
+    out["passed"] = tan["passed_pre_holm"]  # Holm adjustment applied in eval_phase
 
     # teardown before the next indicator
     del engine, trainer, risk_series, block
@@ -615,14 +751,32 @@ def eval_phase(proto: Dict[str, Any]) -> int:
         logger.info("%s -> %s", code, results[code].get("status"))
 
     evaluated = {c: r for c, r in results.items() if r.get("status") == "evaluated"}
-    pvals = {c: float(r["ap_permutation_p"]) for c, r in evaluated.items() if np.isfinite(r.get("ap_permutation_p", np.nan))}
+    # Holm-Bonferroni across EVERY declared scorer-indicator pair: pooling
+    # only one scorer would understate the multiplicity the protocol itself
+    # introduces. For single-scorer protocols (v1/v2) the pool is unchanged.
+    pvals: Dict[str, float] = {}
+    for code, r in evaluated.items():
+        for scorer_name, scorer_result in (r.get("scorers") or {"tan_frozen": r}).items():
+            p_value = scorer_result.get("ap_permutation_p")
+            if p_value is not None and np.isfinite(p_value):
+                pvals[f"{code}::{scorer_name}"] = float(p_value)
     holm = _holm(pvals, HOLM_ALPHA) if pvals else {}
-    for code, survives in holm.items():
-        results[code]["ap_survives_holm_bonferroni"] = survives
-        # criterion 4 is AP > base rate AND family-wise significance
-        results[code]["passed"] = bool(
-            results[code]["passed"] and survives
-        ) if "passed" in results[code] else False
+    for code, r in evaluated.items():
+        scorers = r.get("scorers") or {"tan_frozen": r}
+        any_pass = False
+        for scorer_name, scorer_result in scorers.items():
+            survives = bool(holm.get(f"{code}::{scorer_name}", False))
+            scorer_result["ap_survives_holm_bonferroni"] = survives
+            if "passed_pre_holm" in scorer_result:
+                scorer_result["passed"] = bool(scorer_result["passed_pre_holm"] and survives)
+            if scorer_result.get("passed"):
+                any_pass = True
+        tan = scorers.get("tan_frozen", {})
+        r["ap_survives_holm_bonferroni"] = tan.get("ap_survives_holm_bonferroni")
+        # An indicator passes when any of its declared scorers passes all
+        # four criteria with a Holm-surviving AP (declared in the protocol;
+        # for single-scorer protocols this is exactly the v1/v2 rule).
+        r["passed"] = any_pass
 
     passed = sorted(c for c, r in evaluated.items() if r.get("passed"))
     tested = sorted(evaluated)
@@ -658,7 +812,8 @@ def eval_phase(proto: Dict[str, Any]) -> int:
         "constants": {
             "eval_window": [str(EVAL_START.date()), str(EVAL_END.date())],
             "quantile": QUANTILE, "horizon": HORIZON, "min_duration": MIN_DURATION,
-            "alarm_quantile": ALARM_QUANTILE, "max_lead": MAX_LEAD,
+            "alarm_quantile": proto.get("alarm_quantile", ALARM_QUANTILE), "max_lead": MAX_LEAD,
+            "scorers": list(proto.get("scorers", ("tan_frozen",))),
             "perm_iterations": PERM_ITERATIONS, "perm_seed": PERM_SEED, "holm_alpha": HOLM_ALPHA,
             "criteria": {"min_median_lead": MIN_MEDIAN_LEAD,
                           "max_fa_per_quiet_year": MAX_FALSE_ALARMS_PER_QUIET_YEAR},
@@ -701,16 +856,33 @@ def _render_markdown(report: Dict[str, Any]) -> str:
         if r.get("status") != "evaluated":
             lines.append(f"| `{code}` | {r.get('status')} ({r.get('skip_reason') or r.get('error', '')}) | – | – | – | – | – | – | – | – | – |")
             continue
-        crit = r["criteria"]
-        lt = r["model"]["lead_time"].get("median_lead")
-        lines.append(
-            f"| `{code}` | evaluated | {r['n_events']} | {r['base_rate']:.3f} "
-            f"| {r['model']['roc_auc']:.3f} | {r['model']['average_precision']:.3f} "
-            f"| {r['ap_permutation_p']:.4f} | {lt if lt is not None else 'n/a'} "
-            f"| {r['fa_per_quiet_year']} | {'yes' if crit['beats_both_baselines_auc_and_ap'] else 'no'} "
-            f"| {'PASS' if r.get('passed') else 'fail'} |"
-        )
-    lines += ["", "## Criteria (frozen pre-run, identical to every protocol version)", "",
+        scorers = r.get("scorers") or {"tan_frozen": r}
+        multi = len(scorers) > 1
+        for scorer_name, sres in scorers.items():
+            label = f"`{code}`" + (f" · {scorer_name}" if multi else "")
+            card = sres.get("card") or sres.get("model")
+            if card is None:
+                lines.append(f"| {label} | scorer skipped ({sres.get('skipped', '?')}) | – | – | – | – | – | – | – | – | – |")
+                continue
+            crit = sres["criteria"]
+            p_val = sres.get("ap_permutation_p", float("nan"))
+            lt = card["lead_time"].get("median_lead")
+            scorer_passed = sres.get("passed", sres.get("passed_pre_holm"))
+            lines.append(
+                f"| {label} | evaluated | {r['n_events']} | {r['base_rate']:.3f} "
+                f"| {card['roc_auc']:.3f} | {card['average_precision']:.3f} "
+                f"| {p_val:.4f} | {lt if lt is not None else 'n/a'} "
+                f"| {sres.get('fa_per_quiet_year')} | {'yes' if crit['beats_both_baselines_auc_and_ap'] else 'no'} "
+                f"| {'PASS' if scorer_passed else 'fail'} |"
+            )
+        if multi:
+            lines.append(
+                f"| `{code}` — **indicator verdict** | {'PASS' if r.get('passed') else 'fail'} "
+                "(any declared scorer, Holm-adjusted) | | | | | | | | | |"
+            )
+    lines += ["", "## Criteria (frozen pre-run; identical thresholds in every protocol version)", "",
+              f"0. Alarm rule and scorers are declared per protocol version: this run used alarm quantile "
+              f"{report['constants']['alarm_quantile']} and scorer(s) {', '.join(report['constants'].get('scorers', ['tan_frozen']))}",
               f"1. median lead >= {MIN_MEDIAN_LEAD} business days (max_lead {MAX_LEAD}, earliest-alarm convention)",
               f"2. false alarms <= {MAX_FALSE_ALARMS_PER_QUIET_YEAR:.0f} per quiet year (an alarm simultaneous with an event counts as false: it warned nobody)",
               "3. AUC and AP both strictly above the persistence AND the AR(1) baseline on the identical grid",
