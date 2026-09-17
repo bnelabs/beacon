@@ -10,6 +10,24 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **The UK gap has its first feed: `boe_database` plugin** — action 2 of the
+  executed BoE probe's YELLOW path, implemented to the contract the probe
+  confirmed. A strict stdlib HTML-table reader for the Interactive Database
+  (`FromShowColumns.asp`, `DD/Mon/YYYY`, no auth): typed `BoEDatabaseError`
+  on HTTP status / ErrorPage redirect / missing table / unparseable date /
+  non-numeric value — schema drift fails loudly, never as empty data; an
+  empty window returns `None` per the plugin contract. Evidence-first
+  catalogue: only the probe-verified Official Bank Rate (`IUDBEDR`) is
+  built in; further series must be operator-declared in config — the plugin
+  never guesses codes. Identifying User-Agent, one request per fetch,
+  declared century pivot for two-digit years (Bank Rate history reaches
+  1694). 19 offline tests parse the **real captured table bytes**; one live
+  smoke parsed 63 recent rows and a 22-business-day January-2024 window.
+  Registered in the loader list (the omission class that once darkened
+  three plugins) and in `CURATED_PROVENANCE` — where the reuse licence is
+  recorded as **unconfirmed**: `/copyright` and `/terms-and-conditions`
+  both 404 at probe time, and nothing claims a permission that was not
+  observed. README's plugin count corrected to 18.
 - **The pre-registered early-warning evaluation ran — and the answer is a
   published NO.** Under tag `prereg-early-warning-v1`, on hashed data
   fetched through the platform's own keyless FRED plugin and certified by

@@ -753,7 +753,7 @@ const notificationStats = {
  * Shape copied from the real `backend/modules/data/provenance.build_disclosure`
  * output rather than invented: the top-level keys, the six provenance classes,
  * the two policy keys, and the per-source `access` / `deployment` nesting. Only
- * `sources` is shortened -- the real payload lists all 17 registered plugins and
+ * `sources` is shortened -- the real payload lists all 18 registered plugins and
  * four are enough to exercise the page, one per provenance class the UI renders
  * plus `fdic`, which the spec selects in the create-source form.
  *

@@ -132,6 +132,15 @@ CURATED_PROVENANCE: Dict[str, ProvenanceRecord] = {
         provenance_class="official_statistics",
         provides="reference rates (SOFR, overnight reverse repo) from the NY Fed public API",
     ),
+    "boe_database": ProvenanceRecord(
+        publisher="Bank of England",
+        provenance_class="official_statistics",
+        provides=(
+            "Official Bank Rate (IUDBEDR) and operator-declared series from the "
+            "Interactive Database's HTML-table interface; reuse licence unconfirmed "
+            "at probe time (see docs/probes/boe_endpoint_probe.md)"
+        ),
+    ),
     "cftc_cot": ProvenanceRecord(
         publisher="U.S. Commodity Futures Trading Commission",
         provenance_class="official_statistics",
