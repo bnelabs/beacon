@@ -66,6 +66,15 @@ def _start_every_session_on_a_cold_database() -> None:
     file handle), so removing the file here is the last moment it is both
     safe and guaranteed to precede the first connection. Modules keep their
     own within-run cleanup; this is the between-run half.
+
+    NOT COMPATIBLE WITH pytest-xdist AS-IS: every worker process imports
+    this conftest, so a worker starting late would unlink the database while
+    earlier workers are mid-run -- open handles would survive the unlink but
+    every later connection would see a fresh, empty file. Before enabling
+    ``-n``, give each worker its own database (per-worker SQLite path, or
+    ``sqlite:///:memory:`` with StaticPool) and gate this deletion to the
+    controller. The same applies to anyone pointing a local app at
+    ``USE_SQLITE=true``: running the test suite deletes that ``./beacon.db``.
     """
     from pathlib import Path
 

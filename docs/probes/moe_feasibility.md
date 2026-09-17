@@ -64,7 +64,7 @@ prediction = sum(w_i * expert_i(x) for i, w_i in enumerate(gate_weights))
 3. Backtest vs single-model baseline
 4. Equivalence harness: MoE should beat baseline in ≥2 regimes without losing in others
 
-### Phase 3: Production Integration (1 week, after Phases 0-2)
+### Phase 3: Production Integration (1 week, after Phases 1-2)
 1. Add MoE option to model configuration (requires first building the model registry listed under Missing Pieces)
 2. Update prediction engine to route through MoE when selected
 3. Monitoring dashboard: gate weights over time, expert contributions

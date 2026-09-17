@@ -1,8 +1,10 @@
 name: Frontend e2e (deep)
 
 # why: the production build and the Playwright suite are the deep frontend
-# validation: ~10 minutes of browser downloads, Vite bundling and mocked
-# navigation that used to run on every push and pull request. That wait is
+# validation: browser download, Vite bundling and the three mocked
+# navigation specs (dashboard/pages/search) -- measured ~1 min on the runner
+# with warm caches, a few minutes cold -- which used to run on every push
+# and pull request. That wait is
 # what made CI feel slower than the work, so the suite moved here -- nightly
 # and on demand -- while frontend-ci.yml keeps the sub-minute static gate
 # (typecheck + mock-coverage audit) in front of every merge. A regression this
@@ -29,8 +31,9 @@ jobs:
   build-and-e2e:
     name: Build and Playwright e2e (Node 24)
     runs-on: ubuntu-latest
-    # why: browser download + vite build + the long mocked navigation spec;
-    # 30 minutes gives headroom on a cold cache while bounding a hung run.
+    # why: browser download + vite build + the three mocked navigation specs;
+    # 30 minutes gives headroom on a cold cache while bounding a hung run
+    # (measured: ~1.1 min on warm runs of this exact job).
     timeout-minutes: 30
 
     defaults:

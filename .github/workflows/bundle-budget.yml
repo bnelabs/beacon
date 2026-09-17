@@ -72,6 +72,11 @@ jobs:
           const routes = app.filter((f) => !isIndex(f))
           const deps = assets.filter((f) => isVendor(f) || isGeoData(f))
 
+          if (routes.length === 0) {
+            console.error('bundle-budget: no route chunks found in dist/assets -- the classification no longer matches the build output (manualChunks renamed? empty build?); fix the gate rather than let it pass silently')
+            process.exit(1)
+          }
+
           const appTotal = app.reduce((s, f) => s + kb(f), 0)
           const largestRoute = routes.reduce(
             (max, f) => (kb(f) > kb(max) ? f : max),
