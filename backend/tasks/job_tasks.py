@@ -1381,6 +1381,34 @@ def run_backtest(self, job_id: int, parameters: dict):
                 "skipped": "no usable per-timestep risk series to score against the labelled events"
             }
 
+        # Volatility track (the census's `garch` disposition, wired): GARCH(1,1)
+        # priced against unconditional variance per source, on each source's own
+        # contiguous span -- returns never difference across a source seam. This
+        # track prices VOLATILITY, not levels: it consumes none of the quant or
+        # event metrics above and feeds none of them. Skips are per-source and
+        # declared, as everywhere else.
+        if 'source_code' in test_data.columns:
+            from backend.modules.engine.backtesting import compare_volatility_baselines
+
+            volatility_value_col = 'Close' if 'Close' in test_data.columns else 'Value'
+            volatility_payload = {}
+            for volatility_source in test_data['source_code'].unique():
+                volatility_rows = test_data[
+                    test_data['source_code'] == volatility_source
+                ].sort_values('Date')
+                volatility_values = pd.to_numeric(
+                    volatility_rows[volatility_value_col], errors='coerce'
+                ).to_numpy(dtype=float)
+                try:
+                    volatility_payload[str(volatility_source)] = compare_volatility_baselines(
+                        volatility_values
+                    )
+                except Exception as vol_exc:  # noqa: BLE001 - a per-source failure is recorded, it does not void the backtest
+                    volatility_payload[str(volatility_source)] = {
+                        "failed": f"{type(vol_exc).__name__}: {vol_exc}"
+                    }
+            backtest_metrics["volatility_baselines"] = {"by_source": volatility_payload}
+
         # Persist scalar metrics to the metrics hypertable (fifth-round wiring).
         try:
             persisted = persist_model_metrics(
