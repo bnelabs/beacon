@@ -31,11 +31,22 @@ YELLOW-path contract prescribes:
   no published rate limits; that absence is a reason for restraint, not for
   hammering.
 
-Open item, stated because it is not resolved: the probe could not locate a
-terms-of-use page (``/copyright`` and ``/terms-and-conditions`` both 404 at
-probe time), so the reuse/attribution licence for BoE statistical data is
-UNCONFIRMED. Operators should resolve it before production deployment; this
-docstring is the record that the question was asked and not answered.
+Licence, RESOLVED 2026-09-18: the reuse terms live at
+``bankofengland.co.uk/legal`` — the paths tried during the probe
+(``/copyright`` and ``/terms-and-conditions``) both 404; ``/legal`` is the
+real page, found by search on 2026-09-18. Its "Bank of England Database"
+section states that the Database is the copyright of the Governor and
+Company of the Bank of England and that "Reproduction of data in the
+Database is subject to the terms of the UK Open Government Licence",
+"allowing and encouraging free and flexible data reuse". Derived products
+should carry the standard OGL v3 attribution ("Contains public sector
+information licensed under the Open Government Licence v3.0"). Two scope
+notes from the same page, recorded because they bind any catalogue
+expansion: third-party-owned series are NOT covered by the grant — the page
+names LSEG spot-exchange-rate data as requiring LSEG's own approval, and
+the built-in catalogue holds only the BoE's own Bank Rate — and SONIA /
+SONIA Compounded Index series carry a required attribution statement of
+their own if they are ever added.
 
 Date parsing note: the interface renders two-digit years (``02 Jan 24``).
 Two-digit years are resolved with an explicit pivot — ``yy`` greater than

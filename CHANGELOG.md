@@ -10,6 +10,19 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **The BoE licence question is resolved — OGL v3, confirmed against the
+  source.** The probe's two candidate terms URLs were 404s; the real page is
+  `bankofengland.co.uk/legal` (accessed 2026-09-18), whose "Bank of England
+  Database" section states that reproduction of Database data "is subject to
+  the terms of the UK Open Government Licence", linking OGL v3. The plugin
+  docstring, the curated provenance record and the probe document now carry
+  the confirmed licence with its quote, the required attribution ("Contains
+  public sector information licensed under the Open Government Licence
+  v3.0"), and the grant's scope notes: third-party-owned series (the page
+  names LSEG spot-FX data) are excluded and need their owner's approval, and
+  SONIA-family series carry their own required statement. The pinned test
+  now asserts the confirmed licence appears in the provenance record. One
+  YELLOW-path action remains open (the PRA probe for bank-level exposures).
 - **The v3 early-warning run executed — 0 of 3, and the line is parked as
   its own protocol declared.** One clean run under tag
   `prereg-early-warning-v3` (tag → fetch → evaluate; zero retries; key

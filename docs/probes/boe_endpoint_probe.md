@@ -64,6 +64,7 @@ decision paths, the actions are:
 4. Licensing/attribution: confirm terms for redistribution in derived
    reports before shipping (BoE statistical data is normally free to use
    with attribution; the exact licence was not captured by this probe).
+   **RESOLVED 2026-09-18** — see "Licence resolution" below.
 
 ### Discovery follow-up (executed 2026-09-17, ~5 further requests)
 
@@ -95,13 +96,15 @@ date/value cell pairs. A `boe_database_plugin.py` should therefore:
 3. register first series: Official Bank Rate (`IUDBEDR`), then SONIA-family
    candidates for the semantics registry (direction per `FRED_SOFR`
    convention);
-4. confirm BoE reuse/attribution terms before shipping — **STILL OPEN.**
+4. confirm BoE reuse/attribution terms before shipping — **RESOLVED
+   2026-09-18** (see "Licence resolution" below).
    Attempted 2026-09-17: `bankofengland.co.uk/copyright` → **404** and
    `/terms-and-conditions` → **404**; no reuse terms could be located at
-   the standard paths, so the licence is recorded as *unconfirmed* here, in
-   the plugin's docstring and in its curated provenance record. Operators
-   should resolve it (likely via the BoE enquiries route) before production
-   deployment; nothing claims a permission that was not observed.
+   the standard paths, so the licence was recorded as *unconfirmed* here, in
+   the plugin's docstring and in its curated provenance record — nothing
+   claimed a permission that was not observed. The resolution found the
+   real page (`/legal`) the next day; every record now carries the
+   confirmed licence, its quote and its scope notes.
 
 ### Implementation status (2026-09-17): action 2 is DONE
 
@@ -121,7 +124,47 @@ boundary), and one live smoke through the plugin parsed 63 recent rows and
 a January-2024 window of 22 business days at 5.25. Caching note: the
 platform's per-source sync scheduler provides the cadence; the plugin adds
 no private cache, so nothing can serve stale bytes silently. Action 3
-(PRA probe for bank-level exposures) and action 4 (licence) remain open.
+(PRA probe for bank-level exposures) remains open; action 4 (licence) is
+**RESOLVED** — see below.
+
+### Licence resolution (executed 2026-09-18, one page fetch)
+
+The probe's two candidate URLs (`/copyright`, `/terms-and-conditions`) were
+404s; the actual terms page is **https://www.bankofengland.co.uk/legal**
+(found by web search, fetched once, accessed 2026-09-18). Its section
+**"Bank of England Database"** states, verbatim:
+
+> "The information made available via the Database is the copyright of the
+> Governor and Company of the Bank of England, unless otherwise stated.
+> Reproduction of data in the Database is subject to the terms of the UK
+> Open Government Licence, allowing and encouraging free and flexible data
+> reuse."
+
+with the licence linked as **Open Government Licence v3.0**
+(nationalarchives.gov.uk/doc/open-government-licence/version/3/). So the
+plugin's activity — reproducing Database tables into the platform's storage
+and derived reports — is permitted, with attribution. Records updated the
+same day: the plugin docstring, the curated provenance record
+(`backend/modules/data/provenance.py`) and its pinned test.
+
+Obligations and scope notes carried with the grant (all from the same page):
+
+1. **Attribution.** Derived products should state: "Contains public sector
+   information licensed under the Open Government Licence v3.0", copyright
+   the Governor and Company of the Bank of England.
+2. **Third-party series are excluded.** The page names LSEG-owned spot
+   exchange-rate data as requiring LSEG's approval, not the Bank's. The
+   plugin's built-in catalogue holds only the BoE's own Bank Rate
+   (`IUDBEDR`); any operator-declared code must be checked against this
+   exclusion before production use.
+3. **SONIA family carries its own required statement** ("SONIA and/or SONIA
+   Compounded Index data licensed under the Open Government Licence v3.0
+   and copyright the Governor and Company of the Bank of England…") — 
+   recorded now because the follow-up registry names SONIA-family rates as
+   expansion candidates.
+4. **No warranty.** The Bank gives no assurance of accuracy, completeness
+   or continued publication — consistent with the platform's own posture
+   (strict validation, loud failure on drift, provenance per series).
 
 *Probe discipline: every status code, redirect and value above was
 observed on 2026-09-17; nothing is inferred from documentation alone.*

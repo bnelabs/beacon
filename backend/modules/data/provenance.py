@@ -137,8 +137,14 @@ CURATED_PROVENANCE: Dict[str, ProvenanceRecord] = {
         provenance_class="official_statistics",
         provides=(
             "Official Bank Rate (IUDBEDR) and operator-declared series from the "
-            "Interactive Database's HTML-table interface; reuse licence unconfirmed "
-            "at probe time (see docs/probes/boe_endpoint_probe.md)"
+            "Interactive Database's HTML-table interface; reuse licence CONFIRMED "
+            "2026-09-18 against bankofengland.co.uk/legal ('Bank of England "
+            "Database' section): UK Open Government Licence v3 -- derived products "
+            "should attribute 'Contains public sector information licensed under "
+            "the Open Government Licence v3.0', (c) Governor and Company of the "
+            "Bank of England; third-party-sourced series (e.g. LSEG spot exchange "
+            "rates) are excluded from that licence and need the third party's "
+            "approval (see docs/probes/boe_endpoint_probe.md)"
         ),
     ),
     "cftc_cot": ProvenanceRecord(
