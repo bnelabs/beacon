@@ -395,11 +395,17 @@ def _bis_licence_screen() -> Tuple[bool, str, List[str]]:
         return True, f"unconfirmed: licence page unreachable ({type(exc).__name__})", []
     if response.status_code != 200:
         return True, f"unconfirmed: licence page HTTP {response.status_code}", []
-    text = re.sub(r"<[^>]+>", " ", response.text)
+    text = re.sub(r"<script.*?</script>", " ", response.text, flags=re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text)
     match = LICENCE_PROHIBITION_RE.search(text)
+    # Recorded lines must be the TERMS, not page furniture: only sentences
+    # carrying the permission/attribution language itself qualify (the page's
+    # JSON-LD header once matched the loose 'licen' pattern -- pre-metric
+    # defect, fixed and fetch re-run before any metric; see the v4 execution
+    # log).
     lines = [s.strip() for s in re.split(r"(?<=[.;]) ", text)
-             if re.search(r"unrestricted|reproduc|cited|licen|permitted use", s, re.I)][:4]
+             if re.search(r"unrestricted|must be cited|permitted use", s, re.I)][:2]
     if match:
         return True, match.group(0), lines
     if not any("unrestricted" in ln.lower() for ln in lines):

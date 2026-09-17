@@ -205,6 +205,15 @@ class TestBisLicenceScreen:
         assert prohibited is True
         assert "prohibited" in reason.lower()
 
+    def test_page_furniture_is_not_recorded_as_terms(self, runner):
+        noisy = ('<html><head><script type="application/ld+json">{"@context":"https://schema.org",'
+                 '"legalName":"BIS","license":"https://example.org"}</script></head><body>'
+                 + self.PERMISSION + '</body></html>')
+        with self._get(noisy):
+            prohibited, reason, lines = runner._bis_licence_screen()
+        assert prohibited is False
+        assert lines and all("unrestricted" in ln or "cited" in ln for ln in lines)
+
     def test_drifted_page_refuses_as_unconfirmed(self, runner):
         with self._get("<html><body><p>Something else entirely.</p></body></html>"):
             prohibited, reason, _ = runner._bis_licence_screen()
