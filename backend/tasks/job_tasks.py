@@ -1323,7 +1323,6 @@ def run_backtest(self, job_id: int, parameters: dict):
             event_metrics_payload = {"definition": definition.to_dict(), "by_source": {}}
             for source_name in (risk_series.sources if risk_series is not None else []):
                 block = frame[frame["source"] == source_name]
-                scores_block = np.asarray(block["risk_score"], dtype=float)
                 source_rows = test_data[test_data['source_code'] == source_name].sort_values('Date')
                 series_values = pd.to_numeric(source_rows[value_col], errors='coerce').to_numpy(dtype=float)
                 if series_values.size < definition.horizon + definition.min_duration:
@@ -1339,19 +1338,41 @@ def run_backtest(self, job_id: int, parameters: dict):
                         "skipped": "no declared or registered stress direction for this series"
                     }
                     continue
+
+                # Alignment: scores join the series through row_offset -- the
+                # documented RiskSeriesResult contract. The previous naive
+                # truncation (events[:len(scores)]) shifted every label by the
+                # sequence warm-up (~30 business days), which is larger than
+                # the lead times being measured: a 20-day warning read as
+                # simultaneous, a simultaneous alarm read as a lead.
+                offsets = np.asarray(block["row_offset"], dtype=int)
+                scores_raw = np.asarray(block["risk_score"], dtype=float)
+                keep = (offsets >= 0) & (offsets < series_values.size) & np.isfinite(scores_raw)
+                offsets = offsets[keep]
+                if offsets.size == 0:
+                    event_metrics_payload["by_source"][source_name] = {"skipped": "no_aligned_scores"}
+                    continue
+                # Direction: for a direction=-1 series stress lives in FALLING
+                # values, so scoring the high tail of the raw score against
+                # falling-value labels measures the opposite of a warning.
+                # Sign-adjust so higher always means more stress; the alarm
+                # quantile is then taken on the adjusted scores.
+                sign = 1.0 if resolved_direction == "up" else -1.0
+                scores_block = scores_raw[keep] * sign
+
                 source_definition = _dc_replace(definition, direction=resolved_direction)
                 labelling = label_events(series_values, source_definition)
-                events_aligned = labelling.events[: scores_block.size]
+                events_aligned = labelling.events[offsets]
                 if events_aligned.size == 0 or not events_aligned.any():
                     event_metrics_payload["by_source"][source_name] = {"skipped": "no_events_in_window"}
                     continue
                 alarms = scores_block >= np.quantile(scores_block, definition.quantile)
                 event_metrics_payload["by_source"][source_name] = {
                     "n_events": int(labelling.n_events),
-                    "roc_auc": roc_auc(events_aligned, scores_block[: events_aligned.size]),
-                    "average_precision": average_precision(events_aligned, scores_block[: events_aligned.size]),
+                    "roc_auc": roc_auc(events_aligned, scores_block),
+                    "average_precision": average_precision(events_aligned, scores_block),
                     "lead_time": lead_time_stats(
-                        events_aligned, alarms[: events_aligned.size], max_lead=2 * definition.horizon
+                        events_aligned, alarms, max_lead=2 * definition.horizon
                     ),
                 }
             backtest_metrics["event_metrics"] = event_metrics_payload

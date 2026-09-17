@@ -10,6 +10,28 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **The pre-registered early-warning evaluation exists as a tagged, runnable
+  artefact** — steps 1–3 of `docs/probes/event_target_proposal.md`,
+  owner-approved with the proposal's defaults (RRPONTSYD excluded). Frozen
+  protocol: `docs/prereg/early_warning_v1.md` + `configs/event_eval_v1.yaml`
+  (7-episode context family, registry indicator family with per-code
+  dispositions declared *before any fetch*, 21-business-day horizon at the
+  0.95 quantile with 5-step persistence, chronological 2006/2007 holdout,
+  sign-adjusted scores joined via `row_offset`, persistence + AR(1)
+  baselines on the identical grid, four pass criteria with Holm–Bonferroni
+  across a 1000-shuffle permutation test, minimum testable family of 3 for
+  any system-level claim, single-run rule, negative results published).
+  Runner: `scripts/run_preregistered_eval.py` (`--fetch` writes
+  `data/prereg/` + a hashed manifest through the platform's own keyless FRED
+  plugin; `--eval` executes once). The fetch phase ran pre-tag: of the 6
+  public candidates only `FRED_T10Y2Y` survived the declared
+  data-availability rules (STLFSI4 weekly, KCFSI monthly — the protocol step
+  is one business day; SOFR starts 2018; BAMLH0A0HYM2 serves anonymous
+  callers a licence-windowed tail; FRED id `CISS` 404s), so v1 evaluates one
+  indicator and the family verdict is automatically NO system claim — the
+  protocol's first honest finding: the registry skews to operator-reported
+  and low-frequency series, and any future claim needs daily public series
+  curated into the catalogue first.
 - **The BoE probe's YELLOW-path discovery follow-up ran** (~5 further
   polite requests): no stateless CSV/JSON contract exists behind
   `FromShowColumns.asp` (HTML tables only, no download links, no REST
@@ -92,6 +114,19 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   this prevents the task-snapshot class of leak at the index level.
 
 ### Fixed
+- **`run_backtest`'s event metrics measured the wrong thing twice over.**
+  (a) Alignment: labels were joined to the risk series by naive truncation
+  (`events[:len(scores)]`), shifting every label by the sequence warm-up
+  (~30 business days) — larger than the lead times being measured, so a
+  20-day warning read as simultaneous and a simultaneous alarm read as a
+  lead. Scores now join through `row_offset`, the documented
+  `RiskSeriesResult` contract. (b) Direction: for a `direction=-1` series
+  (e.g. `FRED_T10Y2Y`, where stress is *falling* values) the raw score's
+  high tail was scored against falling-value labels — measuring the
+  opposite of a warning. Scores are now sign-adjusted by the registry
+  direction before the alarm quantile, so higher always means more stress.
+  Found while building the pre-registered runner, which mirrors this idiom;
+  the runner implements the corrected form and the job path now matches it.
 - **The v2 predictions API no longer fabricates scores.** `_extract_nodes`
   coerced a missing score to `0.0` and, worse, fell back to "any numeric
   column, scanned backwards" — on a refused row (NaN score, uncertainty
