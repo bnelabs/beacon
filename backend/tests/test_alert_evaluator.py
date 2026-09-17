@@ -13,17 +13,15 @@ silence would read as health. These tests pin the evaluator's contract:
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
-os.environ.setdefault(
-    "DATABASE_URL",
-    f"sqlite:///{Path(__file__).resolve().parent / 'test_alert_evaluator.sqlite3'}",
-)
-(Path(__file__).resolve().parent / "test_alert_evaluator.sqlite3").unlink(missing_ok=True)
+# No private DATABASE_URL here: conftest.py pins USE_SQLITE=true suite-wide,
+# and backend.database under that flag ignores DATABASE_URL entirely and binds
+# the shared on-disk ``./beacon.db``. Setting a module-private URL would be
+# dead code that lies about which database these tests run against, so this
+# module relies on the ``_clean`` fixture below for isolation instead.
 
 from backend.database import SessionLocal, init_db  # noqa: E402
 from backend.models.alert_rule import AlertRule  # noqa: E402
@@ -47,9 +45,21 @@ def db():
 @pytest.fixture(autouse=True)
 def _clean(db):
     """Jobs and notifications are the metric inputs; a leak between tests
-    would make one test's breach another test's average."""
+    would make one test's breach another test's average.
+
+    AlertRule is cleaned too, and that is not only about tests within this
+    file: under the suite-wide USE_SQLITE binding (pinned in conftest.py) the
+    engine is the shared on-disk ``./beacon.db``, so rules also survive
+    *across runs*. ``test_due_rules_honour_each_rules_frequency`` selects the
+    rules it created by name; a same-named rule left over from a previous
+    invocation is never due (its stored ``last_evaluated_at`` equals NOW) and
+    the assertion ``names <= evaluated_ids`` fails on the second run. A green
+    suite that only passes against a freshly deleted database is a suite that
+    cannot be re-run -- which is exactly how the two-days-red import-order
+    incident started."""
     db.query(Job).delete()
     db.query(Notification).delete()
+    db.query(AlertRule).delete()
     db.commit()
     yield
 

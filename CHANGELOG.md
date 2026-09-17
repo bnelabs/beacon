@@ -9,6 +9,83 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Fixed
+- **The deep backend suite can run again.** The sharded rewrite of
+  `backend-tests.yml` could not start at all: `with: { key:
+  backend-deps-${{ github.run_id }}, ... }` is invalid YAML (`${{ }}` inside a
+  flow mapping), so every run failed with zero jobs; behind that, the test
+  jobs restored only `~/.cache/uv` while the dependencies lived in the setup
+  job's site-packages on a different runner, and every shard passed `-n auto`
+  without pytest-xdist being declared anywhere. The shard globs also silently
+  dropped four test files (`test_compose_stack`, `test_counterfactual_coupling`,
+  `test_foundation_encoders`, `test_hidden_markov` -- the last two covering
+  modules the README lists as wired). Reverted to the proven single-job
+  workflow (measured 8-10 min green, not the ~25 min the rewrite claimed as
+  its baseline), which also restores the coverage artefact and advisory ruff
+  the workflows README documents.
+- **The deep e2e suite installs its browser again.** The parallel rewrite of
+  `frontend-e2e.yml` dropped `npx playwright install` (keeping only
+  `install-deps`, which fetches OS libraries, not chromium) and cached the
+  browser under a key with no playwright version in it; it also built and
+  cached `dist/` that no test consumed -- the suite runs against the Vite dev
+  server. Reverted to the proven single job (measured ~1.2 min, not the ~20
+  min the rewrite claimed), with the comment updated for the three-way spec
+  split. The split itself (dashboard/pages/search) is kept.
+- **`pages.spec.js` control-room test navigates to the page it asserts on.**
+  The split from the monolith lost the Data Sources navigation step, so the
+  test looked for the schedule selector on the Dashboard and could only ever
+  time out. It had never executed anywhere: the workflow that runs it has not
+  completed a run since the split.
+- **The bundle-budget gate measures what it says it measures.** It read a
+  `dist/stats.json` that `vite build --stats` does not produce, budgeted the
+  "largest route chunk" by taking the largest of *all* chunks -- the 957 kB
+  `deck-vendor` -- against a 40 kB budget, so both of its metrics were
+  permanently tripped and could never surface the 33 kB route-chunk
+  regression it exists for; its summary table also printed literal
+  backslashes from over-escaped `${{ }}` expressions. It now classifies
+  chunks the way `vite.config.js` creates them (vendor / geo data / app /
+  route), budgets app total ≤450 kB and largest route chunk ≤40 kB, and
+  reports vendor bytes as informational.
+- **`test_alert_evaluator.py` survives a second run.** Its `_clean` fixture
+  deleted jobs and notifications but not alert rules, and under the
+  suite-wide `USE_SQLITE` binding the rules accumulated in the shared
+  `./beacon.db` across runs -- so
+  `test_due_rules_honour_each_rules_frequency` failed on every re-run against
+  a warm database. Rules are cleaned with the other inputs, and the module's
+  dead import-time `DATABASE_URL` setup (always overridden by the conftest
+  pin) was replaced with a comment saying which database actually runs.
+- **`bank_analyzer.py` no longer claims a vectorisation it does not do.** The
+  counterfactual-shock loop was relabelled "batched ... using vectorized
+  operations" while still calling `clear_multiplex` once per node -- an
+  O(n^2) `np.tile` pre-materialisation and a cosmetic reindex were the only
+  changes. The honest loop is restored, with a comment that states the real
+  cost and points at `scripts/bench_systemic.py` as the baseline any future
+  batching claim must beat.
+- **The repo's `.gitignore` is the repo's `.gitignore` again.** A task-snapshot
+  commit replaced its 131 lines with an LLM's prose about why nothing needed
+  ignoring, which stopped ignoring `__pycache__/`, `.env`, virtualenvs and
+  build artefacts, and a compiled `analytics.cpython-312.pyc` was committed
+  into the tree. The original file is restored and the `.pyc` untracked.
+- **`docs/api-endpoints.md` is regenerated, not hand-edited.** The retired
+  analytics endpoints were removed from the inventory by hand with a
+  "Retired endpoints (Phase 2)" annotation the generator does not know, while
+  the header still claimed v3.2.0/124 operations against a live app serving
+  v3.3.0/122 -- so `test_api_docs_current` failed. The routes were already
+  gone from the code; the inventory now says so the generated way.
+- **The Pool teardown guard no longer dies while guarding.**
+  `multiprocessing_patch.safe_del` called `logger.debug` inside its
+  `AttributeError` handler at interpreter shutdown, where module globals are
+  already `None`, producing "Exception ignored in ... safe_del" tracebacks at
+  process exit -- noise from the very path whose job is to suppress noise.
+- **The feasibility memos state the platform as it is.** The MoE memo claimed
+  a "prediction store with `regime_label` field" and a "model registry [that]
+  tracks performance by regime"; neither exists -- regime labels ride inside
+  `jobs.result` JSON and there is no registry. The temporal-GNN memo claimed
+  per-prediction-cycle exposure networks and versioned balance sheets; the
+  PIT store holds only what operators upload or estimate. The BoE probe memo
+  is now explicitly marked planned-not-executed: it records methodology and
+  expected responses, and contains no findings.
+
 ## [3.3.0] - 2026-09-16
 
 ### Added

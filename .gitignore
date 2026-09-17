@@ -1,6 +1,131 @@
-Nothing should be ignored since only a Python source file was modified and no build artifacts, dependencies, or temporary files were included in the changes.node_modules/
-.next/
-dist/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
 build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+notebooks/.ipynb_checkpoints/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Testing
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# Data and logs (generated at runtime)
+data/jobs/*
+data/raw/*
+data/processed/*
+data/cache/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/cache/.gitkeep
+logs/*.log
 *.log
+
+# Model artifacts
+models/saved/*.pth
+models/saved/*.pt
+!models/saved/.gitkeep
+
+# Results
+results/backtests/*.csv
+results/backtests/*.html
+results/dashboards/*.html
+!results/backtests/.gitkeep
+!results/dashboards/.gitkeep
+
+# Docker
+# `.dockerignore` was listed here from the original restructure, which is why the
+# repository never had one. It is not an artefact: it is build configuration that
+# decides what enters the image context, so it has to be tracked for a build to be
+# reproducible anywhere but on the machine that happened to write it.
+!.dockerignore
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+# the shared SQLite file backend.database binds under USE_SQLITE=true
+beacon.db
+
+# Redis dump
+dump.rdb
+
+# Node.js (frontend)
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.pnp
+frontend/.pnp.js
+frontend/coverage/
+
+# Playwright output. `npx playwright test` writes traces, screenshots and an
+# HTML report here on every run; committing them would add megabytes of binary
+# per failure.
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/.playwright/
+
+
+# Frontend environment
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Frontend logs
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/lerna-debug.log*
+data/predictions/*
 node_modules/
+.next/

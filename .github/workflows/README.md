@@ -1,6 +1,6 @@
 # CI/CD workflows
 
-This directory contains the GitHub Actions automation for BEACON: seven
+This directory contains the GitHub Actions automation for BEACON: nine
 workflows, Dependabot configuration, and a pull-request template.
 
 The design rule is a **two-tier split**: everything that runs in front of a
@@ -24,6 +24,7 @@ change that deserves it (`gh workflow run <file> --ref <branch>`).
 | --- | --- | --- |
 | `backend-tests.yml` | The full backend leg: uv-installed pinned stack + CPU torch, pytest with coverage, the live-migration PostgreSQL service, the generated-API-docs check, offline migration render, advisory ruff. | nightly 03:47 UTC + manual |
 | `frontend-e2e.yml` | Production `vite build` + the fully mocked Playwright suite on chromium, artifacts on failure. | nightly 03:26 UTC + manual |
+| `bundle-budget.yml` | Advisory bundle-size gate: app-chunk total (≤450 kB) and largest lazy route chunk (≤40 kB), vendor/geo-data chunks reported but not budgeted. Warns via annotations + job summary; never blocks. | nightly 03:30 UTC + manual |
 | `security.yml` | Advisory dependency audits: `pip-audit` for `backend/requirements.txt` and `npm audit` for `frontend/`. Never blocked a merge (every step is `continue-on-error`), so it no longer queues in front of one. | weekly (Mondays 06:17 UTC) + manual |
 
 **Manual only:**

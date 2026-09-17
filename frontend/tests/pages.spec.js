@@ -79,7 +79,13 @@ test('data sources CRUD operations', async ({ page }) => {
 test('control room schedule and health checks', async ({ page }) => {
   await page.goto('/')
 
-  // Control room: the schedule selector, the scheduler's health view and the live probe
+  // The schedule selector, health view and live probe live on the Data
+  // Sources page -- the monolith this spec was split from reached them after
+  // the CRUD section; each split test starts from a fresh page and must
+  // navigate there itself.
+  await page.getByRole('button', { name: 'Data Sources' }).click()
+  await expect(page.getByRole('heading', { name: 'Data Sources' })).toBeVisible()
+
   await expect(page.getByLabel('Collection schedule for FDIC Call Reports')).toBeVisible()
   await page.getByLabel('Collection schedule for FDIC Call Reports').selectOption('60')
   await expect(page.getByText('overdue · retry ×4')).toBeVisible()

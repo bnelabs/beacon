@@ -24,13 +24,24 @@ def _wrap_pool_del(original_del: Callable[[mp_pool.Pool], None]) -> Callable[[mp
             message = str(exc)
             if "dumps" not in message:
                 raise
-            # ``ForkingPickler.dumps`` is no longer available because the module
-            # providing it was cleared during interpreter shutdown. This happens
-            # when Celery/torch tweak the pickler implementation.
-            logger.debug(
-                "Suppressing multiprocessing Pool shutdown error caused by late interpreter teardown: %s",
-                message,
-            )
+            # ``ForkingPickler.dumps`` is no longer available because the
+            # module providing it was cleared during interpreter shutdown.
+            # This happens when Celery/torch tweak the pickler implementation.
+            #
+            # The logging call is itself guarded: at late-teardown time this
+            # module's globals may already have been replaced with None, so
+            # ``logger.debug`` can raise ``AttributeError: 'NoneType' object
+            # has no attribute 'debug'`` from inside the very handler that
+            # exists to suppress teardown noise (observed as "Exception
+            # ignored in ... safe_del" at pytest exit). A guard that dies at
+            # the moment it guards is not a guard.
+            try:
+                logger.debug(
+                    "Suppressing multiprocessing Pool shutdown error caused by late interpreter teardown: %s",
+                    message,
+                )
+            except Exception:  # noqa: BLE001 - interpreter teardown; nothing left to log with
+                pass
         except Exception:
             # Bubble up every other failure so default behaviour is preserved.
             raise

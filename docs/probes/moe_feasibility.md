@@ -4,10 +4,10 @@
 Phase 5/6 parked feature: MoE architecture for regime-aware prediction blending.
 
 ## Prerequisite Now Available
-**Labelled regime history** — the platform now produces regime labels on every prediction pass via:
+**Regime labels on live predictions** — the platform now produces regime labels on every prediction pass via:
 - `backend.modules.engine.hidden_markov` (HMM-based regime detection)
-- `backend.modules.engine.prediction_engine` (regime-annotated predictions)
-- Persistence in prediction store with `regime_label` field
+- `backend.modules.engine.prediction_engine` (regime-annotated predictions: each per-source row in a prediction job's result carries `regime` and `regime_method`)
+- Persistence: prediction job results are stored in the `jobs.result` JSON column, so labelled predictions survive — but there is no dedicated prediction store, and no `regime_label` column anywhere; regime history is recovered by scanning job results
 
 ## MoE Architecture Proposal
 
@@ -40,11 +40,12 @@ prediction = sum(w_i * expert_i(x) for i, w_i in enumerate(gate_weights))
 ## Data Requirements
 
 ### Current State ✅
-- Regime labels produced per-prediction
-- Historical predictions stored with regime context
-- Model registry tracks performance by regime
+- Regime labels produced per-prediction (`regime` + `regime_method` per source row)
+- Historical predictions persisted inside job results (`jobs.result` JSON), carrying their regime context
 
 ### Missing Pieces ⚠️
+- A model registry: none exists today — nothing tracks trained models, let alone performance by regime (this memo's earlier draft asserted one; it was never real)
+- A queryable prediction history: regime history requires scanning `jobs.result`; no prediction store or table exists
 - Expert model checkpoints (one per regime)
 - Gating combiner module
 - MoE evaluation harness (by-regime metrics)
@@ -52,7 +53,7 @@ prediction = sum(w_i * expert_i(x) for i, w_i in enumerate(gate_weights))
 ## Implementation Phases
 
 ### Phase 1: Evidence Gathering (1 week)
-1. Query prediction store for regime distribution
+1. Scan persisted job results for regime distribution (no prediction store exists yet)
 2. Analyze per-regime prediction error (existing models)
 3. Quantify regime-specific error patterns
 4. Decision gate: does MoE promise exceed complexity cost?
@@ -63,8 +64,8 @@ prediction = sum(w_i * expert_i(x) for i, w_i in enumerate(gate_weights))
 3. Backtest vs single-model baseline
 4. Equivalence harness: MoE should beat baseline in ≥2 regimes without losing in others
 
-### Phase 3: Production Integration (1 week)
-1. Add MoE option to model registry
+### Phase 3: Production Integration (1 week, after Phases 0-2)
+1. Add MoE option to model configuration (requires first building the model registry listed under Missing Pieces)
 2. Update prediction engine to route through MoE when selected
 3. Monitoring dashboard: gate weights over time, expert contributions
 

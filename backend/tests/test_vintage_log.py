@@ -12,17 +12,15 @@ history.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
-os.environ.setdefault(
-    "DATABASE_URL",
-    f"sqlite:///{Path(__file__).resolve().parent / 'test_vintage_log.sqlite3'}",
-)
-(Path(__file__).resolve().parent / "test_vintage_log.sqlite3").unlink(missing_ok=True)
+# No private DATABASE_URL here: conftest.py pins USE_SQLITE=true suite-wide,
+# and backend.database under that flag ignores DATABASE_URL and binds the
+# shared on-disk ``./beacon.db`` -- which conftest also deletes at session
+# start, so every run begins cold and the vintage-log counts below are only
+# ever this run's own writes.
 
 from backend.database import SessionLocal, init_db  # noqa: E402
 from backend.models.timeseries import IndicatorObservation, IndicatorVintageLog  # noqa: E402

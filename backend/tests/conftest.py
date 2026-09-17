@@ -47,6 +47,33 @@ def _pin_sqlite_before_first_database_import() -> None:
     os.environ["USE_SQLITE"] = "true"
 
 
+def _start_every_session_on_a_cold_database() -> None:
+    """Delete the shared on-disk SQLite file before anything can connect.
+
+    ``USE_SQLITE=true`` binds every test module in the suite to the same
+    ``sqlite:///./beacon.db`` (cwd-relative), and several modules write rows
+    their fixtures never delete -- alert rules, scheduled sources, vintage-log
+    entries. That is invisible in CI (every run checks out a clean tree) and
+    loud locally: the second ``pytest`` against the same working directory
+    failed 17 tests across ``test_alert_evaluator``, ``test_sync_scheduler``,
+    ``test_data_source_update`` and ``test_vintage_log`` purely because the
+    first run's rows were still there. A suite that only passes against a
+    freshly deleted database cannot be re-run, and "run it again" is the
+    first thing anyone does after a failure.
+
+    conftest is imported before every test module, and the engine binds
+    lazily through NullPool (a new connection per checkout, no long-lived
+    file handle), so removing the file here is the last moment it is both
+    safe and guaranteed to precede the first connection. Modules keep their
+    own within-run cleanup; this is the between-run half.
+    """
+    from pathlib import Path
+
+    for suffix in ("", "-wal", "-shm"):
+        Path(f"beacon.db{suffix}").unlink(missing_ok=True)
+
+
 _ensure_repo_root_on_path()
 _pin_sqlite_before_first_database_import()
+_start_every_session_on_a_cold_database()
 

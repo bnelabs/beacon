@@ -1,10 +1,21 @@
 name: Bundle Size Budget Gate
 
-# why: the 33 kB route chunk must not silently regress. This runs nightly
-# alongside the deep frontend e2e to catch bundle bloat early, before it
-# impacts production load times. The gate is advisory (annotation) rather
-# than blocking, so perf work can iterate without CI friction while still
-# surfacing regressions within 24 hours.
+# why: the route chunks (the lazy-loaded page bundles, the largest of which is
+# RiskMapPage at ~33 kB) must not silently regress. This runs nightly
+# alongside the deep frontend e2e. The gate is advisory (annotations + job
+# summary) rather than blocking, so perf work can iterate without CI friction
+# while still surfacing regressions within 24 hours.
+#
+# What is measured, and what is deliberately not:
+#   * "app chunks" = every dist/assets/*.js except the manualChunks vendors
+#     (react-vendor, query-vendor, deck-vendor -- see frontend/vite.config.js)
+#     and the static geo-data payloads (region-boundaries, world-countries).
+#     Vendors are dependency-sized and move when the lockfile moves; holding
+#     them against an app-code budget would make the gate a constant alarm.
+#   * "route chunks" = app chunks that are not index-* (index-* are the entry
+#     and shared chunks, not pages).
+#   * gzip sizes are reported for context; budgets apply to raw bytes, which
+#     is what `vite build` prints and what the 33 kB figure refers to.
 on:
   schedule:
     # 03:30 UTC daily, right after the frontend-e2e run starts
@@ -42,58 +53,89 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Build production bundle with stats
-        run: npm run build -- --stats
+      - name: Build production bundle
+        run: npm run build
 
       - name: Analyze bundle sizes
         id: analyze
         run: |
-          # Budget thresholds (kB)
-          TOTAL_BUDGET=450
-          ROUTE_CHUNK_BUDGET=40
-          
-          # Extract sizes from stats.json if available, otherwise dist assets
-          if [ -f "dist/stats.json" ]; then
-            TOTAL_SIZE=$(node -e "console.log(Math.round(require('./dist/stats.json').size / 1024))")
-          else
-            TOTAL_SIZE=$(du -sk dist/assets/*.js 2>/dev/null | awk '{sum+=$1} END {print sum}')
-          fi
-          
-          # Find largest route chunk
-          LARGEST_ROUTE=$(find dist/assets -name "*.js" -type f 2>/dev/null | xargs -I {} sh -c 'size=$(stat -c%s "{}"); echo "$size {}"' | sort -rn | head -1)
-          LARGEST_ROUTE_KB=$(echo "$LARGEST_ROUTE" | awk '{print int($1/1024)}')
-          LARGEST_ROUTE_FILE=$(echo "$LARGEST_ROUTE" | awk '{print $2}')
-          
-          echo "total_size=$TOTAL_SIZE" >> $GITHUB_OUTPUT
-          echo "largest_route_kb=$LARGEST_ROUTE_KB" >> $GITHUB_OUTPUT
-          echo "largest_route_file=$LARGEST_ROUTE_FILE" >> $GITHUB_OUTPUT
-          
-          # Check budgets
-          BUDGET_OK=true
-          if [ "$TOTAL_SIZE" -gt "$TOTAL_BUDGET" ]; then
-            echo "::warning::Total bundle size ${TOTAL_SIZE}kB exceeds budget ${TOTAL_BUDGET}kB"
-            BUDGET_OK=false
+          node - <<'EOF' > "$RUNNER_TEMP/bundle-budget.env"
+          const { readdirSync, statSync } = require('node:fs')
+          const assets = readdirSync('dist/assets').filter((f) => f.endsWith('.js'))
+          const kb = (f) => statSync(`dist/assets/${f}`).size / 1024
+
+          const isVendor = (f) => /-vendor-/.test(f)
+          const isGeoData = (f) => /^(region-boundaries|world-countries)-/.test(f)
+          const isIndex = (f) => /^index-/.test(f)
+
+          const app = assets.filter((f) => !isVendor(f) && !isGeoData(f))
+          const routes = app.filter((f) => !isIndex(f))
+          const deps = assets.filter((f) => isVendor(f) || isGeoData(f))
+
+          const appTotal = app.reduce((s, f) => s + kb(f), 0)
+          const largestRoute = routes.reduce(
+            (max, f) => (kb(f) > kb(max) ? f : max),
+            routes[0]
+          )
+          const depsTotal = deps.reduce((s, f) => s + kb(f), 0)
+
+          const out = {
+            app_total_kb: Math.round(appTotal),
+            largest_route_kb: Math.round(kb(largestRoute)),
+            largest_route_file: largestRoute,
+            deps_total_kb: Math.round(depsTotal),
+          }
+          for (const [k, v] of Object.entries(out)) console.log(`${k}=${v}`)
+          EOF
+          cat "$RUNNER_TEMP/bundle-budget.env" >> "$GITHUB_OUTPUT"
+
+      - name: Check budgets and annotate
+        id: budget
+        env:
+          APP_TOTAL_KB: ${{ steps.analyze.outputs.app_total_kb }}
+          LARGEST_ROUTE_KB: ${{ steps.analyze.outputs.largest_route_kb }}
+          LARGEST_ROUTE_FILE: ${{ steps.analyze.outputs.largest_route_file }}
+          DEPS_TOTAL_KB: ${{ steps.analyze.outputs.deps_total_kb }}
+        run: |
+          APP_TOTAL_BUDGET=450    # app chunks (entry + shared + routes), raw kB
+          ROUTE_CHUNK_BUDGET=40   # any single lazy-loaded page chunk, raw kB
+
+          app_ok=true; route_ok=true
+          if [ "$APP_TOTAL_KB" -gt "$APP_TOTAL_BUDGET" ]; then
+            echo "::warning::App-chunk total ${APP_TOTAL_KB}kB exceeds the ${APP_TOTAL_BUDGET}kB budget (vendor and geo-data chunks excluded)"
+            app_ok=false
           fi
           if [ "$LARGEST_ROUTE_KB" -gt "$ROUTE_CHUNK_BUDGET" ]; then
-            echo "::warning::Route chunk ${LARGEST_ROUTE_FILE} (${LARGEST_ROUTE_KB}kB) exceeds budget ${ROUTE_CHUNK_BUDGET}kB"
-            BUDGET_OK=false
+            echo "::warning::Route chunk ${LARGEST_ROUTE_FILE} (${LARGEST_ROUTE_KB}kB) exceeds the ${ROUTE_CHUNK_BUDGET}kB budget"
+            route_ok=false
           fi
-          
-          echo "budget_ok=$BUDGET_OK" >> $GITHUB_OUTPUT
+          echo "app_ok=$app_ok" >> "$GITHUB_OUTPUT"
+          echo "route_ok=$route_ok" >> "$GITHUB_OUTPUT"
 
-      - name: Annotate PR or log results
+      - name: Write job summary
         if: always()
+        env:
+          APP_TOTAL_KB: ${{ steps.analyze.outputs.app_total_kb }}
+          LARGEST_ROUTE_KB: ${{ steps.analyze.outputs.largest_route_kb }}
+          LARGEST_ROUTE_FILE: ${{ steps.analyze.outputs.largest_route_file }}
+          DEPS_TOTAL_KB: ${{ steps.analyze.outputs.deps_total_kb }}
+          APP_OK: ${{ steps.budget.outputs.app_ok }}
+          ROUTE_OK: ${{ steps.budget.outputs.route_ok }}
         run: |
-          echo "## Bundle Size Report" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Metric | Value | Budget | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Total Bundle | \${{ steps.analyze.outputs.total_size }}kB | 450kB | $([ "\${{ steps.analyze.outputs.budget_ok }}" = "true" ] && echo "✅" || echo "⚠️") |" >> $GITHUB_STEP_SUMMARY
-          echo "| Largest Route Chunk | \${{ steps.analyze.outputs.largest_route_kb }}kB (\${{ steps.analyze.outputs.largest_route_file }}) | 40kB | $([ "\${{ steps.analyze.outputs.budget_ok }}" = "true" ] && echo "✅" || echo "⚠️") |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "\${{ steps.analyze.outputs.budget_ok }}" = "false" ]; then
-            echo "**Action required**: Bundle size regression detected. Review recent changes for:" >> $GITHUB_STEP_SUMMARY
-            echo "- New dependencies added" >> $GITHUB_STEP_SUMMARY
-            echo "- Large imports in route components" >> $GITHUB_STEP_SUMMARY
-            echo "- Missing code-splitting opportunities" >> $GITHUB_STEP_SUMMARY
-          fi
+          status() { [ "$1" = "true" ] && echo "✅" || echo "⚠️"; }
+          {
+            echo "## Bundle Size Report"
+            echo ""
+            echo "| Metric | Value | Budget | Status |"
+            echo "|--------|-------|--------|--------|"
+            echo "| App chunks total (raw) | ${APP_TOTAL_KB}kB | 450kB | $(status "$APP_OK") |"
+            echo "| Largest route chunk (\`${LARGEST_ROUTE_FILE}\`) | ${LARGEST_ROUTE_KB}kB | 40kB | $(status "$ROUTE_OK") |"
+            echo "| Vendor + geo-data chunks (informational) | ${DEPS_TOTAL_KB}kB | — | — |"
+            echo ""
+            if [ "$APP_OK" = "false" ] || [ "$ROUTE_OK" = "false" ]; then
+              echo "**Action required**: bundle regression detected. Review recent changes for:"
+              echo "- new dependencies imported into route components"
+              echo "- imports that pull a vendor into an app chunk (check \`manualChunks\`)"
+              echo "- missing code-splitting opportunities"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

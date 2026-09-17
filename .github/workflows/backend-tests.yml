@@ -1,9 +1,18 @@
 name: Backend tests (deep)
 
-# why: Maximum parallelization - 8 independent shards run simultaneously.
-# With 84 test files split across 8 jobs, wall time drops to ~3-5min.
+# why: the full backend validation -- the pinned scientific stack on CPU
+# torch, the pytest suite, the live-migration PostgreSQL service, the
+# generated-API-docs check and the offline migration render. This used to run
+# on every push and pull request and dominated CI wall-time (torch install
+# alone outlasts the entire sub-minute pre-merge budget), so it moved here:
+# nightly, and on demand whenever a change should be proven before merge:
+#   gh workflow run backend-tests.yml --ref <branch>
+# Run it by hand before merging anything that touches requirements, models,
+# migrations, the pipeline, or the API surface.
 on:
   schedule:
+    # 03:47 UTC daily, offset from frontend-e2e so the two nightly runs do
+    # not queue behind each other on the same account's runners.
     - cron: "47 3 * * *"
   workflow_dispatch:
 
@@ -15,261 +24,183 @@ permissions:
   contents: read
 
 jobs:
-  # Shared setup - installs deps once, cached by all test jobs
-  setup:
-    name: Setup Python & Dependencies
+  # why: NO PostgreSQL service is needed by the test suites themselves. They
+  # are self-contained:
+  #   * backend/tests/conftest.py only ensures the repo root is on sys.path.
+  #   * test_api_smoke.py forces SQLite (USE_SQLITE=true,
+  #     DATABASE_URL=sqlite:///backend/tests/test_api.sqlite3) and talks to the
+  #     app through FastAPI's in-process TestClient.
+  #   * test_pipeline_integration.py points DATABASE_URL at a per-test SQLite
+  #     file in tmp_path and drives the pipeline from a locally generated CSV.
+  #   * test_country_scope.py is the only docker/Postgres/Redis-dependent
+  #     test; it is skipped unless RUN_DOCKER_SCOPE_TESTS=1, which this
+  #     workflow never sets.
+  #
+  # A postgres service IS declared below, and the reason is
+  # test_migrations_live.py. This job used to conclude that no service was
+  # needed because nothing exercised a real database, and the migration
+  # "test" was `alembic upgrade head --sql` -- which cannot fail on a
+  # migration-ordering defect, because baseline_core_001 renders as a
+  # deliberate no-op offline. That is how a release shipped whose root
+  # migration added columns to a table created five revisions later, so no
+  # fresh install could start. The offline render step below is kept as a
+  # cheap import/render check; the service is what makes the ordering real.
+  test:
+    name: Compile and test (Python 3.12)
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    # why: the CPU torch wheel plus the scientific stack makes this the slow
+    # leg; 30 minutes leaves headroom on a cold uv cache while still bounding
+    # a hung job.
+    timeout-minutes: 30
     env:
+      # Install into the setup-python interpreter without a venv to keep the
+      # commands below free of repeated --system flags.
       UV_SYSTEM_PYTHON: "1"
-    steps:
-      - uses: actions/checkout@v7
-      - id: python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.1.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: |
-            backend/requirements.txt
-            backend/requirements-dev.txt
-      - name: Install CPU-only PyTorch
-        run: |
-          TORCH_VERSION="$(grep -E '^torch==' backend/requirements.txt | head -1 | cut -d= -f3)"
-          if [ -z "$TORCH_VERSION" ]; then
-            echo "Could not determine the torch pin from backend/requirements.txt" >&2
-            exit 1
-          fi
-          uv pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
-      - name: Install project and dev dependencies
-        run: uv pip install -r backend/requirements.txt -r backend/requirements-dev.txt
-      - uses: actions/cache/save@v6
-        with:
-          key: backend-deps-${{ github.run_id }}
-          path: |
-            ~/.cache/uv
-            /opt/hostedtoolcache/Python
-
-  test-api:
-    name: API Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: setup
-    env:
-      UV_SYSTEM_PYTHON: "1"
+      # test_migrations_live.py creates and drops throwaway databases on this
+      # server. Without it the live migration tests skip, and a skip is not a
+      # pass -- which is the whole point of naming the variable here.
+      #
+      # No password, because the service below uses trust auth; see its
+      # comment.
+      MIGRATION_TEST_DATABASE_URL: postgresql://beacon_user@127.0.0.1:5432/postgres
     services:
+      # Same image and major version as docker-compose.yml, so the migrations
+      # are validated against what deployments actually run.
+      #
+      # `POSTGRES_HOST_AUTH_METHOD: trust` is deliberate. The first version of
+      # this set POSTGRES_USER/POSTGRES_PASSWORD and connected with them, and
+      # every migration test failed with
+      #   FATAL: password authentication failed for user "beacon_user"
+      # even though the credentials matched the service env -- so the image
+      # did not initialise the role the way the stock postgres image does,
+      # and the job's own healthcheck could not tell, because `pg_isready`
+      # only checks that the server accepts connections, not that it
+      # authenticates anyone. Debugging an image's auth setup is not what
+      # this job is for. This is an ephemeral container on the runner's
+      # loopback, discarded when the job ends, so trust is the right trade:
+      # it removes a variable rather than hiding a failure, and nothing here
+      # holds data.
       postgres:
         image: timescale/timescaledb:2.15.2-pg15
         env:
           POSTGRES_USER: beacon_user
           POSTGRES_DB: postgres
           POSTGRES_HOST_AUTH_METHOD: trust
-        ports: [5432:5432]
+        ports:
+          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U beacon_user -d postgres"
-          --health-interval 5s --health-timeout 5s --health-retries 12
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with: { python-version: "3.12" }
-      - uses: astral-sh/setup-uv@v10.1.0
-        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
-      - uses: actions/cache/restore@v6
-        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
-      - run: python -m pytest backend/tests/test_api_*.py backend/tests/test_auth_gate.py backend/tests/test_custom_api_ssrf.py backend/tests/test_keyless_feeds.py backend/tests/test_plugin_http_client.py -n auto
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
 
-  test-models:
-    name: Model Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: setup
-    env:
-      UV_SYSTEM_PYTHON: "1"
-    services:
-      postgres:
-        image: timescale/timescaledb:2.15.2-pg15
-        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
-        ports: [5432:5432]
-        options: >-
-          --health-cmd "pg_isready -U beacon_user -d postgres"
-          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with: { python-version: "3.12" }
-      - uses: astral-sh/setup-uv@v10.1.0
-        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
-      - uses: actions/cache/restore@v6
-        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
-      - run: python -m pytest backend/tests/test_*hmm*.py backend/tests/test_mixture_of_experts.py backend/tests/test_neural_sde.py backend/tests/test_tncm_vae.py backend/tests/test_baselines.py -n auto
+      - name: Check out repository
+        uses: actions/checkout@v7
 
-  test-network:
-    name: Network Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: setup
-    env:
-      UV_SYSTEM_PYTHON: "1"
-    services:
-      postgres:
-        image: timescale/timescaledb:2.15.2-pg15
-        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
-        ports: [5432:5432]
-        options: >-
-          --health-cmd "pg_isready -U beacon_user -d postgres"
-          --health-interval 5s --health-timeout 5s --health-retries 12
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with: { python-version: "3.12" }
-      - uses: astral-sh/setup-uv@v10.1.0
-        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
-      - uses: actions/cache/restore@v6
-        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
-      - run: python -m pytest backend/tests/test_network*.py backend/tests/test_subgraphx.py backend/tests/test_reachability.py backend/tests/test_multiplex.py -n auto
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          # why: matches backend/Dockerfile.cpu (FROM python:3.12-slim) and
+          # the python3.12 interpreter installed by backend/Dockerfile. The
+          # pinned scientific stack (scipy 1.18, scikit-learn 1.9,
+          # matplotlib 3.11) requires >= 3.12, so CI must not run an older
+          # interpreter than the image ships.
+          python-version: "3.12"
 
-  test-clearing:
-    name: Clearing & Fire Sale Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: setup
-    env:
-      UV_SYSTEM_PYTHON: "1"
-    services:
-      postgres:
-        image: timescale/timescaledb:2.15.2-pg15
-        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
-        ports: [5432:5432]
-        options: >-
-          --health-cmd "pg_isready -U beacon_user -d postgres"
-          --health-interval 5s --health-timeout 5s --health-retries 12
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with: { python-version: "3.12" }
-      - uses: astral-sh/setup-uv@v10.1.0
-        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
-      - uses: actions/cache/restore@v6
-        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
-      - run: python -m pytest backend/tests/test_clearing*.py backend/tests/test_fire_sale.py backend/tests/test_liquidity_spiral.py -n auto
+      - name: Set up uv
+        # why: uv resolves and installs the pinned stack in seconds where pip
+        # takes the better part of a minute, and its cache is keyed on the
+        # requirements files so an unchanged stack is reused across runs.
+        # Pinned to an exact version because this action publishes no floating
+        # `v10` tag (only v10.0.0, v10.0.1, v10.1.0), so `@v10` fails to
+        # resolve.
+        uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
 
-  test-causal:
-    name: Causal & Discovery Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: setup
-    env:
-      UV_SYSTEM_PYTHON: "1"
-    services:
-      postgres:
-        image: timescale/timescaledb:2.15.2-pg15
-        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
-        ports: [5432:5432]
-        options: >-
-          --health-cmd "pg_isready -U beacon_user -d postgres"
-          --health-interval 5s --health-timeout 5s --health-retries 12
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with: { python-version: "3.12" }
-      - uses: astral-sh/setup-uv@v10.1.0
-        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
-      - uses: actions/cache/restore@v6
-        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
-      - run: python -m pytest backend/tests/test_causal*.py backend/tests/test_notears_nonlinear.py backend/tests/test_engine_orchestrator_scoring.py -n auto
+      - name: Install CPU-only PyTorch
+        # why: the default PyPI torch wheel pulls multi-GB CUDA runtime
+        # packages. The CPU wheel index keeps the runner image small and the
+        # job fast on a GPU-less runner. The version is read from
+        # requirements.txt rather than hard-coded so the two can never drift
+        # apart again. Installing it first means the requirements install
+        # below finds the pin already satisfied and never re-fetches torch
+        # from PyPI.
+        run: |
+          TORCH_VERSION="$(grep -E '^torch==' backend/requirements.txt | head -1 | cut -d= -f3)"
+          if [ -z "$TORCH_VERSION" ]; then
+            echo "Could not determine the torch pin from backend/requirements.txt" >&2
+            exit 1
+          fi
+          echo "Installing CPU-only torch==${TORCH_VERSION}"
+          uv pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
 
-  test-data:
-    name: Data & Pipeline Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: setup
-    env:
-      UV_SYSTEM_PYTHON: "1"
-    services:
-      postgres:
-        image: timescale/timescaledb:2.15.2-pg15
-        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
-        ports: [5432:5432]
-        options: >-
-          --health-cmd "pg_isready -U beacon_user -d postgres"
-          --health-interval 5s --health-timeout 5s --health-retries 12
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with: { python-version: "3.12" }
-      - uses: astral-sh/setup-uv@v10.1.0
-        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
-      - uses: actions/cache/restore@v6
-        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
-      - run: python -m pytest backend/tests/test_data*.py backend/tests/test_exposure_vintage.py backend/tests/test_pit.py backend/tests/test_vintage_log.py backend/tests/test_pipeline_integration.py -n auto
+      - name: Install project and dev dependencies
+        run: uv pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 
-  test-validation:
-    name: Validation & Quality Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: setup
-    env:
-      UV_SYSTEM_PYTHON: "1"
-    services:
-      postgres:
-        image: timescale/timescaledb:2.15.2-pg15
-        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
-        ports: [5432:5432]
-        options: >-
-          --health-cmd "pg_isready -U beacon_user -d postgres"
-          --health-interval 5s --health-timeout 5s --health-retries 12
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with: { python-version: "3.12" }
-      - uses: astral-sh/setup-uv@v10.1.0
-        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
-      - uses: actions/cache/restore@v6
-        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
-      - run: python -m pytest backend/tests/test_conformal.py backend/tests/test_cpcv*.py backend/tests/test_property_based.py backend/tests/test_prediction_uncertainty.py backend/tests/test_validation_report.py backend/tests/test_validator_anomalies.py -n auto
+      - name: Syntax gate (compileall)
+        # why: a fast, dependency-light gate that fails on Python syntax
+        # errors before the slower test collection step. (The pre-merge
+        # backend-ci.yml runs the same gate without any of the installs
+        # above; it is repeated here so a nightly failure is self-contained.)
+        run: python -m compileall -q backend
 
-  test-system:
-    name: System & Integration Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 12
-    needs: setup
-    env:
-      UV_SYSTEM_PYTHON: "1"
-    services:
-      postgres:
-        image: timescale/timescaledb:2.15.2-pg15
-        env: { POSTGRES_USER: beacon_user, POSTGRES_DB: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
-        ports: [5432:5432]
-        options: >-
-          --health-cmd "pg_isready -U beacon_user -d postgres"
-          --health-interval 5s --health-timeout 5s --health-retries 12
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with: { python-version: "3.12" }
-      - uses: astral-sh/setup-uv@v10.1.0
-        with: { enable-cache: true, cache-dependency-glob: "backend/requirements.txt" }
-      - uses: actions/cache/restore@v6
-        with: { key: backend-deps-${{ github.run_id }}, path: "~/.cache/uv", fail-on-cache-miss: true }
-      - name: API docs check
-        run: PYTHONPATH=. python scripts/generate_api_docs.py --check
+      - name: API docs are current
+        # why: docs/api-endpoints.md is generated from the app's own OpenAPI
+        # schema. The previous hand-written inventory drifted until seven of
+        # the fourteen endpoints it documented did not exist, and nothing
+        # caught it because a stale table still reads plausibly. This turns
+        # that silent failure into a build failure. Import only -- the app's
+        # lifespan, and therefore the database, is never started.
+        run: |
+          PYTHONPATH=. python scripts/generate_api_docs.py --check
+
       - name: Render migrations offline
+        # Catches unrenderable migration chains (import errors, bad op
+        # calls). This is NOT a migration test and is not offered as one:
+        # baseline_core_001 returns early when `op.get_context().as_sql`, so
+        # the revision that creates data_sources renders nothing and an
+        # ordering defect between it and the root revision is invisible here.
+        # Applying the chain to a real database is test_migrations_live.py,
+        # which the postgres service above exists for.
         run: |
           export DATABASE_URL=postgresql://user:pass@localhost:5432/db
           alembic upgrade head --sql > /dev/null
-      - run: python -m pytest backend/tests/test_migrations_live.py backend/tests/test_backtesting.py backend/tests/test_federated*.py backend/tests/test_regulatory.py backend/tests/test_adoption*.py backend/tests/test_alert_evaluator.py backend/tests/test_analytical_capacity.py backend/tests/test_country_scope.py backend/tests/test_e2e_api_coverage.py backend/tests/test_event*.py backend/tests/test_fractional.py backend/tests/test_frontend_contract.py backend/tests/test_fx_swap_layer.py backend/tests/test_job_events.py backend/tests/test_latent_dynamics.py backend/tests/test_model_io.py backend/tests/test_persistence_vectors.py backend/tests/test_persistent_homology.py backend/tests/test_phase_integration.py backend/tests/test_portfolio_overlap.py backend/tests/test_provenance_disclosure.py backend/tests/test_regime_batch_equivalence.py backend/tests/test_release_tooling.py backend/tests/test_report_honesty.py backend/tests/test_reproducibility.py backend/tests/test_risk_*.py backend/tests/test_snapshots.py backend/tests/test_stationarity.py backend/tests/test_streaming.py backend/tests/test_sync_scheduler.py backend/tests/test_systemic_module_inputs.py backend/tests/test_temporal_graph.py backend/tests/test_timeseries_store.py backend/tests/test_trainer_composition.py backend/tests/test_uncertainty.py -n auto
 
-  tests-complete:
-    name: Backend Tests Complete
-    runs-on: ubuntu-latest
-    needs: [setup, test-api, test-models, test-network, test-clearing, test-causal, test-data, test-validation, test-system]
-    if: always()
-    steps:
-      - run: |
-          FAILED=$(echo '${{ toJSON(needs) }}' | grep -c '"result": "failure"' || true)
-          if [ "$FAILED" -gt 0 ]; then
-            echo "One or more backend test groups failed"
-            exit 1
-          fi
-          echo "All backend tests passed"
+      - name: Run tests
+        env:
+          PYTHONUNBUFFERED: "1"
+        # why: this workflow is the one place coverage is produced: the
+        # report and artifact are consumed here, and instrumentation slows
+        # the suite by roughly 3.5x (measured 0.63s -> 2.19s on the fastest
+        # modules) -- a cost that made sense when this ran per-PR and does
+        # not when it runs nightly. pytest.ini no longer forces --cov, so
+        # this step fully controls it.
+        run: |
+          python -m pytest backend/tests \
+            --cov=backend \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-report=term-missing
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage
+          path: |
+            coverage.xml
+            htmlcov/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Ruff (advisory)
+        # why: surfaces real defects (E9 syntax errors, F63/F7 undefined
+        # names, F82 unused values) without blocking on style. Uses the ruff
+        # pin from backend/requirements-dev.txt.
+        continue-on-error: true
+        run: ruff check backend --select E9,F63,F7,F82 --output-format=github

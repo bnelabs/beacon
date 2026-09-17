@@ -10,9 +10,9 @@ request and response bodies are not reproduced here; read them from the live
 schema at `/openapi.json` or the Swagger UI at `/docs`.
 
 
-Application: **BEACON API - Banking Network Engine** v3.2.0
+Application: **BEACON API - Banking Network Engine** v3.3.0
 
-**124 operations across 22 tags.**
+**122 operations across 22 tags.**
 
 
 ## Pipeline (DATA-ENGINE-RESULTS)
@@ -231,10 +231,6 @@ Application: **BEACON API - Banking Network Engine** v3.2.0
 | `GET` | `/api/v1/analytics/insights/anomalies` | untyped | Detect and report anomalies in system behavior. |
 | `GET` | `/api/v1/analytics/overview` | untyped | Get comprehensive analytics overview. |
 | `GET` | `/api/v1/analytics/trends/time-series` | untyped | Get time-series trends for various metrics. |
-
-**Retired endpoints (Phase 2):**
-- `GET /api/v1/analytics/distribution/risk-scores` — no UI consumer since #68 deleted `useRiskScoreDistribution`
-- `GET /api/v1/analytics/models/performance-comparison` — no UI consumer since #68 deleted `useModelPerformanceComparison`
 
 
 ## Alert Rules
