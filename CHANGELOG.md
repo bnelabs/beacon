@@ -10,6 +10,14 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **The BoE probe's YELLOW-path discovery follow-up ran** (~5 further
+  polite requests): no stateless CSV/JSON contract exists behind
+  `FromShowColumns.asp` (HTML tables only, no download links, no REST
+  service referenced; the statistics hub landing links no bulk data files),
+  so the documented path is confirmed: a strict HTML-table parser plugin
+  with typed errors, aggressive caching and an identifying User-Agent,
+  first series Official Bank Rate (`IUDBEDR`). Licence/attribution check
+  remains open before shipping. Findings recorded in the probe document.
 - **Refused predictions are visible in the UI.** The Results page's
   predictions table grew an Uncertainty column with the three states the
   deep-ensemble wiring can put a row in: `Refused` (clay chip + the

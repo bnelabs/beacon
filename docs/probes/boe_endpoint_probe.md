@@ -65,6 +65,39 @@ decision paths, the actions are:
    reports before shipping (BoE statistical data is normally free to use
    with attribution; the exact licence was not captured by this probe).
 
+### Discovery follow-up (executed 2026-09-17, ~5 further requests)
+
+Action 1 of the YELLOW path is complete. Observed:
+
+- The Interactive Database is a classic server-rendered ASP application:
+  the landing page's forms post to `FromShowColumns.asp`; no REST/JSON
+  service is referenced anywhere in the landing or results pages.
+- `csv.x=yes` does **not** switch the content type on a stateless GET
+  (HTML returned, `Content-Type: text/html`); the results page contains no
+  CSV/XLS/download links — the only "csv" in the response is the echoed
+  query parameter.
+- The statistics hub landing page links no `.xlsx`/`.csv`/`.zip` data files
+  (media refs are PDFs/images); bulk statistical files, where they exist,
+  sit behind per-dataset pages that each need their own discovery pass.
+
+**Consequence — the parser path is confirmed, not avoided.** The reliable
+series-level contract is the HTML table returned by `FromShowColumns.asp`
+(`SeriesCodes=<code>`, `Datefrom`/`Dateto` in `DD/Mon/YYYY`, `UsingCodes=Y`),
+whose structure was observed to be regular: labelled series header, then
+date/value cell pairs. A `boe_database_plugin.py` should therefore:
+
+1. request the HTML table with an identifying User-Agent and cache
+   aggressively (daily series change at most daily);
+2. parse with a strict table parser and validate the schema (header names,
+   date parseability, numeric values) — any drift raises the platform's
+   typed `SchemaValidationError`/`DataSourceUnavailableError`, never a
+   silent default;
+3. register first series: Official Bank Rate (`IUDBEDR`), then SONIA-family
+   candidates for the semantics registry (direction per `FRED_SOFR`
+   convention);
+4. confirm BoE reuse/attribution terms before shipping (still open — this
+   probe captured no licence statement).
+
 *Probe discipline: every status code, redirect and value above was
 observed on 2026-09-17; nothing is inferred from documentation alone.*
 
