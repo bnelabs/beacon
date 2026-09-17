@@ -10,6 +10,22 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **`docs/operator_series_onboarding.md` — the path for an institution's own
+  series to join the platform.** The three-run pre-registered record
+  established that public daily stress families are thin and that six
+  registry codes (HQLA/LCR/NSFR/bank equity/FX swap basis/CDS) will never
+  have a public source; they are the differentiator, and until now onboarding
+  them was undocumented tribal knowledge spread across two plugins. The doc
+  states the exact contracts — `csv` (`Date[,Indicator],Value` files, mount
+  and sync cadence, absence-not-zero semantics) and `custom_api` (indicator
+  endpoint shape, auth modes, and the round-seven SSRF guardrails as binding
+  contract) — the already-declared stress directions per code, what the
+  pipeline does next (quality gate, event labelling, predictive validity,
+  volatility track with its ≥120-return floor, refusal-rendering), and the
+  boundaries: the parked early-warning line is not reopened by operator
+  data, the published v1–v3 records are untouched, and nothing sends data
+  outward. Registered in the docs index; README's registry bullet now points
+  at it.
 - **The volatility track is visible: a Results-page card prices GARCH(1,1)
   against unconditional variance per source.** `run_backtest` has computed it
   since the garch wiring, but nothing rendered it — the claim "does

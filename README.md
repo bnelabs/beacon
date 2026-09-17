@@ -251,7 +251,10 @@ register now, and it is kept short on purpose:
 - **No cross-source score aggregation.** A per-indicator stress *direction*
   registry does exist (`backend/modules/data/semantics.py`, used by the
   event labelling in backtests; an undeclared orientation is a refusal, not
-  a default). Aggregation still waits on per-indicator *units* and an
+  a default). Six of its codes are operator-reported and have no public
+  source — [`docs/operator_series_onboarding.md`](docs/operator_series_onboarding.md)
+  is the path for an institution's own series to join, with every direction
+  already declared. Aggregation still waits on per-indicator *units* and an
   agreed combination rule; without them, averaging scores across sources
   would average apples with inverted apples.
 
