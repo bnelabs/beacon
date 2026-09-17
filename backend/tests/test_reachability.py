@@ -105,6 +105,7 @@ REQUIRED_REACHABLE: Dict[str, str] = {
     "backend.modules.engine.tncm_vae": "abduction / intervention / propagation",
     "backend.modules.engine.counterfactual": "the counterfactual scenario the engine accepts",
     "backend.modules.engine.conformal": "split-conformal intervals computed per source in RealPredictionEngine.predict",
+    "backend.modules.engine.uncertainty": "deep-ensemble aleatoric/epistemic decomposition in RealPredictionEngine._uncertainty_for_source; an unreliable assessment (epistemic spike, ignorance-dominant variance) refuses the source's prediction",
 }
 
 
@@ -130,11 +131,6 @@ KNOWN_UNREACHABLE: Dict[str, Disposition] = {
         blocker="regime-conditioned experts have no regime input",
         plan="wire",
         next_step="the live regime label now exists (prediction engine); route per-regime expert scores through RegimeRoutedMoE once experts are trained on labelled regimes",
-    ),
-    "backend.modules.engine.uncertainty": Disposition(
-        blocker="nothing consumes a decomposed uncertainty signal",
-        plan="wire",
-        next_step="consume it after conformal: it answers the question conformal does not (is the interval wide because the world is noisy, or because the model is lost), and its docstring says an epistemic spike should refuse the prediction",
     ),
     "backend.services.lei_service": Disposition(
         blocker="entity mapping has no consumer yet: no plugin currently joins FDIC/EBA/BIS namespaces",

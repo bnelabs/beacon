@@ -531,15 +531,43 @@ def run_training(self, job_id: int, parameters: dict):
             sources = train_df['source_code'].nunique()
             logger.info(f"Split: Train={len(train_subset)}, Val={len(val_subset)}, Test={len(test_df)}, Sources={sources}")
 
-        # Train model
+        # Train model. With ensemble_size >= 2 on the single-source path,
+        # train M independently seeded members so the prediction engine can
+        # decompose aleatoric vs epistemic variance (and refuse a prediction
+        # whose epistemic term spikes). The multi-scale trainer does not
+        # train independent members yet; a request it cannot honour is
+        # recorded in the result rather than silently ignored.
         self.update_progress(job_id, 65.0)
 
-        training_metrics = trainer.train(
-            train_df=train_subset,
-            val_df=val_subset,
-            test_df=test_df,
-            output_dir=output_dir
-        )
+        ensemble_size = max(1, int(config.get('ensemble_size', 1) or 1))
+        ensemble_members: list = []
+        ensemble_note = None
+        if ensemble_size >= 2 and not has_multi_source:
+            from backend.modules.engine.trainer import train_ensemble
+            training_metrics, ensemble_members = train_ensemble(
+                train_df=train_subset,
+                val_df=val_subset,
+                test_df=test_df,
+                output_dir=output_dir,
+                model_type=model_type,
+                device=device,
+                config=config,
+            )
+        else:
+            if ensemble_size >= 2:
+                ensemble_note = (
+                    "ensemble_size was requested but the multi-scale trainer "
+                    "does not train independent members yet; a single model "
+                    "was trained and the uncertainty decomposition will "
+                    "report itself not measurable"
+                )
+                logger.warning("%s (ensemble_size=%d)", ensemble_note, ensemble_size)
+            training_metrics = trainer.train(
+                train_df=train_subset,
+                val_df=val_subset,
+                test_df=test_df,
+                output_dir=output_dir
+            )
 
         self.update_progress(job_id, 95.0)
 
@@ -599,6 +627,12 @@ def run_training(self, job_id: int, parameters: dict):
             # of a bespoke attention model is unjustified.
             "baseline_comparison": baseline_comparison,
             "model_path": training_metrics.model_path,
+            "ensemble": {
+                "size": len(ensemble_members) if ensemble_members else 1,
+                "requested": ensemble_size,
+                "members": ensemble_members,
+                **({"note": ensemble_note} if ensemble_note else {}),
+            },
             "predictions_path": training_metrics.predictions_path,
             "training_history_path": str(history_path),
             "train_loss_history": [float(value) for value in training_metrics.train_loss],
@@ -834,6 +868,11 @@ def run_prediction(self, job_id: int, parameters: dict):
                 if "confidence_method" in prediction_result.predictions_df.columns
                 else {}
             ),
+            # Aleatoric/epistemic decomposition state for this run (deep
+            # ensemble when the checkpoint has members; single-model reports
+            # the split not measurable). The explainability card derives its
+            # uncertainty block from this and from confidence_methods.
+            "uncertainty_decomposition": clean_nan(prediction_result.uncertainty_summary),
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "feature_importances": clean_nan(prediction_result.feature_importances),
             "metrics": clean_nan(prediction_result.metrics),

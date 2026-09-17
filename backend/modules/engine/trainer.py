@@ -7,7 +7,8 @@ from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import numpy as np
 from typing import Any, Dict, Tuple, List, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import shutil
 import logging
 from pathlib import Path
 import json
@@ -672,3 +673,89 @@ def split_train_val_by_date(
             "too short for the requested validation fraction"
         )
     return train_part, val_part, cutoff
+
+
+def train_ensemble(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    output_dir: str,
+    model_type: str,
+    device: torch.device,
+    config: Dict[str, Any],
+) -> Tuple[TrainingMetrics, List[str]]:
+    """Train ``ensemble_size`` independent members; member 0 stays ``best_model.pt``.
+
+    Why a separate entry point instead of a loop inside :meth:`ModelTrainer.train`:
+    the epistemic term in :mod:`backend.modules.engine.uncertainty` is the
+    *disagreement between independently trained members*, and independence is
+    the caller's contract to keep (the module's docstring says so explicitly).
+    Fresh ``ModelTrainer`` instances under distinct torch seeds give each member
+    its own weight initialisation and its own DataLoader shuffle order (both are
+    drawn from the global RNG at construction/iteration time). Members sharing a
+    seed would agree more than the truth warrants and the decomposition would
+    understate model ignorance -- the wrong direction to be wrong in.
+
+    Member 0 keeps the canonical ``best_model.pt`` name, so every existing
+    consumer (prediction engine, reports, the training result record) works
+    unchanged on an ensembled job; members 1..M-1 land beside it as
+    ``ensemble_member_{k}.pt``, which is where
+    :class:`~backend.modules.engine.prediction_engine.RealPredictionEngine`
+    discovers them. The returned metrics are member 0's -- an ensemble does not
+    yet have a combined evaluation, and reporting one member's numbers as "the"
+    numbers is stated here rather than hidden.
+
+    Returns:
+        ``(metrics, member_paths)`` -- member 0's metrics and every member's
+        checkpoint path in member order.
+    """
+    ensemble_size = max(1, int(config.get('ensemble_size', 1) or 1))
+    base_seed = int(config.get('seed', 42) or 42)
+    root = Path(output_dir)
+    members_root = root / 'ensemble_members'
+    member_paths: List[str] = []
+    metrics: Optional[TrainingMetrics] = None
+
+    for member_index in range(ensemble_size):
+        # Each member trains in its own directory: train() writes
+        # best_model.pt / predictions.csv / training_history.json into its
+        # output_dir, and letting members share one directory would leave the
+        # LAST member's artifacts under the canonical names -- a silent
+        # provenance swap the result record would not mention.
+        member_dir = members_root / str(member_index)
+        member_dir.mkdir(parents=True, exist_ok=True)
+        torch.manual_seed(base_seed + member_index)
+        trainer = ModelTrainer(model_type=model_type, device=device, config=dict(config))
+        member_metrics = trainer.train(
+            train_df=train_df, val_df=val_df, test_df=test_df, output_dir=str(member_dir)
+        )
+        if member_index == 0:
+            # Member 0 keeps the canonical names, so every existing consumer
+            # (prediction engine, reports, the training result record) reads
+            # an ensembled job's output exactly like a single-model job's.
+            final_model = root / 'best_model.pt'
+            final_predictions = root / 'predictions.csv'
+            final_history = root / 'training_history.json'
+            (member_dir / 'best_model.pt').replace(final_model)
+            (member_dir / 'predictions.csv').replace(final_predictions)
+            (member_dir / 'training_history.json').replace(final_history)
+            metrics = replace(
+                member_metrics,
+                model_path=str(final_model),
+                predictions_path=str(final_predictions),
+            )
+            member_paths.append(str(final_model))
+        else:
+            destination = root / f'ensemble_member_{member_index}.pt'
+            (member_dir / 'best_model.pt').replace(destination)
+            member_paths.append(str(destination))
+        logger.info(
+            "Ensemble member %d/%d trained (seed %d) -> %s",
+            member_index + 1, ensemble_size, base_seed + member_index, member_paths[-1],
+        )
+
+    shutil.rmtree(members_root, ignore_errors=True)
+
+    if metrics is None:  # pragma: no cover - ensemble_size >= 1 guarantees a member
+        raise RuntimeError("train_ensemble produced no members")
+    return metrics, member_paths

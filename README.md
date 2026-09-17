@@ -76,9 +76,11 @@ Storage (TimescaleDB + Redis)
   └── Hypertables with compression and continuous aggregates for observations
   └── Point-in-time store for bilateral exposure vintages (as-of queries)
   └── Redis: Celery broker, result backend, WebSocket relay
-  └── The schema covers indicator observations, risk scores and model metrics,
-      but only observations have a writer — nothing calls `RiskScorePoint` or
-      `ModelMetricPoint`, so those hypertables stay empty *(not wired)*
+  └── The schema covers indicator observations, risk scores and model
+      metrics, and all three now have writers: observations via the DATA
+      pipeline, risk scores via `persist_risk_scores` on prediction jobs
+      (null-scored/refused rows are skipped), model metrics via
+      `persist_model_metrics` on backtest jobs
 
 ML (PyTorch)
   └── Temporal Attention Networks and LSTM sequence models, per-source
@@ -89,6 +91,13 @@ ML (PyTorch)
       supplies the live per-source regime label in `prediction_engine.
       _regime_label`, which is what the mixture-of-experts census entry was
       waiting on
+  └── Aleatoric/epistemic decomposition (deep ensembles) — **wired where
+      members exist**: a training job with `ensemble_size >= 2` saves
+      independently seeded members beside `best_model.pt`; the prediction
+      engine decomposes each source's variance on the conformal calibration
+      slice and *refuses* a prediction whose epistemic term spikes (the
+      refusal is absence, never a number). A single-checkpoint model reports
+      the split as not measurable rather than a fabricated zero
   └── Walk-forward and CPCV validation with lift over persistence/AR/linear
       baselines; seam-aware metrics that never difference across sources
   └── Systemic risk: Basel III LCR/NSFR/leverage translation, coupled fire-sale
