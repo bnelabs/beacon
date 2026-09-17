@@ -10,6 +10,23 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **GARCH(1,1) is priced — the last unblocked `wire` disposition.** The
+  module shipped complete but unconsumed because "level baselines price
+  levels, not variance"; scoring it against level targets would have been a
+  category error. It now runs as its own track: `run_backtest` computes, per
+  source and on that source's own contiguous span (returns never difference
+  across a seam), a walk-forward comparison of the GARCH's one-step
+  conditional variance — seeded from training, stepping on observed *past*
+  squared returns, test returns centred by the training mean — against the
+  unconditional-variance baseline, on MSE-of-variance and MAE-of-volatility,
+  with per-fold parameters, stationarity and convergence reported rather
+  than hidden and a positive lift meaning the three parameters earned their
+  place (`backtesting.compare_volatility_baselines`, results under
+  `backtest_metrics.volatility_baselines.by_source`). A richer volatility
+  model now has the honest bar the garch module's docstring always claimed
+  it must beat. Census: `garch` moved to `REQUIRED_REACHABLE`. Six tests pin
+  the contract, including the load-bearing one: on data from a true
+  GARCH(1,1) family the fit must beat unconditional variance on both losses.
 - **The UK gap has its first feed: `boe_database` plugin** — action 2 of the
   executed BoE probe's YELLOW path, implemented to the contract the probe
   confirmed. A strict stdlib HTML-table reader for the Interactive Database

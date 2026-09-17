@@ -485,6 +485,148 @@ def baseline_factory(kind: str = "persistence") -> Callable[[], Any]:
 
 
 # ---------------------------------------------------------------------------
+# Volatility baselines (a separate track, deliberately)
+# ---------------------------------------------------------------------------
+def compare_volatility_baselines(
+    values: ArrayLike,
+    config: Optional[WalkForwardConfig] = None,
+    *,
+    min_train_returns: int = 120,
+) -> Dict[str, Any]:
+    """Price GARCH(1,1) as a volatility baseline against unconditional variance.
+
+    This is the volatility companion to the level baselines above -- and a
+    separate track on purpose, never an entry in ``BASELINE_NAMES``: GARCH
+    forecasts the conditional *variance of returns*, so scoring it against
+    level targets would be a category error (the same sin as pricing a
+    variance model with level r2). A richer volatility model (stochastic
+    volatility, the Neural SDE's latent dynamics) must beat BOTH columns
+    here to earn its keep -- that comparison is what the module docstring of
+    ``engine/garch.py`` means by "the honest baseline".
+
+    Discipline:
+
+    * ``values`` must be ONE source's contiguous span: returns are
+      ``np.diff`` of the levels, and a seam between sources would difference
+      two indicators against each other. Per-source segmentation is the
+      caller's job (``run_backtest`` iterates sources);
+    * folds come from the same embargoed walk-forward generator as the level
+      harness -- training strictly precedes test -- under this track's own
+      declared defaults (the level config's ``min_train_size`` can be far
+      below what a three-parameter ML fit needs);
+    * one-step-ahead conditional variances use only information available at
+      forecast time: the recursion is seeded with the training span's last
+      fitted conditional variance and steps on observed *past* squared
+      returns (test returns are centred by the TRAINING mean, the only mean
+      the fit ever saw);
+    * a fold whose fit fails (under 50 observations, zero variance) or comes
+      back non-stationary/non-converged is counted and reported, never
+      hidden or silently clipped into looking stationary;
+    * losses: MSE of variance against realised squared returns, and MAE of
+      volatility against absolute returns. Lift is ``unconditional - garch``:
+      positive means the three parameters earned their place.
+
+    Returns a JSON-safe dict. When the span cannot support the track, the
+    dict carries ``skipped`` with the reason -- absence, as always, is
+    reported as absence.
+    """
+    from .garch import fit_garch11
+
+    arr = _as_1d(values)
+    if not np.all(np.isfinite(arr)):
+        return {"skipped": "series contains non-finite values; a return across a gap is not a one-step return"}
+    returns = np.diff(arr)
+    cfg = config if config is not None else WalkForwardConfig(
+        n_splits=3, test_size=0.15, expanding=True, gap=1, min_train_size=min_train_returns
+    )
+    try:
+        folds = generate_walk_forward_folds(returns.size, cfg)
+    except ValueError as exc:
+        return {"skipped": str(exc)}
+
+    fold_results: List[Dict[str, Any]] = []
+    n_fit_failures = 0
+    n_nonstationary = 0
+    n_nonconverged = 0
+    for fold_index, (train_idx, test_idx) in enumerate(folds):
+        train_r = returns[train_idx]
+        test_r = returns[test_idx]
+        if train_r.size < max(min_train_returns, 50) or test_r.size < 1:
+            n_fit_failures += 1
+            continue
+        try:
+            fit = fit_garch11(train_r)
+        except ValueError as exc:
+            n_fit_failures += 1
+            fold_results.append({"fold": fold_index, "fit_failed": str(exc)})
+            continue
+        n_nonstationary += int(not fit.stationary)
+        n_nonconverged += int(not fit.converged)
+
+        train_mean = float(train_r.mean())
+        uncond_var = float(np.var(train_r - train_mean))
+
+        # One-step-ahead conditional variance over the test span.
+        centred = test_r - train_mean
+        squared = centred * centred
+        h = np.empty(squared.size)
+        prev_var = float(fit.conditional_volatility[-1]) ** 2
+        prev_sq = float((train_r[-1] - train_mean) ** 2)
+        for t in range(squared.size):
+            prev_var = fit.omega + fit.alpha * prev_sq + fit.beta * prev_var
+            h[t] = prev_var
+            prev_sq = float(squared[t])
+
+        realised_sq = squared
+        garch_mse_var = float(np.mean((h - realised_sq) ** 2))
+        garch_mae_vol = float(np.mean(np.abs(np.sqrt(np.maximum(h, 0.0)) - np.abs(centred))))
+        uncond_mse_var = float(np.mean((uncond_var - realised_sq) ** 2))
+        uncond_mae_vol = float(np.mean(np.abs(np.sqrt(max(uncond_var, 0.0)) - np.abs(centred))))
+        fold_results.append({
+            "fold": fold_index,
+            "n_train": int(train_r.size),
+            "n_test": int(test_r.size),
+            "omega": float(fit.omega),
+            "alpha": float(fit.alpha),
+            "beta": float(fit.beta),
+            "persistence": float(fit.persistence),
+            "stationary": bool(fit.stationary),
+            "converged": bool(fit.converged),
+            "garch": {"mse_var": garch_mse_var, "mae_vol": garch_mae_vol},
+            "unconditional": {"mse_var": uncond_mse_var, "mae_vol": uncond_mae_vol},
+        })
+
+    scored = [f for f in fold_results if "garch" in f]
+    if not scored:
+        return {
+            "skipped": "no fold produced a usable GARCH fit",
+            "n_folds": len(folds),
+            "n_fit_failures": n_fit_failures,
+            "folds": fold_results,
+        }
+
+    def _mean(model: str, loss: str) -> float:
+        return float(np.mean([f[model][loss] for f in scored]))
+
+    summary = {
+        "n_folds": len(folds),
+        "n_scored_folds": len(scored),
+        "n_fit_failures": n_fit_failures,
+        "n_nonstationary_fits": n_nonstationary,
+        "n_nonconverged_fits": n_nonconverged,
+        "garch": {"mse_var": _mean("garch", "mse_var"), "mae_vol": _mean("garch", "mae_vol")},
+        "unconditional": {"mse_var": _mean("unconditional", "mse_var"), "mae_vol": _mean("unconditional", "mae_vol")},
+        "lift": {
+            # positive = GARCH beats the unconditional variance
+            "mse_var": _mean("unconditional", "mse_var") - _mean("garch", "mse_var"),
+            "mae_vol": _mean("unconditional", "mae_vol") - _mean("garch", "mae_vol"),
+        },
+        "folds": fold_results,
+    }
+    return summary
+
+
+# ---------------------------------------------------------------------------
 # Aggregate metric bundle
 # ---------------------------------------------------------------------------
 def compute_metrics(

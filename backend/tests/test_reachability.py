@@ -106,6 +106,7 @@ REQUIRED_REACHABLE: Dict[str, str] = {
     "backend.modules.engine.counterfactual": "the counterfactual scenario the engine accepts",
     "backend.modules.engine.conformal": "split-conformal intervals computed per source in RealPredictionEngine.predict",
     "backend.modules.engine.uncertainty": "deep-ensemble aleatoric/epistemic decomposition in RealPredictionEngine._uncertainty_for_source; an unreliable assessment (epistemic spike, ignorance-dominant variance) refuses the source's prediction",
+    "backend.modules.engine.garch": "GARCH(1,1) priced as the volatility baseline against unconditional variance in run_backtest's per-source volatility track (backtesting.compare_volatility_baselines)",
 }
 
 
@@ -136,11 +137,6 @@ KNOWN_UNREACHABLE: Dict[str, Disposition] = {
         blocker="entity mapping has no consumer yet: no plugin currently joins FDIC/EBA/BIS namespaces",
         plan="wire",
         next_step="use LEI resolution when the EBA transparency ingest lands, so institution identities join across sources without guessed matches",
-    ),
-    "backend.modules.engine.garch": Disposition(
-        blocker="the GARCH(1,1) volatility baseline has no consumer yet: level baselines price levels, not variance",
-        plan="wire",
-        next_step="price it as a volatility baseline in the backtest harness and feed conditional vol as a feature once the event-labelled validation exists",
     ),
     # -- decide: blocked on a call, not on effort ----------------------------
     "backend.modules.engine.foundation_encoders": Disposition(
