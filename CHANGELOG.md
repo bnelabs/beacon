@@ -9,6 +9,13 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Added
+- **Tracked build artifacts now fail the fast gate.** `backend-ci.yml` gains
+  a milliseconds-long index check (`git ls-files` against
+  `__pycache__`/`.pyc`/`beacon.db`/`dist`/`node_modules` patterns): the
+  restored `.gitignore` prevents artifact leaks at the filesystem level,
+  this prevents the task-snapshot class of leak at the index level.
+
 ### Fixed
 - **The transparency card reports what the job actually carries.** The
   explainability endpoint's uncertainty block asserted a blanket

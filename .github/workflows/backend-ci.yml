@@ -39,6 +39,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - name: No build artifacts are tracked
+        # why: a task-snapshot commit once replaced .gitignore with an LLM's
+        # prose and a compiled analytics.cpython-312.pyc was committed into
+        # the tree; the restored ignore rules prevent that at the filesystem
+        # level, this prevents it at the index level. Milliseconds, stdlib
+        # git only -- inside the sub-minute budget by construction.
+        run: |
+          tracked=$(git ls-files | grep -E '(__pycache__/|\.pyc$|\.pyo$|(^|/)beacon\.db|(^|/)dist/|node_modules/)' || true)
+          if [ -n "$tracked" ]; then
+            echo "::error::Build artifacts are tracked in git; untrack them (git rm --cached):"
+            echo "$tracked"
+            exit 1
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
