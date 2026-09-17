@@ -10,6 +10,31 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **The v3 early-warning run executed — 0 of 3, and the line is parked as
+  its own protocol declared.** One clean run under tag
+  `prereg-early-warning-v3` (tag → fetch → evaluate; zero retries; key
+  grep-verified absent from every committed file; licence screen refused
+  the ICE BofA series before download). The q98 alarm point fixed exactly
+  what v2 diagnosed — false alarms fell from ~9–10 to 2.7–4.7 per quiet
+  year, clearing the criterion for two of three indicators — and consumed
+  lead time exactly as declared pre-run (medians 42→10, 18.5→10, 11.5→8;
+  VIX fell through the frozen ≥10-day floor). `FRED_T10Y3M`'s frozen TAN
+  failed on the false-alarm criterion **alone, by 0.2** (4.2 vs 4.0) — the
+  closest any candidate came in three runs, published as a fail because
+  loosening a ceiling after seeing 4.2 is the goalpost-move the protocol
+  exists to forbid. The frozen hazard logit failed out-of-sample on both
+  spreads (AUC 0.39/0.44): an 18-year extrapolation of a pre-2006 hazard
+  fit does not survive the QE-era regime change — recorded as the finding
+  it is (frozen-forever scoring and hazard architectures are a poor
+  pairing; the literature's rolling refits were outside this protocol's
+  discipline). Persistence remains unbeaten on VIX (0.9265 vs 0.9257).
+  Reproducibility held a third time: alarm-independent metrics identical
+  across v2/v3 for every indicator-scorer pair. Under the terminal clause
+  frozen before the run, the early-warning line is **parked** with the
+  three-run record; the README gate now says so, and any resumption is a
+  new owner-initiated protocol (recorded v4 axes: rolling refits,
+  weekly/monthly tracks for the credit-gap family). Report + execution
+  log: `docs/prereg/runs/early_warning_v3/`.
 - **Early-warning pre-registration v3 — the declared-final iteration.**
   Two changes, both derived from *published* v1/v2 facts, with every
   grading criterion frozen untouched: (1) alarm quantile 0.95 → **0.98** —

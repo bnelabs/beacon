@@ -218,30 +218,36 @@ register now, and it is kept short on purpose:
   are computed per source wherever the payload's own held-out residuals
   support a calibration window, and are `null` — with `confidence_method`
   recording why — wherever they do not.
-- **No event target yet.** Crisis early-warning needs a labelled stress-event
-  target (event labeller) and a pre-registered evaluation — lift over
-  persistence/AR baselines under CPCV, event precision and lead time. Until
-  both exist the platform is a data-governance and scenario laboratory, not a
-  demonstrated early-warning system, and it does not claim to be one. Two
-  protocol versions have now been frozen, tagged, run once each, and
-  published unchanged:
-  [v1](docs/prereg/runs/early_warning_v1/report.md)
-  (`prereg-early-warning-v1`) graded the single indicator that survived its
-  data-availability rules and returned NO;
-  [v2](docs/prereg/runs/early_warning_v2/report.md)
-  (`prereg-early-warning-v2`) kept **every criterion, window, model and seed
-  identical** and fixed only the diagnosed flaw — the family — adding the
-  literature-backed daily series `T10Y3M` and `VIXCLS` (plus a licence
-  screen that withdraws prohibited data before download). Verdict: 0 of 3
-  passed, claim still **NO** — but the numbers are now informative: T10Y2Y
-  reproduced v1 byte-identically; `T10Y3M` beat both baselines (the only
-  lift-criterion pass) and flagged 5 of the 7 declared episodes; `VIXCLS`
-  discriminates strongly (AUC 0.93, AP ≈ 9× base rate). What binds all
-  three is the false-alarm criterion (~9–10 per quiet year vs ≤4): the q95
-  alarm quantile fires on ~5% of days by construction, so v3's design work —
-  declared in advance, never tuned post hoc — is the alarm rule and its
-  coherence with the false-alarm ceiling, plus the weekly/monthly tracks
-  that would admit the credit-gap family the literature favours.
+- **No event target — line parked after three pre-registered runs.** Crisis
+  early-warning needs a labelled stress-event target and a pre-registered
+  evaluation; until a run passes one, the platform is a data-governance and
+  scenario laboratory, not a demonstrated early-warning system, and it does
+  not claim to be one. Three protocol versions were frozen, tagged, run once
+  each, and published unchanged:
+  [v1](docs/prereg/runs/early_warning_v1/report.md) — under-powered NO (one
+  testable indicator, below the declared family minimum);
+  [v2](docs/prereg/runs/early_warning_v2/report.md) — better-powered NO
+  (0/3) whose diagnosis was arithmetic: at the q95 alarm point the
+  false-alarm ceiling was unreachable for any indicator;
+  [v3](docs/prereg/runs/early_warning_v3/report.md) — the declared-final
+  run: coherent q98 alarm point plus a second frozen scorer (onset-hazard
+  logit, the crisis literature's architecture), every grading criterion
+  untouched. Verdict 0/3, and under its terminal clause **this line is
+  parked**. What the three-run record establishes: the coherent alarm point
+  fixed the false-alarm criterion (9–10 → 2.7–4.7 per quiet year) and
+  consumed lead time exactly as declared (medians 42→10, 18.5→10, 11.5→8 —
+  VIX fell through the 10-day floor); `FRED_T10Y3M`'s frozen TAN missed
+  passing on the FA criterion alone, by 0.2 alarms per quiet year (4.2 vs
+  4.0 — published as a fail; loosening it afterwards would be the
+  goalpost-move the protocol exists to forbid); the frozen hazard logit
+  failed out-of-sample on both spreads (AUC 0.39/0.44 — an 18-year
+  extrapolation of a pre-2006 fit does not survive the QE-era regime
+  change); and persistence remains unbeaten on `VIXCLS` (AUC 0.9265 vs
+  0.9257). Reproducibility held throughout: alarm-independent metrics are
+  byte-identical across versions. Any resumption is a new protocol (the
+  recorded v4 axes: rolling refits — the discipline the hazard architecture
+  actually needs — and weekly/monthly tracks admitting the credit-gap
+  family), owner-initiated, frozen before its run, like all three of these.
 - **No cross-source score aggregation.** A per-indicator stress *direction*
   registry does exist (`backend/modules/data/semantics.py`, used by the
   event labelling in backtests; an undeclared orientation is a refusal, not
