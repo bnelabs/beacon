@@ -298,7 +298,7 @@ def _evaluate_indicator(code: str, entry: Dict[str, Any]) -> Dict[str, Any]:
     import torch
 
     from backend.modules.data.event_labeller import EventDefinition, label_events
-    from backend.modules.data.quality_gate import QualityGate
+    from backend.modules.data.quality_gate import DataQualityGate
     from backend.modules.data.semantics import event_direction, stress_direction
     from backend.modules.engine.event_metrics import (
         average_precision,
@@ -306,9 +306,8 @@ def _evaluate_indicator(code: str, entry: Dict[str, Any]) -> Dict[str, Any]:
         lead_time_stats,
         roc_auc,
     )
-    from backend.modules.engine.model_io import safe_torch_load, safe_torch_save
+    from backend.modules.engine.multi_scale_trainer import MultiScaleTrainer
     from backend.modules.engine.prediction_engine import RealPredictionEngine
-    from backend.modules.engine.trainer import ModelTrainer
 
     out: Dict[str, Any] = {"code": code, "direction": event_direction(code)}
     direction_sign = 1.0 if stress_direction(code) >= 0 else -1.0
@@ -320,7 +319,7 @@ def _evaluate_indicator(code: str, entry: Dict[str, Any]) -> Dict[str, Any]:
     out["rows_train"], out["rows_eval"] = int(len(train_frame)), int(len(eval_frame))
 
     # 1. Certification: the real quality gate, on the evaluation payload.
-    gate = QualityGate()
+    gate = DataQualityGate()
     attestation = gate.evaluate({code: eval_frame}, job_id=f"prereg-ew-v1-{code}")
     out["quality_gate"] = {
         "verified": bool(attestation.verified),
@@ -333,28 +332,36 @@ def _evaluate_indicator(code: str, entry: Dict[str, Any]) -> Dict[str, Any]:
         out["skip_reason"] = "quality_gate_failed"
         return out
 
-    # 2. Train the frozen small model on the pre-2007 span only.
+    # 2. Train the frozen small model on the pre-2007 span only. Production
+    # pairing: MultiScaleTrainer checkpoints carry the architecture config,
+    # source_stats and sources that RealPredictionEngine._load_model reads.
+    # (The single-scale ModelTrainer's checkpoints cannot be loaded by the
+    # engine, and bypassing the engine would score through a path production
+    # does not use -- infrastructure defect #2, logged, no metric existed.)
     workdir = DATA_DIR / "work" / code
     workdir.mkdir(parents=True, exist_ok=True)
+    train_frame = train_frame.assign(source_code=code)
+    eval_frame = eval_frame.assign(source_code=code)
     split_at = int(len(train_frame) * 0.8)
-    trainer = ModelTrainer(model_type="temporal_attention", device=torch.device("cpu"), config=dict(MODEL_CONFIG))
+    trainer = MultiScaleTrainer(model_type="temporal_attention", device=torch.device("cpu"),
+                                config=dict(MODEL_CONFIG))
     torch.manual_seed(11)  # frozen training seed; member of the protocol, not a tuned value
-    metrics = trainer.train(
+    trainer.train(
         train_df=train_frame.iloc[:split_at],
         val_df=train_frame.iloc[split_at:],
         test_df=eval_frame,
         output_dir=str(workdir),
     )
-    checkpoint_path = Path(metrics.model_path)
+    checkpoint_path = workdir / "best_model.pt"
+    if not checkpoint_path.exists():
+        out["status"] = "failed"
+        out["error"] = "training produced no checkpoint"
+        return out
 
-    # Attach the training-span normalisation so the engine scores in the
-    # space the model was trained in, not in payload-derived statistics.
+    # Training-span statistics for the baselines (the engine reads its own
+    # source_stats from the checkpoint, which MultiScaleTrainer saved).
     train_values = pd.to_numeric(train_frame["Value"], errors="coerce").to_numpy(dtype=float)
     finite = train_values[np.isfinite(train_values)]
-    checkpoint = safe_torch_load(str(checkpoint_path))
-    checkpoint["source_stats"] = {code: {"mean": float(finite.mean()), "std": float(finite.std())}}
-    checkpoint["sources"] = [code]
-    safe_torch_save(checkpoint, checkpoint_path)
 
     # 3. Out-of-sample per-timestep risk series over the evaluation window.
     engine = RealPredictionEngine(str(checkpoint_path), torch.device("cpu"),
