@@ -1031,8 +1031,8 @@ def _evaluate_indicator(code: str, entry: Dict[str, Any], proto: Dict[str, Any])
         lead = lead_time_stats(ev, alarms, max_lead=int(tp["max_lead"]))
         fa = false_alarm_stats(alarms, ev, horizon=int(tp["horizon"]))
         return {
-            "roc_auc": roc_auc(events, sc),
-            "average_precision": average_precision(events, sc),
+            "roc_auc": roc_auc(ev, sc),
+            "average_precision": average_precision(ev, sc),
             "lead_time": lead,
             "false_alarms": fa,
             "n_alarms": int(alarms.sum()),
