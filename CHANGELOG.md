@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-09-17
+
 ### Added
 - **`docs/FAILURE_LEDGER.md` — the failure & mitigation ledger, open to
   everyone.** Twenty-four confirmed failures in one place — the three-run
