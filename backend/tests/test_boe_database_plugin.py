@@ -90,8 +90,12 @@ class TestRegistrationAndProvenance:
         assert record is not None
         assert record.publisher == "Bank of England"
         assert record.provenance_class == "official_statistics"
-        # The open licence question is recorded, not hidden.
-        assert "licence unconfirmed" in record.provides
+        # The licence question is resolved and pinned: OGL v3, confirmed
+        # 2026-09-18 against bankofengland.co.uk/legal (quote and scope notes
+        # in docs/probes/boe_endpoint_probe.md). A future edit that drops the
+        # licence statement from the record fails here, not in production.
+        assert "Open Government Licence" in record.provides
+        assert "LSEG" in record.provides  # the third-party exclusion travels with the grant
 
 
 class TestParsingTheObservedContract:
