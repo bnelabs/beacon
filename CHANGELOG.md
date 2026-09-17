@@ -10,6 +10,16 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **The BoE endpoint probe was executed** (2026-09-17, ~9 polite requests)
+  and its findings recorded in `docs/probes/boe_endpoint_probe.md` against
+  the pre-written criteria: the guessed balance-sheet file 404s,
+  `api.bankofengland.co.uk` does not resolve, but the Interactive Database
+  (`boeapps/database/FromShowColumns.asp`) serves real series data with no
+  authentication — Official Bank Rate `IUDBEDR` = 5.25 returned for
+  2–5 Jan 2024, matching published history — as HTML tables (`csv.x=yes`
+  did not yield CSV; `DD/Mon/YYYY` dates required). Classified **YELLOW**:
+  bounded endpoint-discovery follow-up before any parser work; bank-level
+  UK exposures would need a separate PRA probe.
 - **Event-target & pre-registered-evaluation proposal**
   (`docs/probes/event_target_proposal.md`, awaiting owner sign-off — nothing
   in it is pre-registered): the declared episode family (seven widely-dated
