@@ -16,6 +16,7 @@ they stayed stale for ten months without anyone noticing.
 | [`deployment.md`](deployment.md) | Deploying on this host: Docker Compose, GPU, model weights, secrets, verification |
 | [`RUNBOOK.md`](RUNBOOK.md) | Operating the deployment: boot order, environment, health checks, failure matrix, backup/restore drill |
 | [`VERSIONING.md`](VERSIONING.md) | SemVer policy, changelog discipline, release tooling, what CI enforces |
+| [`operator_series_onboarding.md`](operator_series_onboarding.md) | Onboarding the six operator-reported registry codes: CSV and custom-API routes, declared directions, SSRF contract, what the pipeline does next, and the parked-EWS boundary |
 | [`LANGUAGE_STRATEGY.md`](LANGUAGE_STRATEGY.md) | The measured Python/Rust boundary and the rule for moving it |
 | [`../.github/workflows/README.md`](../.github/workflows/README.md) | CI/CD workflows and how to reproduce each locally |
 
