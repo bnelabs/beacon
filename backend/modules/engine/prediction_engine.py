@@ -31,9 +31,12 @@ requires a network and a value function over that network, which this engine's
 payload does not carry, so ``feature_importances`` remains empty here rather than
 being filled with something unverifiable.
 
-Uncertainty intervals are likewise reported as unavailable until conformal
-calibration is in place; the confidence fields are ``None`` and
-``confidence_method`` records why.
+Uncertainty intervals are split-conformal, computed per source from the
+payload's own held-out rolling residuals when there are enough of them; a
+source that cannot support a calibration window gets ``None`` bounds with
+``confidence_method`` recording why -- never a zero-width or invented
+interval. What remains uncalibrated is the risk *scale*: no mapping from the
+standardized score to risk levels exists, and none is simulated.
 """
 
 import torch
@@ -812,6 +815,17 @@ class RealPredictionEngine:
         else:
             avg_risk = max_risk = min_risk = 0.0
 
+        # What the summary says about intervals must match what the rows
+        # carry: count the per-source confidence methods actually recorded
+        # rather than asserting a blanket state.
+        if not predictions_df.empty and 'confidence_method' in predictions_df.columns:
+            methods = predictions_df['confidence_method'].astype(str)
+            n_with_intervals = int(methods.str.startswith('split_conformal').sum())
+            method_counts = {m: int(c) for m, c in methods.value_counts().items()}
+        else:
+            n_with_intervals = 0
+            method_counts = {}
+
         executive_summary = f"""
 LIQUIDITY STRESS FORECAST SUMMARY
 
@@ -827,10 +841,15 @@ mapping to a risk level exists yet (README.md, Scoring and validation).
 KEY FINDINGS:
 {self._generate_key_findings(predictions_df)}
 
-Attribution and calibrated uncertainty are not reported: local feature
-attribution is available through SubgraphX when a liability network and a game
-value are supplied, and intervals through conformal calibration. Neither is
-reported here rather than approximated.
+INTERVALS AND ATTRIBUTION:
+Prediction intervals are split-conformal, fitted per source on this
+payload's own held-out rolling residuals: {n_with_intervals} of {len(predictions_df)} source(s) carry
+one (confidence methods: {method_counts}). Sources whose history cannot
+support a calibration window report null bounds and name the reason in
+confidence_method; no interval is invented or zero-width.
+Local feature attribution is not reported: SubgraphX requires a liability
+network and a game value this payload does not carry, and nothing is
+approximated in its place.
 """
 
         return PredictionResult(

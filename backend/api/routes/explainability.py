@@ -7,9 +7,12 @@ summary asserting that "all predictions include confidence intervals and
 feature attributions". All three methods had been **removed** from the codebase
 in an earlier review round (the attribution routine presented gradient*input
 scaled by uniform attention as SHAP; the dropout intervals described a
-different network than the one scoring), and confidence intervals are
-reported as unavailable until conformal calibration lands. The endpoint was
-asserting the exact things the rest of the repository had repudiated.
+different network than the one scoring), and confidence intervals were
+reported as unavailable at a time when nothing computed them. (Split-conformal
+intervals were wired per source afterwards; the uncertainty block below now
+reports what each job actually carries instead of a blanket state.) The
+endpoint was asserting the exact things the rest of the repository had
+repudiated.
 
 What these endpoints serve now is what actually exists:
 
@@ -17,7 +20,9 @@ What these endpoints serve now is what actually exists:
 * attribution status ``not_computed`` with the reason and the module that
   will provide it once a liability network and a game value are available
   (``backend/modules/engine/subgraphx.py``),
-* uncertainty status ``not_calibrated`` with the calibration roadmap pointer,
+* an uncertainty block derived from the job's recorded per-source
+  confidence methods (``not_recorded`` when the result predates them), with
+  the calibration roadmap pointer,
 * the metrics the job really recorded,
 * per-institution profiles with their scores in the model's own units --
   never multiplied into percentages, never defaulted to zero when absent.
@@ -52,15 +57,58 @@ _ATTRIBUTION_NOT_COMPUTED = {
     "provider_when_available": "backend.modules.engine.subgraphx",
 }
 
-_UNCERTAINTY_NOT_CALIBRATED = {
-    "status": "not_calibrated",
+_UNCERTAINTY_ROADMAP = "README.md, Scoring and validation: known limitations"
+
+#: Fallback for jobs whose result predates confidence-method recording (or
+#: non-prediction jobs): states the current semantics without inventing a
+#: per-job status the result cannot support.
+_UNCERTAINTY_NOT_RECORDED = {
+    "status": "not_recorded",
     "reason": (
-        "Calibrated intervals require a held-out calibration set per source "
-        "(split conformal). Until then the confidence fields are null rather "
-        "than an interval from a method that described a different network."
+        "This job's stored result does not record per-source confidence "
+        "methods, so no interval status is asserted for it. Current "
+        "prediction jobs compute split-conformal intervals per source where "
+        "the payload's held-out residuals support a calibration window; "
+        "elsewhere the confidence fields are null and each row's "
+        "confidence_method records why. Independently of intervals, no "
+        "calibrated risk scale exists: standardized scores are not banded "
+        "into risk-level percentages."
     ),
-    "roadmap": "README.md, Scoring and validation: known limitations",
+    "roadmap": _UNCERTAINTY_ROADMAP,
 }
+
+
+def _uncertainty_block(result: dict) -> dict:
+    """Report the uncertainty state the job's result actually carries.
+
+    ``confidence_methods`` (method label -> source count) is recorded by the
+    prediction task since the conformal wiring; deriving the status from it
+    keeps this card honest in both directions -- it no longer claims bounds
+    are universally null (they are not, when a source's residual history
+    supports split conformal), and it does not claim calibrated intervals
+    for sources whose method says otherwise.
+    """
+    methods = result.get("confidence_methods")
+    if not isinstance(methods, dict) or not methods:
+        return dict(_UNCERTAINTY_NOT_RECORDED)
+
+    conformal = {m: c for m, c in methods.items() if str(m).startswith("split_conformal")}
+    status = "split_conformal_per_source" if conformal else "not_calibrated"
+    reason = (
+        "Per-source confidence methods recorded by this job. Split-conformal "
+        "intervals are computed from each source's own held-out rolling "
+        "residuals; sources listed under another method have null bounds, "
+        "with the method label recording why (e.g. "
+        "insufficient_history_for_calibration). No calibrated risk scale "
+        "exists: standardized scores are not banded into risk-level "
+        "percentages."
+    )
+    return {
+        "status": status,
+        "confidence_methods": methods,
+        "reason": reason,
+        "roadmap": _UNCERTAINTY_ROADMAP,
+    }
 
 
 @router.get("/{job_id}/explanation")
@@ -72,10 +120,11 @@ async def get_model_explanation(
     Serve the transparency card for a training or prediction job.
 
     Returns what the job actually produced: its saved model-output report,
-    the metrics it recorded, and explicit not-computed / not-calibrated
-    statuses for attribution and uncertainty. It makes no regulatory
-    compliance claim; see the module docstring for why the previous version's
-    claims were removed.
+    the metrics it recorded, an explicit not-computed status for attribution,
+    and an uncertainty block derived from the confidence methods the job
+    recorded (or an explicit not-recorded status when it did not). It makes
+    no regulatory compliance claim; see the module docstring for why the
+    previous version's claims were removed.
     """
     job = db.query(Job).filter(Job.id == job_id).first()
 
@@ -108,7 +157,7 @@ async def get_model_explanation(
         "model_type": result.get("model_type"),
         "explanation_report": explanation_report,
         "attribution": _ATTRIBUTION_NOT_COMPUTED,
-        "uncertainty": _UNCERTAINTY_NOT_CALIBRATED,
+        "uncertainty": _uncertainty_block(result),
         "model_metrics": metrics,
         "feature_importances": result.get("feature_importances") or {},
         "compliance": {

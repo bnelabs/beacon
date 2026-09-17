@@ -321,13 +321,14 @@ def run_training(self, job_id: int, parameters: dict):
         service = JobService(db)
         service.update_job_status(job_id, status="running", progress=0.0)
 
-        # Import BNE engine system
-        from backend.modules.engine.orchestrator import EngineOrchestrator
-        from backend.modules.data.orchestrator import DataPackage
-
         logger.info(f"Starting BNE ENGINE training for job {job_id}")
 
-        # Initialize engine orchestrator
+        # Training is driven directly by the trainer classes selected below
+        # (MultiScaleTrainer / ModelTrainer). EngineOrchestrator is NOT
+        # involved in this task -- it serves the synchronous pipeline route
+        # (api/routes/pipeline.py). An earlier revision constructed one here
+        # and never called it; the object did nothing but log a device line
+        # and imply an architecture this task does not use.
         self.update_progress(job_id, 10.0)
         output_dir = f"/app/data/jobs/{job_id}"
         os.makedirs(output_dir, exist_ok=True)
@@ -341,7 +342,6 @@ def run_training(self, job_id: int, parameters: dict):
         # MultiScaleTemporalAttentionModel, while the job result still reported
         # model_type="HGT". The default now names the model that is trained.
         config.setdefault('model', 'temporal_attention')
-        orchestrator = EngineOrchestrator(f"job_{job_id}", output_dir, config)
 
         # For training, we need existing data package
         # Check if user provided a data_job_id to use existing collected data
@@ -820,6 +820,20 @@ def run_prediction(self, job_id: int, parameters: dict):
             "predictions_path": output_path,
             "num_predictions": len(prediction_result.predictions_df),
             "mean_risk": float(prediction_result.predictions_df['risk_score'].mean()) if 'risk_score' in prediction_result.predictions_df.columns else None,
+            # Per-source confidence-method counts, so the explainability card
+            # can report the interval state this job actually produced instead
+            # of a blanket claim. Plain ints: numpy integers would not survive
+            # JSON serialisation into jobs.result.
+            "confidence_methods": (
+                {
+                    str(method): int(count)
+                    for method, count in prediction_result.predictions_df["confidence_method"]
+                    .value_counts()
+                    .items()
+                }
+                if "confidence_method" in prediction_result.predictions_df.columns
+                else {}
+            ),
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "feature_importances": clean_nan(prediction_result.feature_importances),
             "metrics": clean_nan(prediction_result.metrics),

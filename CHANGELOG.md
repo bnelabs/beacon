@@ -10,6 +10,39 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Fixed
+- **The transparency card reports what the job actually carries.** The
+  explainability endpoint's uncertainty block asserted a blanket
+  `not_calibrated` — "the confidence fields are null" — for every job, but
+  split-conformal intervals have been computed per source since `6be3797`
+  (2026-09-14) and populate those fields wherever a source's held-out
+  residuals support a calibration window. Prediction results now record
+  their per-source `confidence_methods` counts, the card derives its status
+  from them (`split_conformal_per_source` / `not_calibrated` /
+  `not_recorded` for older jobs), and the same stale "until conformal lands"
+  sentence was corrected in the README calibration register, the prediction
+  engine's module docstring, and the executive-summary template — which now
+  counts the intervals the run actually produced instead of claiming none
+  are reported.
+- **The training task no longer constructs an orchestrator it never calls.**
+  `job_tasks.run_training` built an `EngineOrchestrator`, logged a device
+  line through it, and then trained via `MultiScaleTrainer`/`ModelTrainer`
+  directly — the object implied an architecture the task does not use (the
+  orchestrator's real production caller is the pipeline route). Dead
+  construction and imports removed; reachability of `engine/orchestrator.py`
+  is unaffected.
+- **Dead computations removed**: an unused `base_url` in `bis_plugin` (the
+  fetch hardcodes the full URL), an unused identity matrix in
+  `causal_discovery`, an unused `receipts` vector in `risk/clearing.py`, and
+  a duplicate `"btn"` in the Bhutan code set.
+- **`test_migrations_live` asserts the error class it means**: the
+  "genuine errors must surface" check accepted a blind `Exception`, which a
+  bug in the guard itself would also satisfy; it now expects the DB-API
+  error the database actually raises.
+- **`.env.example` documents the knobs the code reads**: `BEACON_API_TOKEN`
+  (the bearer gate over `/api/*`; unset = single-operator, no auth) and the
+  custom-API SSRF policy (`BEACON_CUSTOM_API_ALLOW_HTTP`,
+  `BEACON_CUSTOM_API_HOST_ALLOWLIST`) were only in the RUNBOOK.
+
 - **The deep backend suite can run again.** The sharded rewrite of
   `backend-tests.yml` could not start at all: `with: { key:
   backend-deps-${{ github.run_id }}, ... }` is invalid YAML (`${{ }}` inside a

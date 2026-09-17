@@ -104,7 +104,6 @@ class BISPlugin(DataSourcePlugin):
             DataFrame with standardized columns
         """
         try:
-            base_url = "https://stats.bis.org/api/v1"
             all_data = []
 
             # Map common symbols to BIS series codes

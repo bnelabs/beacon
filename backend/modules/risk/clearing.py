@@ -519,7 +519,6 @@ class MultiplexClearingEngine:
                 break
 
         total_paid = self._total_paid(payments, layer_nominals)
-        receipts = resources - endowments_arr
         equity = resources - nominal_total
 
         return ClearingResult(

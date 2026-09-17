@@ -1217,7 +1217,6 @@ class NoteArsBasisDiscovery:
         gram = features.T @ features / n_samples
         cross = features.T @ target / n_samples
         target_gram_trace = float(np.trace(target.T @ target)) / n_samples
-        identity = np.eye(n_variables)
 
         def objective(theta: np.ndarray) -> Tuple[float, np.ndarray]:
             coefficients = theta.reshape(n_columns, n_variables)
