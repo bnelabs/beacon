@@ -222,11 +222,17 @@ register now, and it is kept short on purpose:
   target (event labeller) and a pre-registered evaluation — lift over
   persistence/AR baselines under CPCV, event precision and lead time. Until
   both exist the platform is a data-governance and scenario laboratory, not a
-  demonstrated early-warning system, and it does not claim to be one.
-- **No per-indicator semantics registry.** Cross-source score aggregation
-  waits on a registry of each indicator's stress direction and unit; without
-  it, averaging scores across sources would average apples with inverted
-  apples.
+  demonstrated early-warning system, and it does not claim to be one. The
+  labelling machinery and metrics are wired; what is missing is the declared
+  target and the frozen protocol — see
+  [`docs/probes/event_target_proposal.md`](docs/probes/event_target_proposal.md)
+  (proposal awaiting sign-off; nothing in it is pre-registered yet).
+- **No cross-source score aggregation.** A per-indicator stress *direction*
+  registry does exist (`backend/modules/data/semantics.py`, used by the
+  event labelling in backtests; an undeclared orientation is a refusal, not
+  a default). Aggregation still waits on per-indicator *units* and an
+  agreed combination rule; without them, averaging scores across sources
+  would average apples with inverted apples.
 
 ---
 

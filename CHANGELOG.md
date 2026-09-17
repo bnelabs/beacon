@@ -10,6 +10,16 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **Event-target & pre-registered-evaluation proposal**
+  (`docs/probes/event_target_proposal.md`, awaiting owner sign-off — nothing
+  in it is pre-registered): the declared episode family (seven widely-dated
+  systemic episodes, chosen before any indicator data is examined), the
+  fixed indicator family (every code in the semantics registry), labelling
+  defaults for the existing `EventDefinition` knobs, and the protocol that
+  makes the "demonstrated early-warning system" claim a tagged, single-run,
+  negative-results-published artefact instead of a vibe. It records what
+  already exists (labeller, event metrics, backtest consumption, CPCV
+  baselines) so the remaining gap is visible as decisions, not code.
 - **Aleatoric/epistemic decomposition is wired — the census's oldest `wire`
   disposition.** A training job with `ensemble_size >= 2` (single-source path)
   now trains that many independently seeded members via
@@ -44,6 +54,14 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   this prevents the task-snapshot class of leak at the index level.
 
 ### Fixed
+- **The README's semantics-register bullet was stale in the third
+  direction.** It claimed "no per-indicator semantics registry" exists, but
+  `backend/modules/data/semantics.py` (round-eight adoption) declares stress
+  directions for the curated indicator set and `run_backtest` consumes it
+  for event labelling -- with `None` as a refusal, not a default. The
+  bullet now states what is real (directions) and what is still missing
+  (units and an agreed combination rule for cross-source aggregation). The
+  event-target bullet points at the new proposal.
 - **Two more stale "not wired" claims corrected** (found by the whole-repo
   audit, same drift class as the transparency card): the README's Storage
   section said nothing writes `RiskScorePoint`/`ModelMetricPoint`, but
