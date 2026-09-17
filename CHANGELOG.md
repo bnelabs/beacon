@@ -10,6 +10,28 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **Early-warning pre-registration v3 — the declared-final iteration.**
+  Two changes, both derived from *published* v1/v2 facts, with every
+  grading criterion frozen untouched: (1) alarm quantile 0.95 → **0.98** —
+  at q95 the false-alarm criterion was arithmetically unreachable for any
+  indicator (~12.6 alarms/yr × measured 23–29% precision ⇒ ~9–10 FA per
+  quiet year vs the ceiling of 4), a protocol design incoherence now
+  measured twice; at q98 the ceiling demands precision ≥ ~20% — demanding,
+  not soft. Declared risk accepted pre-run: rarer alarms may shorten median
+  lead below the frozen ≥10-day floor. (2) A second frozen scorer,
+  **`hazard_logit`** — the crisis-literature EWS architecture (logistic
+  hazard of episode onset within 21 days on two declared features: signed
+  standardized level and its 63-day change), sklearn defaults, fitted once
+  on ≤2006, no exposed knob — graded identically to the retained TAN scorer
+  on the same grid, with Holm–Bonferroni pooling **every scorer–indicator
+  pair** (multiplicity accounted, not hidden). Terminal clause declared:
+  pass → the README claim gate moves with these numbers; fail → the line is
+  parked with a three-run documented record. Frozen constants pinned by
+  `test_prereg_runner.py::TestProtocolTableIntegrity` (13 helper/contract
+  tests: Holm propagation, Wilson, hazard mechanics incl. determinism and
+  declared-absence, protocol-table drift). `docs/prereg/early_warning_v3.md`
+  + `configs/event_eval_v3.yaml`, tagged `prereg-early-warning-v3` before
+  the single run.
 - **The v2 early-warning run executed — a better-powered NO, published
   unchanged.** Under tag `prereg-early-warning-v2`, one clean run (zero
   retries, zero infrastructure defects), on licence-screened hashed data
