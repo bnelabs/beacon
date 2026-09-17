@@ -222,17 +222,26 @@ register now, and it is kept short on purpose:
   target (event labeller) and a pre-registered evaluation — lift over
   persistence/AR baselines under CPCV, event precision and lead time. Until
   both exist the platform is a data-governance and scenario laboratory, not a
-  demonstrated early-warning system, and it does not claim to be one. The
-  protocol v1 is now frozen and tagged (`prereg-early-warning-v1`,
-  [`docs/prereg/early_warning_v1.md`](docs/prereg/early_warning_v1.md)) and
-  its single run has been executed and published unchanged
-  ([run report](docs/prereg/runs/early_warning_v1/report.md)): the one
-  testable public indicator failed two of four criteria (too many false
-  alarms; did not beat the persistence baseline), the testable family fell
-  below the declared minimum, and the claim above therefore **stands**. The
-  first-order finding is about data, not models: the semantics registry skews
-  to operator-reported and low-frequency series — a v2 family needs daily
-  public series curated into the catalogue before any claim can be graded.
+  demonstrated early-warning system, and it does not claim to be one. Two
+  protocol versions have now been frozen, tagged, run once each, and
+  published unchanged:
+  [v1](docs/prereg/runs/early_warning_v1/report.md)
+  (`prereg-early-warning-v1`) graded the single indicator that survived its
+  data-availability rules and returned NO;
+  [v2](docs/prereg/runs/early_warning_v2/report.md)
+  (`prereg-early-warning-v2`) kept **every criterion, window, model and seed
+  identical** and fixed only the diagnosed flaw — the family — adding the
+  literature-backed daily series `T10Y3M` and `VIXCLS` (plus a licence
+  screen that withdraws prohibited data before download). Verdict: 0 of 3
+  passed, claim still **NO** — but the numbers are now informative: T10Y2Y
+  reproduced v1 byte-identically; `T10Y3M` beat both baselines (the only
+  lift-criterion pass) and flagged 5 of the 7 declared episodes; `VIXCLS`
+  discriminates strongly (AUC 0.93, AP ≈ 9× base rate). What binds all
+  three is the false-alarm criterion (~9–10 per quiet year vs ≤4): the q95
+  alarm quantile fires on ~5% of days by construction, so v3's design work —
+  declared in advance, never tuned post hoc — is the alarm rule and its
+  coherence with the false-alarm ceiling, plus the weekly/monthly tracks
+  that would admit the credit-gap family the literature favours.
 - **No cross-source score aggregation.** A per-indicator stress *direction*
   registry does exist (`backend/modules/data/semantics.py`, used by the
   event labelling in backtests; an undeclared orientation is a refusal, not
