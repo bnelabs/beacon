@@ -223,10 +223,16 @@ register now, and it is kept short on purpose:
   persistence/AR baselines under CPCV, event precision and lead time. Until
   both exist the platform is a data-governance and scenario laboratory, not a
   demonstrated early-warning system, and it does not claim to be one. The
-  labelling machinery and metrics are wired; what is missing is the declared
-  target and the frozen protocol — see
-  [`docs/probes/event_target_proposal.md`](docs/probes/event_target_proposal.md)
-  (proposal awaiting sign-off; nothing in it is pre-registered yet).
+  protocol v1 is now frozen and tagged (`prereg-early-warning-v1`,
+  [`docs/prereg/early_warning_v1.md`](docs/prereg/early_warning_v1.md)) and
+  its single run has been executed and published unchanged
+  ([run report](docs/prereg/runs/early_warning_v1/report.md)): the one
+  testable public indicator failed two of four criteria (too many false
+  alarms; did not beat the persistence baseline), the testable family fell
+  below the declared minimum, and the claim above therefore **stands**. The
+  first-order finding is about data, not models: the semantics registry skews
+  to operator-reported and low-frequency series — a v2 family needs daily
+  public series curated into the catalogue before any claim can be graded.
 - **No cross-source score aggregation.** A per-indicator stress *direction*
   registry does exist (`backend/modules/data/semantics.py`, used by the
   event labelling in backtests; an undeclared orientation is a refusal, not

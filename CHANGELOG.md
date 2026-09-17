@@ -10,6 +10,27 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **The pre-registered early-warning evaluation ran — and the answer is a
+  published NO.** Under tag `prereg-early-warning-v1`, on hashed data
+  fetched through the platform's own keyless FRED plugin and certified by
+  the real quality gate: of the 6 public candidates only `FRED_T10Y2Y`
+  survived the declared data-availability rules (weekly/monthly frequency,
+  a 2018 start, a licence-windowed anonymous tail and a 404 excluded the
+  rest *before any metric existed*). The single testable indicator detected
+  its labelled events with a 42-business-day median lead and AP ~2x base
+  rate (permutation p=0.001, Holm-surviving) but **failed 2 of the 4 frozen
+  criteria**: 9.6 false alarms per quiet year (limit 4) and no lift over
+  the persistence baseline (AUC 0.555 vs 0.559 — "stress continues" read
+  off the current spread level slightly beat the trained model). Testable
+  family 1 < the declared minimum of 3, so the system-level claim is
+  automatically unwarranted and the README's honest default stands. Two
+  pre-metric infrastructure failures (a wrong class name, then the
+  single-scale trainer's engine-incompatible checkpoints) were fixed and
+  logged with their diffs in the execution log, as the single-run rule
+  requires; no protocol constant changed between tag and run. Report:
+  `docs/prereg/runs/early_warning_v1/` — published unchanged, negative
+  result included. The first-order finding is about data, not models: a v2
+  family needs daily public series curated into the catalogue first.
 - **The pre-registered early-warning evaluation exists as a tagged, runnable
   artefact** — steps 1–3 of `docs/probes/event_target_proposal.md`,
   owner-approved with the proposal's defaults (RRPONTSYD excluded). Frozen
