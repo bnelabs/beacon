@@ -49,6 +49,16 @@ STRESS_DIRECTION = {
     # market-stress gauge; FRED serves it "reprinted with permission" with no
     # reproduction prohibition (series notes checked 2026-09-17). Added for v2.
     "FRED_VIXCLS": +1,
+    # BIS credit-to-GDP gap, US private non-financial sector, quarterly
+    # (CG_DTYPE=C -- the GAP; the A/B variants are levels and are not this
+    # indicator): a widening gap is a credit boom beyond trend, the
+    # build-up of systemic risk the EWS literature documents as the best
+    # single early-warning indicator for banking crises (Borio & Drehmann;
+    # Drehmann & Juselius). The credit-gap family the v3 record named as a
+    # recorded v4 axis. Direction declared 2026-09-18, BEFORE any v4 fetch
+    # (docs/probes/prereg_v4_source_probe.md: keyless, quarterly, 1957-Q4
+    # onward, licence GREEN with attribution).
+    "BIS_CREDIT_GAP_US": +1,
     # Liquidity levels and coverage: falling = deterioration.
     "HQLA_LEVEL": -1,
     "LCR_RATIO": -1,

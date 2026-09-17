@@ -250,6 +250,20 @@ without anyone noticing. Mitigation: `docs/README.md` exists as the index;
 this ledger and `CONTRIBUTING.md` are registered in it; the whole-repo claim
 audit (L-13) is the recurring sweep. Status: **FIXED** — `docs/README.md`.
 
+**L-25. The 4.0.0 release left a generated doc stale.** `docs/api-endpoints.md`
+embeds the application version; the release bumped `VERSION` to 4.0.0 but the
+regeneration step was not part of the release tooling, so the committed
+inventory still claimed v3.3.0. The fast CI gates do not include the
+inventory check (the deep suite does), so the release merge looked green —
+the staleness was caught by the first full-suite run after the release,
+before it could reach a nightly. Mitigation: the inventory was regenerated
+(one-line diff) in the v4-freeze change; the `CONTRIBUTING.md` release
+checklist now carries "regenerate `docs/api-endpoints.md` immediately after
+`release.py`" as a numbered step; a release-tooling guard (fail when the
+generated inventory disagrees with `VERSION`) is recorded as the durable fix
+if this class recurs. Status: **FIXED** (tooling guard: OPEN, deliberately
+deferred until a second occurrence justifies touching the release script).
+
 ---
 
 *Adding an entry: open it when the failure is confirmed, with a pointer; close

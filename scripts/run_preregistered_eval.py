@@ -97,6 +97,40 @@ BUSINESS_DAYS_PER_YEAR = 252
 MIN_MEDIAN_LEAD = 10          # business days
 MAX_FALSE_ALARMS_PER_QUIET_YEAR = 4.0
 
+# --------------------------------------------------------------------------
+# Per-track step semantics (protocol v4; declared BEFORE any v4 fetch).
+# The daily row re-states the frozen v1-v3 constants exactly -- it exists so
+# the mapping is explicit and testable, not because v4 changes the daily
+# track's parameters. The weekly/quarterly rows translate the SAME design
+# intent (a ~21-business-day move horizon, ~5-business-day persistence, a
+# >=10-business-day median-lead floor, a ~one-quarter hazard lookback) onto
+# coarser grids, at the coarsest granularity each grid can express. Every
+# value is declared in configs/event_eval_v4.yaml and docs/prereg/
+# early_warning_v4.md before the run; nothing here is tuned afterwards.
+# --------------------------------------------------------------------------
+TRACK_PARAMS: Dict[str, Dict[str, float]] = {
+    "daily": {
+        "horizon": 21, "min_duration": 5, "max_lead": 42, "min_median_lead": 10,
+        "steps_per_year": 252, "hazard_lookback": 63, "bd_per_step": 1.0,
+        "gap_min": 0.0, "gap_max": 1.5,
+    },
+    "weekly": {
+        # 21 bd ~ 4.2 weeks -> 4 steps; 5 bd ~ 1 week -> 1 step;
+        # lead floor 10 bd ~ 2 weeks -> 2 steps; quarter lookback -> 13 steps.
+        "horizon": 4, "min_duration": 1, "max_lead": 8, "min_median_lead": 2,
+        "steps_per_year": 52, "hazard_lookback": 13, "bd_per_step": 5.0,
+        "gap_min": 1.5, "gap_max": 8.0,
+    },
+    "quarterly": {
+        # The coarsest expressible grid: horizon 1 quarter (~63 bd, >= the
+        # 21-bd daily intent -- acknowledged coarser, declared not hidden);
+        # lead floor 1 quarter (~63 bd) is STRICTER than the 10-bd intent.
+        "horizon": 1, "min_duration": 1, "max_lead": 2, "min_median_lead": 1,
+        "steps_per_year": 4, "hazard_lookback": 1, "bd_per_step": 63.0,
+        "gap_min": 35.0, "gap_max": 125.0,
+    },
+}
+
 # Declared episode family (proposal section 2.1). Context/sanity only: the
 # labels the metrics run against are the labeller's endogenous events.
 EPISODES: Dict[str, Tuple[str, str]] = {
@@ -145,6 +179,40 @@ FAMILY_V2: Dict[str, Dict[str, Any]] = {
     "FRED_T10Y3M":       {"source": "fred", "series_id": "T10Y3M"},
     "FRED_VIXCLS":       {"source": "fred", "series_id": "VIXCLS"},
 }
+
+# v4 = v2's candidate set (rules re-derive every skip at fetch time) PLUS the
+# credit-gap family's one GREEN-probed member: the BIS credit-to-GDP GAP for
+# the US private non-financial sector (CG_DTYPE=C; the A/B variants are LEVELS
+# and are not this indicator). Keyless, quarterly, 1957-Q4 onward, licence
+# GREEN with attribution (data.bis.org/help/legal, probed 2026-09-18 -- see
+# docs/probes/prereg_v4_source_probe.md). The BIS debt service ratio was
+# probed YELLOW (US history starts 1999-Q1: ~32 pre-2007 quarters cannot
+# honestly train the declared architecture) and is EXCLUDED pre-fetch per the
+# probe's declared disposition rule; ECB CISS was probed RED (the data-API
+# flow mis-resolves to ECB_FMD2 equity-index series; the legacy SDW host does
+# not connect) so its v1-style keyless FRED attempt stays declared and its
+# skip will be recorded, not substituted. Directions for every entering code
+# are declared in backend/modules/data/semantics.py BEFORE any v4 fetch.
+FAMILY_V4: Dict[str, Dict[str, Any]] = {
+    **{k: v for k, v in FAMILY_V2.items()},
+    "BIS_CREDIT_GAP_US": {"source": "bis", "series_id": "WS_CREDIT_GAP/Q.US.P.A.C.E"},
+}
+
+# Declared track per candidate (v4 only; absence means the daily track, which
+# is the only track v1-v3 have). Weekly: the two FRED-served weekly stress
+# indices whose registry directions predate v4. Quarterly: the BIS credit gap.
+TRACKS_V4: Dict[str, str] = {
+    "FRED_STLFSI4":      "weekly",
+    "FRED_KCFSI":        "weekly",
+    "ECB_CISS":          "weekly",
+    "BIS_CREDIT_GAP_US": "quarterly",
+}
+
+# BIS licence screen: the live terms page and the attribution its
+# "terms of permitted use" require when statistics are reproduced.
+BIS_LICENCE_URL = "https://data.bis.org/help/legal"
+BIS_ATTRIBUTION = "Source: BIS Data Portal - Bank for International Settlements"
+
 
 # Terms-of-use phrases that PROHIBIT the reproduction/redistribution this
 # repository performs by committing fetched series as provenance. A match is
@@ -202,6 +270,51 @@ PROTOCOLS: Dict[str, Dict[str, Any]] = {
         # q95 and plausibly better at a rarer point. Demanding, not soft.
         "alarm_quantile": 0.98,
         "scorers": ("tan_frozen", "hazard_logit"),
+    },
+    "v4": {
+        "name": "early_warning_v4",
+        "tag": "prereg-early-warning-v4",
+        # Family = v2's PLUS the probe-GREEN BIS credit-to-GDP gap (quarterly).
+        # v4 is the owner-initiated resumption the v3 terminal clause recorded:
+        # it tests EXACTLY the two recorded axes -- rolling annual refits and
+        # weekly/quarterly tracks -- and changes NO grading criterion.
+        "family": FAMILY_V4,
+        "tracks": TRACKS_V4,
+        "data_dir": REPO / "data" / "prereg" / "v4",
+        "report_dir": REPO / "docs" / "prereg" / "runs" / "early_warning_v4",
+        "keyed": True,
+        "licence_screen": True,
+        # Alarm arithmetic, declared pre-run from PUBLISHED v2/v3 facts only.
+        # Uniform rule: alarm on the top 2% of each scorer's own score grid.
+        #   daily (~252 steps/yr):    ~5.0 alarms/yr; ceiling 4 needs precision
+        #     >= ~20% -- v3 measured 23-29% at q98: demanding but reachable
+        #     (identical arithmetic to v3's frozen declaration).
+        #   weekly (~52 steps/yr):    ~1.0 alarm/yr  -> FA <= 1.0 x (1-p) <= 1
+        #     < 4 for ANY precision: the ceiling cannot bind; the binding
+        #     criteria are lift and lead (declared consequence, pre-run).
+        #   quarterly (~4 steps/yr):  top 2% of ~72 scores = 1-2 alarms in the
+        #     whole 18-year window -> FA ceiling cannot bind; lift and lead
+        #     bind (declared consequence, pre-run).
+        "alarm_quantile": 0.98,
+        # Four declared scorers: the two frozen v3 scorers (reproducing v3 on
+        # unchanged sources -- the run's own reproducibility check) and their
+        # rolling-refit counterparts (the axis v3's hazard collapse diagnosed:
+        # an 18-year extrapolation of a pre-2006 fit does not survive regime
+        # change). Rolling spec: refit at every calendar-year boundary on the
+        # EXPANDING window of all observations strictly before the boundary
+        # (strictly causal: no boundary sees any later row), identical model
+        # class/config, torch.manual_seed(11) before every refit, identical
+        # hazard feature/estimator spec with per-track lookback. A refit whose
+        # window cannot support the fit (< sequence_length+10 rows, or no
+        # training-span onsets for the hazard) contributes NO scores for that
+        # year -- declared absence, not zero.
+        "scorers": ("tan_frozen", "tan_rolling", "hazard_logit", "hazard_logit_rolling"),
+        "rolling_refit": "annual",
+        # v4 reports per-scorer grids (rolling scorers can cover steps the
+        # frozen TAN's eval-only warmup drops); each scorer is graded against
+        # baselines recomputed on its OWN grid. v1-v3 keep the single shared
+        # grid and byte-identical report shapes.
+        "per_scorer_grids": True,
     },
 }
 
@@ -265,6 +378,73 @@ def _licence_screen(series_id: str, api_key: str) -> Tuple[bool, str, List[str]]
     return False, "", lines
 
 
+def _bis_licence_screen() -> Tuple[bool, str, List[str]]:
+    """Licence screen for BIS-sourced series: read the live terms page, apply
+    the SAME prohibition patterns as the FRED screen, and record the
+    permission sentence verbatim. Probed 2026-09-18 (docs/probes/
+    prereg_v4_source_probe.md): "The use of the statistics is unrestricted,
+    provided that: if the statistics are reproduced, the BIS must be cited ...
+    as the source" -- permission with attribution, no prohibition pattern."""
+    import requests
+
+    try:
+        response = requests.get(BIS_LICENCE_URL, timeout=30,
+                                headers={"User-Agent": "BEACON-prereg-licence-screen/4.0"})
+    except requests.RequestException as exc:
+        # Unconfirmed is refused, never assumed (the BoE-404 precedent).
+        return True, f"unconfirmed: licence page unreachable ({type(exc).__name__})", []
+    if response.status_code != 200:
+        return True, f"unconfirmed: licence page HTTP {response.status_code}", []
+    text = re.sub(r"<[^>]+>", " ", response.text)
+    text = re.sub(r"\s+", " ", text)
+    match = LICENCE_PROHIBITION_RE.search(text)
+    lines = [s.strip() for s in re.split(r"(?<=[.;]) ", text)
+             if re.search(r"unrestricted|reproduc|cited|licen|permitted use", s, re.I)][:4]
+    if match:
+        return True, match.group(0), lines
+    if not any("unrestricted" in ln.lower() for ln in lines):
+        # The permission sentence itself must be observable; its absence means
+        # the page drifted and the licence is NOT confirmed -> refuse (the BoE
+        # 404 precedent: unconfirmed is recorded as unconfirmed, never assumed).
+        return True, "unconfirmed: permission sentence not found on the live terms page (drift)", lines
+    return False, "", lines
+
+
+def _fetch_bis_frame(series_id: str) -> pd.DataFrame:
+    """Fetch one BIS SDMX series (keyless CSV transport) as Date/Value.
+
+    ``series_id`` is a full SDMX key (e.g. ``WS_CREDIT_GAP/Q.US.P.A.C.E``).
+    Quarter periods (``YYYY-Qn``) map to their quarter-END calendar date --
+    the declared convention of the quarterly track. The response must be a
+    single homogeneous series: mixed dimension values are a format-drift
+    refusal, not a guess (the boe_database discipline)."""
+    import requests
+
+    flow, _, key = series_id.partition("/")
+    url = f"https://stats.bis.org/api/v1/data/{flow}/{key}?format=csv"
+    response = requests.get(url, timeout=60,
+                            headers={"User-Agent": "BEACON-prereg-fetch/4.0 (research)"})
+    if response.status_code != 200:
+        raise RuntimeError(f"BIS HTTP {response.status_code} for {url}")
+    from io import StringIO
+
+    raw = pd.read_csv(StringIO(response.text))
+    if raw.empty or "TIME_PERIOD" not in raw.columns or "OBS_VALUE" not in raw.columns:
+        raise RuntimeError("BIS payload lacks TIME_PERIOD/OBS_VALUE -- format drift, refusing to guess")
+    dim_cols = [c for c in raw.columns
+                if c not in ("TIME_PERIOD", "OBS_VALUE", "OBS_STATUS", "OBS_CONF", "OBS_PRE_BREAK")]
+    for col in dim_cols:
+        if raw[col].astype(str).nunique(dropna=False) > 1:
+            raise RuntimeError(f"BIS payload mixes {col} values -- expected one homogeneous series, refusing")
+    frame = pd.DataFrame({
+        "Date": [pd.Period(str(tp).replace("-Q", "Q"), freq="Q").end_time.normalize()
+                 for tp in raw["TIME_PERIOD"]],
+        "Value": pd.to_numeric(raw["OBS_VALUE"], errors="coerce"),
+    })
+    frame = frame.dropna(subset=["Date"]).drop_duplicates(subset=["Date"]).sort_values("Date")
+    return frame.reset_index(drop=True)
+
+
 def fetch_phase(proto: Dict[str, Any]) -> int:
     from backend.plugins.fred_plugin import FREDPlugin
 
@@ -286,49 +466,85 @@ def fetch_phase(proto: Dict[str, Any]) -> int:
     }
     eval_busdays = int(np.busday_count(EVAL_START.date(), (EVAL_END + pd.Timedelta(days=1)).date()))
 
+    bis_licence_cache: Optional[Tuple[bool, str, List[str]]] = None
+    tracks: Dict[str, str] = proto.get("tracks") or {}
+    eval_cal_days = (EVAL_END - EVAL_START).days + 1
+
     for code, spec in proto["family"].items():
         if "excluded" in spec:
             manifest["entries"][code] = {"status": "excluded", "reason": spec["excluded"]}
             continue
 
         series_id = spec["series_id"]
-        entry: Dict[str, Any] = {
-            "status": "pending",
-            "source": transport,
-            "series_id": series_id,
-            "endpoint": (
-                f"https://api.stlouisfed.org/fred/series/observations?series_id={series_id}&api_key=<redacted>"
-                if api_key else
-                f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-            ),
-        }
+        source = spec.get("source", "fred")
+        track = tracks.get(code, "daily")
+        tp = TRACK_PARAMS[track]
+        if source == "bis":
+            entry: Dict[str, Any] = {
+                "status": "pending",
+                "source": "stats.bis.org SDMX REST (keyless CSV transport)",
+                "series_id": series_id,
+                "endpoint": f"https://stats.bis.org/api/v1/data/{series_id}?format=csv",
+            }
+        else:
+            entry = {
+                "status": "pending",
+                "source": transport,
+                "series_id": series_id,
+                "endpoint": (
+                    f"https://api.stlouisfed.org/fred/series/observations?series_id={series_id}&api_key=<redacted>"
+                    if api_key else
+                    f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+                ),
+            }
+        if tracks:
+            entry["track"] = track
 
         # Licence screen BEFORE any data download: committing a series whose
         # terms prohibit reproduction would make the provenance store itself
         # the violation. (This is why v1's BAMLH0A0HYM2 csv was removed.)
         if proto["licence_screen"]:
-            prohibited, reason, licence_lines = _licence_screen(series_id, api_key)
-            entry["licence_lines"] = licence_lines[:4]
-            if prohibited:
-                entry.update(
-                    status="skipped", skip_reason="licence_prohibits_reproduction",
-                    detail=f"series notes contain: {reason!r} -- committing it as provenance would violate the terms",
-                )
-                manifest["entries"][code] = entry
-                logger.warning("%s: licence skip (%s)", code, reason)
-                continue
-            if reason.startswith("metadata HTTP"):
-                entry.update(status="skipped", skip_reason="fetch_failed",
-                             detail=f"licence screen could not read series metadata: {reason}")
-                manifest["entries"][code] = entry
-                continue
+            if source == "bis":
+                if bis_licence_cache is None:
+                    bis_licence_cache = _bis_licence_screen()
+                prohibited, reason, licence_lines = bis_licence_cache
+                entry["licence_lines"] = (licence_lines + [BIS_ATTRIBUTION, f"terms: {BIS_LICENCE_URL}"])[:4]
+                if prohibited:
+                    entry.update(
+                        status="skipped",
+                        skip_reason="licence_unconfirmed" if reason.startswith("unconfirmed")
+                        else "licence_prohibits_reproduction",
+                        detail=f"BIS terms screen: {reason!r}",
+                    )
+                    manifest["entries"][code] = entry
+                    logger.warning("%s: BIS licence skip (%s)", code, reason)
+                    continue
+            else:
+                prohibited, reason, licence_lines = _licence_screen(series_id, api_key)
+                entry["licence_lines"] = licence_lines[:4]
+                if prohibited:
+                    entry.update(
+                        status="skipped", skip_reason="licence_prohibits_reproduction",
+                        detail=f"series notes contain: {reason!r} -- committing it as provenance would violate the terms",
+                    )
+                    manifest["entries"][code] = entry
+                    logger.warning("%s: licence skip (%s)", code, reason)
+                    continue
+                if reason.startswith("metadata HTTP"):
+                    entry.update(status="skipped", skip_reason="fetch_failed",
+                                 detail=f"licence screen could not read series metadata: {reason}")
+                    manifest["entries"][code] = entry
+                    continue
 
         try:
-            frame = plugin.fetch_indicator_data(
-                series_id,
-                datetime(1970, 1, 1),
-                datetime(EVAL_END.year, EVAL_END.month, EVAL_END.day),
-            )
+            if source == "bis":
+                frame = _fetch_bis_frame(series_id)
+            else:
+                frame = plugin.fetch_indicator_data(
+                    series_id,
+                    datetime(1970, 1, 1),
+                    datetime(EVAL_END.year, EVAL_END.month, EVAL_END.day),
+                )
         except Exception as exc:  # typed plugin errors and network facts alike
             entry.update(status="skipped", skip_reason="fetch_failed",
                          detail=f"{type(exc).__name__}: {exc}"[:300])
@@ -350,12 +566,17 @@ def fetch_phase(proto: Dict[str, Any]) -> int:
         frame.to_csv(csv_path, index=False)
 
         eval_rows = frame[(frame["Date"] >= EVAL_START) & (frame["Date"] <= EVAL_END)]
-        coverage_frac = float(len(eval_rows)) / eval_busdays if eval_busdays else 0.0
+        if track == "daily":
+            coverage_frac = float(len(eval_rows)) / eval_busdays if eval_busdays else 0.0
+        else:
+            expected_steps = (eval_cal_days / 7.0) if track == "weekly" else (eval_cal_days * 4.0 / 365.25)
+            coverage_frac = float(len(eval_rows)) / expected_steps if expected_steps else 0.0
 
-        # Frequency is a data-availability fact, measured before any metric:
-        # the protocol's step is one business day, so weekly/monthly series
-        # are skipped rather than silently resampled (resampling rules are
-        # declared v3 work, not mid-run improvisation).
+        # Frequency is a data-availability fact, measured before any metric.
+        # v1-v3 declare the daily step, so non-daily series are skipped rather
+        # than silently resampled. v4 declares its tracks up front: a series
+        # must match the frequency its track declares (band-matched for the
+        # quarterly track, whose ~91-day gaps no named class covers).
         gaps = frame["Date"].diff().dt.days.dropna()
         median_gap = float(gaps.median()) if len(gaps) else float("nan")
         frequency = "daily" if median_gap <= 1.5 else ("weekly" if median_gap <= 8 else ("monthly" if median_gap <= 35 else "other"))
@@ -380,15 +601,28 @@ def fetch_phase(proto: Dict[str, Any]) -> int:
             episodes_covered=episodes_covered,
             nan_ratio_eval=round(float(eval_rows["Value"].isna().mean()), 4) if len(eval_rows) else None,
         )
-        if frequency != "daily":
-            entry.update(status="skipped", skip_reason="frequency_not_daily",
-                         detail=f"median observation gap {median_gap:.0f} days ({frequency}); the protocol step is one business day")
-        elif coverage_frac < MIN_COVERAGE_FRAC or len(episodes_covered) < MIN_EPISODES:
-            entry.update(status="skipped", skip_reason="insufficient_coverage",
-                         detail=(f"coverage {coverage_frac:.2f} < {MIN_COVERAGE_FRAC} or "
-                                 f"{len(episodes_covered)} covered episodes < {MIN_EPISODES}"))
+        if track == "daily":
+            if frequency != "daily":
+                entry.update(status="skipped", skip_reason="frequency_not_daily",
+                             detail=f"median observation gap {median_gap:.0f} days ({frequency}); the protocol step is one business day")
+            elif coverage_frac < MIN_COVERAGE_FRAC or len(episodes_covered) < MIN_EPISODES:
+                entry.update(status="skipped", skip_reason="insufficient_coverage",
+                             detail=(f"coverage {coverage_frac:.2f} < {MIN_COVERAGE_FRAC} or "
+                                     f"{len(episodes_covered)} covered episodes < {MIN_EPISODES}"))
+            else:
+                entry["status"] = "testable"
         else:
-            entry["status"] = "testable"
+            freq_ok = (frequency == track) if track == "weekly" else bool(
+                np.isfinite(median_gap) and tp["gap_min"] <= median_gap <= tp["gap_max"])
+            if not freq_ok:
+                entry.update(status="skipped", skip_reason=f"frequency_not_{track}",
+                             detail=f"median observation gap {median_gap:.0f} days ({frequency}); the declared track is {track}")
+            elif coverage_frac < MIN_COVERAGE_FRAC or len(episodes_covered) < MIN_EPISODES:
+                entry.update(status="skipped", skip_reason="insufficient_coverage",
+                             detail=(f"coverage {coverage_frac:.2f} < {MIN_COVERAGE_FRAC} or "
+                                     f"{len(episodes_covered)} covered episodes < {MIN_EPISODES}"))
+            else:
+                entry["status"] = "testable"
         manifest["entries"][code] = entry
         logger.info("%s: %s (coverage %.2f, episodes %d)", code, entry["status"], coverage_frac, len(episodes_covered))
 
@@ -460,6 +694,7 @@ def _hazard_logit_scores(
     definition: Any,
     eval_values: np.ndarray,
     offsets: np.ndarray,
+    lookback: int = HAZARD_LOOKBACK,
 ) -> Optional[np.ndarray]:
     """The frozen hazard-logit scorer (protocol v3's second declared scorer).
 
@@ -498,7 +733,7 @@ def _hazard_logit_scores(
     def _features(values: np.ndarray, idx: np.ndarray) -> np.ndarray:
         z = direction_sign * (values - train_mean) / train_std
         z = np.where(np.isfinite(z), z, 0.0)
-        look = np.maximum(idx - HAZARD_LOOKBACK, 0)
+        look = np.maximum(idx - lookback, 0)
         return np.column_stack([z[idx], z[idx] - z[look]])
 
     train_labelling = label_events(
@@ -516,6 +751,157 @@ def _hazard_logit_scores(
     logit = LogisticRegression(max_iter=1000)
     logit.fit(_features(train_values, np.arange(train_values.size)), y)
     return logit.decision_function(_features(eval_values, np.asarray(offsets, dtype=int)))
+
+
+def _refit_boundaries(frame_dates: pd.Series, eval_positions: np.ndarray) -> List[Tuple[int, int, int]]:
+    """The declared rolling-refit schedule (protocol v4): one refit per
+    calendar year of the evaluation span, on the EXPANDING window of rows
+    strictly before the year's first observation. Returns ``(b, e, year)``
+    triples of frame positions, clamped to the evaluation span: positions
+    ``[b, e)`` are the year's observations and every position ``< b`` is
+    strictly before the boundary. Nothing after a boundary is ever visible
+    to that refit -- causality is the whole point of the axis."""
+    date_vals = frame_dates.to_numpy()
+    p0, p1 = int(eval_positions[0]), int(eval_positions[-1])
+    years = sorted({int(d.year) for d in frame_dates.iloc[p0:p1 + 1]})
+    out: List[Tuple[int, int, int]] = []
+    for y in years:
+        b = int(np.searchsorted(date_vals, np.datetime64(f"{y}-01-01"), side="left"))
+        e = int(np.searchsorted(date_vals, np.datetime64(f"{y + 1}-01-01"), side="left"))
+        b, e = max(b, p0), min(e, p1 + 1)
+        if e > b:
+            out.append((b, e, y))
+    return out
+
+
+def _map_positions_to_eval(positions: np.ndarray, eval_positions: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Map frame positions onto evaluation-grid indices; the boolean says
+    which positions actually fall on an evaluation row."""
+    idx = np.clip(np.searchsorted(eval_positions, positions), 0, eval_positions.size - 1)
+    return idx, eval_positions[idx] == positions
+
+
+def _rolling_tan_scores(
+    code: str,
+    frame: pd.DataFrame,
+    eval_positions: np.ndarray,
+    proto: Dict[str, Any],
+    workdir: Path,
+    attestation: Any,
+) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """The rolling-refit TAN (protocol v4). Identical architecture, config and
+    seed protocol to the frozen TAN; refit at every declared boundary on the
+    expanding window of rows strictly before it. Each year is scored by the
+    checkpoint fit before that year began, with ``sequence_length`` rows of
+    PAST observations as prediction warm-up (known values, never future
+    ones). A boundary whose window cannot support the fit contributes no
+    scores -- declared absence, not zero. Returns ``(frame_positions,
+    raw_scores)`` or ``None`` when no boundary could be fit."""
+    import torch
+
+    from backend.modules.engine.multi_scale_trainer import MultiScaleTrainer
+    from backend.modules.engine.prediction_engine import RealPredictionEngine
+
+    seq = int(MODEL_CONFIG["sequence_length"])
+    dates = frame["Date"]
+    pos_list: List[np.ndarray] = []
+    sc_list: List[np.ndarray] = []
+    for b, e, y in _refit_boundaries(dates, eval_positions):
+        train_full = frame.iloc[:b]
+        if len(train_full) < seq + 10:
+            continue
+        split_at = int(len(train_full) * 0.8)
+        wd = workdir / f"rolling_tan_{y}"
+        wd.mkdir(parents=True, exist_ok=True)
+        tf = train_full[["Date", "Value"]].assign(source_code=code)
+        slice_df = frame.iloc[max(0, b - seq):e][["Date", "Value"]].assign(source_code=code)
+        trainer = MultiScaleTrainer(model_type="temporal_attention", device=torch.device("cpu"),
+                                    config=dict(MODEL_CONFIG))
+        torch.manual_seed(11)  # the frozen seed protocol, applied at every refit
+        trainer.train(train_df=tf.iloc[:split_at], val_df=tf.iloc[split_at:],
+                      test_df=slice_df, output_dir=str(wd))
+        checkpoint = wd / "best_model.pt"
+        if not checkpoint.exists():
+            del trainer
+            gc.collect()
+            continue
+        engine = RealPredictionEngine(str(checkpoint), torch.device("cpu"),
+                                      {"sequence_length": seq,
+                                       "job_id": f"prereg-{proto['name']}-{code}-rolltan-{y}"})
+        payload = slice_df.rename(columns={"Value": "Close"})
+        rs = engine.predict_risk_series(payload, attestation=attestation, batch_size=256)
+        block = rs.frame[rs.frame["source"] == code]
+        base = max(0, b - seq)
+        gpos = base + np.asarray(block["row_offset"], dtype=int)
+        ps = np.asarray(block["risk_score"], dtype=float)
+        keep = (gpos >= b) & (gpos < e) & np.isfinite(ps)
+        if keep.any():
+            pos_list.append(gpos[keep])
+            sc_list.append(ps[keep])
+        del engine, trainer, rs, block
+        gc.collect()
+    if not pos_list:
+        return None
+    pos = np.concatenate(pos_list)
+    sc = np.concatenate(sc_list)
+    order = np.argsort(pos, kind="stable")
+    return pos[order], sc[order]
+
+
+def _rolling_hazard_scores(
+    frame: pd.DataFrame,
+    eval_positions: np.ndarray,
+    tp: Dict[str, float],
+    direction_sign: float,
+    definition: Any,
+) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """The rolling-refit hazard logit (protocol v4). Identical feature and
+    estimator spec to the frozen hazard logit (signed standardized level and
+    its per-track-lookback change; ``LogisticRegression`` at library
+    defaults); refit at every declared boundary with mean/std and onset
+    labels recomputed from the window strictly before it. A year whose window
+    contains no onsets contributes NO scores -- declared absence, not zero
+    signal (the frozen scorer's refusal rule, applied per refit). Returns
+    ``(frame_positions, decision_function_scores)`` or ``None``."""
+    from sklearn.linear_model import LogisticRegression
+
+    from backend.modules.data.event_labeller import label_events
+
+    values = pd.to_numeric(frame["Value"], errors="coerce").to_numpy(dtype=float)
+    look = int(tp["hazard_lookback"])
+    horizon = int(definition.horizon)
+    pos_list: List[np.ndarray] = []
+    sc_list: List[np.ndarray] = []
+    for b, e, _y in _refit_boundaries(frame["Date"], eval_positions):
+        train_vals = values[:b]
+        if train_vals.size < look + 10:
+            continue
+        lab = label_events(train_vals, definition, threshold_span=(0, train_vals.size))
+        if lab.onsets.size == 0:
+            continue
+        t_mean = float(np.nanmean(train_vals))
+        t_std = float(np.nanstd(train_vals)) or 1.0
+
+        def _feats(idx: np.ndarray) -> np.ndarray:
+            z = direction_sign * (values - t_mean) / t_std
+            z = np.where(np.isfinite(z), z, 0.0)
+            lo = np.maximum(idx - look, 0)
+            return np.column_stack([z[idx], z[idx] - z[lo]])
+
+        ypos = np.zeros(train_vals.size, dtype=int)
+        for onset in lab.onsets:
+            o = int(onset)
+            ypos[max(0, o - horizon):o] = 1
+        logit = LogisticRegression(max_iter=1000)
+        logit.fit(_feats(np.arange(train_vals.size)), ypos)
+        pos_list.append(np.arange(b, e))
+        sc_list.append(logit.decision_function(_feats(np.arange(b, e))))
+    if not pos_list:
+        return None
+    pos = np.concatenate(pos_list)
+    sc = np.concatenate(sc_list)
+    order = np.argsort(pos, kind="stable")
+    return pos[order], sc[order]
 
 
 def _evaluate_indicator(code: str, entry: Dict[str, Any], proto: Dict[str, Any]) -> Dict[str, Any]:
@@ -536,11 +922,17 @@ def _evaluate_indicator(code: str, entry: Dict[str, Any], proto: Dict[str, Any])
     data_dir: Path = proto["data_dir"]
     out: Dict[str, Any] = {"code": code, "direction": event_direction(code)}
     direction_sign = 1.0 if stress_direction(code) >= 0 else -1.0
+    track = (proto.get("tracks") or {}).get(code, "daily")
+    tp = TRACK_PARAMS[track]
+    if proto.get("tracks"):
+        out["track"] = track
 
     frame = pd.read_csv(REPO / entry["csv"], parse_dates=["Date"])
     frame = frame.sort_values("Date").reset_index(drop=True)
     train_frame = frame[frame["Date"] <= TRAIN_END][["Date", "Value"]].reset_index(drop=True)
-    eval_frame = frame[(frame["Date"] >= EVAL_START) & (frame["Date"] <= EVAL_END)][["Date", "Value"]].reset_index(drop=True)
+    eval_mask = ((frame["Date"] >= EVAL_START) & (frame["Date"] <= EVAL_END)).to_numpy()
+    eval_frame = frame[eval_mask][["Date", "Value"]].reset_index(drop=True)
+    eval_positions = np.flatnonzero(eval_mask)
     out["rows_train"], out["rows_eval"] = int(len(train_frame)), int(len(eval_frame))
 
     # 1. Certification: the real quality gate, on the evaluation payload.
@@ -598,14 +990,14 @@ def _evaluate_indicator(code: str, entry: Dict[str, Any], proto: Dict[str, Any])
     values_eval = pd.to_numeric(eval_frame["Value"], errors="coerce").to_numpy(dtype=float)
     keep = (offsets >= 0) & (offsets < values_eval.size) & np.isfinite(scores_raw)
     offsets, scores = offsets[keep], scores_raw[keep] * direction_sign
-    if offsets.size < HORIZON + MIN_DURATION + 1:
+    if offsets.size < int(tp["horizon"]) + int(tp["min_duration"]) + 1:
         out["status"] = "skipped"
         out["skip_reason"] = "risk_series_too_short"
         return out
 
     # 4. Labels on the raw series (never on features), joined via row_offset.
     definition = EventDefinition(direction=event_direction(code), quantile=QUANTILE,
-                                 horizon=HORIZON, min_duration=MIN_DURATION)
+                                 horizon=int(tp["horizon"]), min_duration=int(tp["min_duration"]))
     labelling = label_events(values_eval, definition, threshold_span=(0, values_eval.size))
     events = labelling.events[offsets]
     if not events.any():
@@ -628,10 +1020,10 @@ def _evaluate_indicator(code: str, entry: Dict[str, Any], proto: Dict[str, Any])
     # rewrite history; the lookup gives every run its own tag's rule.
     alarm_q = float(proto.get("alarm_quantile", ALARM_QUANTILE))
 
-    def _score_card(sc: np.ndarray) -> Dict[str, Any]:
+    def _score_card(sc: np.ndarray, ev: np.ndarray) -> Dict[str, Any]:
         alarms = sc >= float(np.quantile(sc, alarm_q))
-        lead = lead_time_stats(events, alarms, max_lead=MAX_LEAD)
-        fa = false_alarm_stats(alarms, events, horizon=HORIZON)
+        lead = lead_time_stats(ev, alarms, max_lead=int(tp["max_lead"]))
+        fa = false_alarm_stats(alarms, ev, horizon=int(tp["horizon"]))
         return {
             "roc_auc": roc_auc(events, sc),
             "average_precision": average_precision(events, sc),
@@ -640,46 +1032,93 @@ def _evaluate_indicator(code: str, entry: Dict[str, Any], proto: Dict[str, Any])
             "n_alarms": int(alarms.sum()),
         }
 
-    pers_card = _score_card(persistence_scores)
-    ar1_card = _score_card(ar1_scores)
+    pers_card = _score_card(persistence_scores, events)
+    ar1_card = _score_card(ar1_scores, events)
     base_rate = float(events.mean())
-    quiet_years = float((events.size - events.sum())) / BUSINESS_DAYS_PER_YEAR
+    quiet_years = float((events.size - events.sum())) / int(tp["steps_per_year"])
 
-    # Declared scorers, each graded identically on the identical grid with
-    # the identical frozen criteria. v1/v2 declare one (the frozen TAN); v3
-    # adds the hazard logit -- both declared in the tagged protocol pre-run.
+    # Declared scorers, each graded with the identical frozen criteria on its
+    # declared grid. v1/v2 declare one (the frozen TAN); v3 adds the frozen
+    # hazard logit; v4 adds the two rolling-refit scorers and declares
+    # per-scorer grids: a rolling scorer covers eval steps the frozen TAN's
+    # eval-only warm-up drops, so each scorer is graded against baselines
+    # recomputed on its OWN grid (v1-v3 keep the single shared grid and their
+    # byte-identical report shapes).
     scorer_series: Dict[str, Optional[np.ndarray]] = {"tan_frozen": scores}
+    scorer_grids: Dict[str, np.ndarray] = {"tan_frozen": offsets}
+    scorer_skip: Dict[str, str] = {}
     if "hazard_logit" in proto.get("scorers", ()):
         scorer_series["hazard_logit"] = _hazard_logit_scores(
-            train_values, mean, std, direction_sign, definition, values_eval, offsets
+            train_values, mean, std, direction_sign, definition, values_eval, offsets,
+            lookback=int(tp["hazard_lookback"]),
         )
+        scorer_grids["hazard_logit"] = offsets
+        scorer_skip["hazard_logit"] = "no_onsets_in_training_span"
+    if "tan_rolling" in proto.get("scorers", ()):
+        scorer_skip["tan_rolling"] = "no_refit_window_could_be_fit"
+        rolled = _rolling_tan_scores(code, frame, eval_positions, proto, workdir, attestation)
+        if rolled is None:
+            scorer_series["tan_rolling"] = None
+        else:
+            rpos, rsc = rolled
+            ridx, rok = _map_positions_to_eval(rpos, eval_positions)
+            scorer_series["tan_rolling"] = rsc[rok] * direction_sign
+            scorer_grids["tan_rolling"] = ridx[rok]
+    if "hazard_logit_rolling" in proto.get("scorers", ()):
+        scorer_skip["hazard_logit_rolling"] = "no_onsets_in_any_refit_window"
+        rolled = _rolling_hazard_scores(frame, eval_positions, tp, direction_sign, definition)
+        if rolled is None:
+            scorer_series["hazard_logit_rolling"] = None
+        else:
+            rpos, rsc = rolled
+            ridx, rok = _map_positions_to_eval(rpos, eval_positions)
+            scorer_series["hazard_logit_rolling"] = rsc[rok]
+            scorer_grids["hazard_logit_rolling"] = ridx[rok]
 
+    per_scorer_grids = bool(proto.get("per_scorer_grids"))
     scorers_out: Dict[str, Any] = {}
     for scorer_name in proto.get("scorers", ("tan_frozen",)):
         sc = scorer_series.get(scorer_name)
         if sc is None:
-            scorers_out[scorer_name] = {"skipped": "no_onsets_in_training_span"}
+            scorers_out[scorer_name] = {"skipped": scorer_skip.get(scorer_name, "no_onsets_in_training_span")}
             continue
-        card = _score_card(sc)
+        g_off = scorer_grids.get(scorer_name, offsets)
+        if per_scorer_grids and g_off is not offsets:
+            ev_g = labelling.events[g_off]
+            if ev_g.size < int(tp["horizon"]) + int(tp["min_duration"]) + 1:
+                scorers_out[scorer_name] = {"skipped": "rolling_grid_too_short"}
+                continue
+            z_g = (values_eval[g_off] - mean) / std
+            pers_g = direction_sign * z_g
+            ar1_g = direction_sign * (intercept + slope * z_g)
+            pers_card_g = _score_card(pers_g, ev_g)
+            ar1_card_g = _score_card(ar1_g, ev_g)
+            base_rate_g = float(ev_g.mean())
+            quiet_years_g = float((ev_g.size - ev_g.sum())) / int(tp["steps_per_year"])
+        else:
+            ev_g, pers_card_g, ar1_card_g = events, pers_card, ar1_card
+            base_rate_g, quiet_years_g = base_rate, quiet_years
+        card = _score_card(sc, ev_g)
         ap_obs = card["average_precision"]
         p_value = (
-            _permutation_ap_pvalue(events.astype(bool), sc, ap_obs)
+            _permutation_ap_pvalue(ev_g.astype(bool), sc, ap_obs)
             if np.isfinite(ap_obs) else 1.0
         )
         n_true = int(card["false_alarms"].get("n_true_alarms", 0))
         n_false = int(card["false_alarms"].get("n_false_alarms", 0))
         precision_ci = _wilson_ci(n_true, n_true + n_false)
         median_lead = card["lead_time"].get("median_lead")
-        fa_per_quiet_year = (n_false / quiet_years) if quiet_years > 0 else float("nan")
+        fa_per_quiet_year = (n_false / quiet_years_g) if quiet_years_g > 0 else float("nan")
 
-        # Frozen criteria (identical for every scorer and protocol version).
-        c_lead = median_lead is not None and float(median_lead) >= MIN_MEDIAN_LEAD
+        # Frozen criteria (identical for every scorer and protocol version;
+        # each track states them in its own declared steps).
+        c_lead = median_lead is not None and float(median_lead) >= tp["min_median_lead"]
         c_fa = np.isfinite(fa_per_quiet_year) and fa_per_quiet_year <= MAX_FALSE_ALARMS_PER_QUIET_YEAR
-        c_lift = (ap_obs > pers_card["average_precision"]) and (ap_obs > ar1_card["average_precision"]) \
-            and (card["roc_auc"] > pers_card["roc_auc"]) and (card["roc_auc"] > ar1_card["roc_auc"])
-        c_ap = bool(np.isfinite(ap_obs) and ap_obs > base_rate)
+        c_lift = (ap_obs > pers_card_g["average_precision"]) and (ap_obs > ar1_card_g["average_precision"]) \
+            and (card["roc_auc"] > pers_card_g["roc_auc"]) and (card["roc_auc"] > ar1_card_g["roc_auc"])
+        c_ap = bool(np.isfinite(ap_obs) and ap_obs > base_rate_g)
 
-        scorers_out[scorer_name] = {
+        scorer_result: Dict[str, Any] = {
             "card": card,
             "ap_permutation_p": p_value,
             "precision_at_alarm_ci95": [round(precision_ci[0], 4), round(precision_ci[1], 4)],
@@ -692,6 +1131,16 @@ def _evaluate_indicator(code: str, entry: Dict[str, Any], proto: Dict[str, Any])
             },
             "passed_pre_holm": bool(all([c_lead, c_fa, c_lift, c_ap])),
         }
+        if per_scorer_grids:
+            scorer_result["grid_n"] = int(ev_g.size)
+            if g_off is not offsets:
+                scorer_result["grid_baselines"] = {
+                    "persistence": {"roc_auc": pers_card_g["roc_auc"],
+                                    "average_precision": pers_card_g["average_precision"]},
+                    "ar1": {"roc_auc": ar1_card_g["roc_auc"],
+                            "average_precision": ar1_card_g["average_precision"]},
+                }
+        scorers_out[scorer_name] = scorer_result
 
     # 7. Episode-overlap context (reported, not a criterion).
     dates = eval_frame["Date"]
@@ -822,6 +1271,12 @@ def eval_phase(proto: Dict[str, Any]) -> int:
         "results": results,
         "family_verdict": family_verdict,
     }
+    if proto.get("tracks"):
+        report["constants"]["tracks"] = proto["tracks"]
+        report["constants"]["track_params"] = {
+            t: TRACK_PARAMS[t] for t in sorted(set(list(proto["tracks"].values()) + ["daily"]))
+        }
+        report["constants"]["rolling_refit"] = proto.get("rolling_refit")
     report_dir.mkdir(parents=True, exist_ok=True)
     (report_dir / "report.json").write_text(json.dumps(report, indent=2, default=str))
     (report_dir / "report.md").write_text(_render_markdown(report))
@@ -883,6 +1338,16 @@ def _render_markdown(report: Dict[str, Any]) -> str:
     lines += ["", "## Criteria (frozen pre-run; identical thresholds in every protocol version)", "",
               f"0. Alarm rule and scorers are declared per protocol version: this run used alarm quantile "
               f"{report['constants']['alarm_quantile']} and scorer(s) {', '.join(report['constants'].get('scorers', ['tan_frozen']))}",
+              *(
+                  ["0b. Per-track step semantics (declared pre-run; the daily row restates the frozen v1-v3 constants):"]
+                  + [f"   - {t}: horizon {int(prm['horizon'])} step(s), min_duration {int(prm['min_duration'])}, "
+                     f"max_lead {int(prm['max_lead'])}, lead floor {int(prm['min_median_lead'])} step(s) "
+                     f"(~{int(prm['min_median_lead'] * prm['bd_per_step'])} business days), "
+                     f"{int(prm['steps_per_year'])} steps/year, hazard lookback {int(prm['hazard_lookback'])} step(s)"
+                     for t, prm in sorted(report["constants"].get("track_params", {}).items())]
+                  + ["   Rolling scorers are graded against baselines recomputed on their own grids (declared: per_scorer_grids)."]
+                  if report["constants"].get("tracks") else []
+              ),
               f"1. median lead >= {MIN_MEDIAN_LEAD} business days (max_lead {MAX_LEAD}, earliest-alarm convention)",
               f"2. false alarms <= {MAX_FALSE_ALARMS_PER_QUIET_YEAR:.0f} per quiet year (an alarm simultaneous with an event counts as false: it warned nobody)",
               "3. AUC and AP both strictly above the persistence AND the AR(1) baseline on the identical grid",
@@ -901,7 +1366,12 @@ def _render_markdown(report: Dict[str, Any]) -> str:
               "before scoring, and recorded in the protocol's `manifest.json` with endpoint (API key",
               "redacted), fetch timestamp, SHA-256, row counts, measured frequency, coverage and the",
               "series' own licence lines. Labels come from `label_events` on raw series; the model",
-              "never saw the evaluation window during training.", ""]
+              "never saw the evaluation window during training.",
+              *((["v4 additionally fetches the BIS credit-to-GDP gap keyless from stats.bis.org (SDMX CSV),",
+                  "licence-screened against data.bis.org/help/legal, with the attribution recorded in the",
+                  "manifest; quarter periods map to quarter-end dates (declared convention)."])
+                if report["constants"].get("tracks") else []),
+              ""]
     return "\n".join(lines)
 
 
