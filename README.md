@@ -366,6 +366,8 @@ Full index: [`docs/README.md`](docs/README.md).
 | [`docs/deployment.md`](docs/deployment.md) | Compose, GPU, model weights, secrets, verification |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operate it: boot, environment, health checks, failure matrix, backup/restore drill |
 | [`docs/VERSIONING.md`](docs/VERSIONING.md) | SemVer policy, changelog rules, release script, what CI enforces |
+| [`docs/FAILURE_LEDGER.md`](docs/FAILURE_LEDGER.md) | Failure & mitigation ledger — every confirmed bug, violation, unreachable criterion and negative result, with evidence |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Community contract: norms, reproducing the tagged science, sharing analyses, reporting errors/faults/misleads |
 | [`docs/LANGUAGE_STRATEGY.md`](docs/LANGUAGE_STRATEGY.md) | Measured Python/Rust boundary and the rule for moving it |
 
 - **Swagger UI**: http://localhost:3456/docs

@@ -17,6 +17,8 @@ they stayed stale for ten months without anyone noticing.
 | [`RUNBOOK.md`](RUNBOOK.md) | Operating the deployment: boot order, environment, health checks, failure matrix, backup/restore drill |
 | [`VERSIONING.md`](VERSIONING.md) | SemVer policy, changelog discipline, release tooling, what CI enforces |
 | [`operator_series_onboarding.md`](operator_series_onboarding.md) | Onboarding the six operator-reported registry codes: CSV and custom-API routes, declared directions, SSRF contract, what the pipeline does next, and the parked-EWS boundary |
+| [`FAILURE_LEDGER.md`](FAILURE_LEDGER.md) | The failure & mitigation ledger: every confirmed bug, licence violation, unreachable criterion and negative result, with detection, impact, mitigation, status and evidence pointers |
+| [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | The community contract: norms (freeze-before-measure, publish unchanged, licence-before-download, refuse-don't-fabricate), running and reproducing the tagged science, sharing analyses with provenance, reporting errors/faults/misleads, release checklist |
 | [`LANGUAGE_STRATEGY.md`](LANGUAGE_STRATEGY.md) | The measured Python/Rust boundary and the rule for moving it |
 | [`../.github/workflows/README.md`](../.github/workflows/README.md) | CI/CD workflows and how to reproduce each locally |
 

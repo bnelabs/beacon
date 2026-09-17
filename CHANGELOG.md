@@ -10,6 +10,31 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **`docs/FAILURE_LEDGER.md` — the failure & mitigation ledger, open to
+  everyone.** Twenty-four confirmed failures in one place — the three-run
+  early-warning record (including the parked verdict and the v2 protocol's
+  unreachable-criterion incoherence), the ICE BofA licence violation and its
+  withdrawal, the fabricated-scores API bug, the CI gates that lied (a suite
+  that could not start, a budget gate permanently tripped and blind), the
+  stranded v3.3.0 release — each with how it was detected, what it cost, the
+  mitigation, its status, and an evidence pointer. Ledger rules are part of the
+  document: an entry opens when a failure is *confirmed* (not when it is
+  fixed), closes only when the mitigation is merged and verified, and nothing
+  is silently deleted. The CHANGELOG records what changed; the ledger records
+  what went wrong and what we did about it. Registered in the docs index and
+  README.
+- **`CONTRIBUTING.md` — the invitation and the contract for running, checking
+  and extending BEACON in public.** The binding norms (freeze before you
+  measure; one run, published unchanged; licence-screen before download;
+  refuse, don't fabricate; claims point at code; credentials never live in the
+  repo), the measured resource profile and exact gate commands (2 CPUs / ~1 GB
+  RAM / CPU torch wheel), how to reproduce any tagged pre-registration run
+  byte-identically with your own FRED key, how to share analyses with
+  provenance (manifest + snapshot id + code tag; negative results explicitly
+  welcome), the five issue classes we track (scoring bug, data/licence, claim
+  drift, reproducibility failure, infrastructure lie) with required evidence,
+  and the maintainer release checklist — whose step 4 ("push the tag") exists
+  because v3.3.0 was stranded without it.
 - **`docs/operator_series_onboarding.md` — the path for an institution's own
   series to join the platform.** The three-run pre-registered record
   established that public daily stress families are thin and that six
@@ -142,6 +167,20 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 - **Two new codes in the semantics registry, directions declared pre-fetch:**
   `FRED_T10Y3M` (-1, same term-structure convention as `FRED_T10Y2Y`) and
   `FRED_VIXCLS` (+1, rising implied equity volatility = stress).
+
+### Changed
+- **BREAKING (the 4.0.0 MAJOR justification): `GET /api/v2/predictions/{job_id}`
+  serves refusal instead of fabrication.** `PredictionNode.risk` is optional;
+  absence travels as `null` with the reason beside it (`uncertainty_status`,
+  `uncertainty_reasons`, `confidence_method`), and a missing score is never
+  coerced to `0.0` nor substituted from "any numeric column, scanned
+  backwards" (which on a refused row would have served epistemic variance as a
+  risk score, or 500'd on NaN). Consumers that assumed a numeric score is
+  always present **will break — by design**: a platform whose API invents
+  numbers under refusal is worse than no platform. Per `docs/VERSIONING.md`
+  this is a breaking change to public API semantics, hence MAJOR. Details in
+  the Fixed entries below and `docs/api.md`; the UI renders refusals as
+  absence (Results page), and the refused-row contract has tests.
 
 ### Removed
 - **`data/prereg/FRED_BAMLH0A0HYM2.csv` — licence violation, withdrawn.**
@@ -316,6 +355,13 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   this prevents the task-snapshot class of leak at the index level.
 
 ### Fixed
+- **The stranded v3.3.0 release is tagged.** The release commit (`57db310`,
+  2026-09-16) moved the changelog block and bumped `VERSION`, but the
+  annotated tag was never created or pushed — `VERSIONING.md` reserves
+  tag-pushing to maintainers and the step was missed. Found by the pre-4.0.0
+  audit diffing `git tag -l` against `release:` commits. `v3.3.0` is tagged at
+  its release commit alongside this one, and the `CONTRIBUTING.md` release
+  checklist now ends with "push the tag; verify it exists" (ledger L-23).
 - **`run_backtest`'s event metrics measured the wrong thing twice over.**
   (a) Alignment: labels were joined to the risk series by naive truncation
   (`events[:len(scores)]`), shifting every label by the sequence warm-up
