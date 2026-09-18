@@ -61,6 +61,7 @@ COPY backend/ backend/
 # did when the build context was ./backend: alembic.ini sits at the
 # repository root, so it was never in the image at all.
 COPY alembic.ini /app/alembic.ini
+COPY VERSION /app/VERSION
 
 # entrypoint.sh arrived with the `COPY backend/ backend/` above and the copy
 # preserves its mode bit, so this is belt-and-braces rather than a fix. It runs

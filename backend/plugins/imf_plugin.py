@@ -9,6 +9,9 @@ from .base import DataSourcePlugin, register_plugin
 
 logger = logging.getLogger(__name__)
 
+DATAMAPPER_BASE_URL = "https://www.imf.org/external/datamapper/api/v1"
+DEFAULT_IMF_USER_AGENT = "BEACON/4.0 beacon@bnelabs.com"
+
 
 class IMFPlugin(DataSourcePlugin):
     """
@@ -64,16 +67,29 @@ class IMFPlugin(DataSourcePlugin):
             }
 
     def test_connection(self) -> Dict[str, Any]:
-        """Test IMF API connectivity."""
+        """Test IMF connectivity through the current public DataMapper API."""
         try:
-            # Test with dataflow endpoint
-            url = "https://dataservices.imf.org/REST/SDMX_JSON.svc/Dataflow"
-            response = requests.get(url, timeout=10)
+            # dataservices.imf.org/REST/SDMX_JSON.svc was retired and no
+            # longer resolves.  DataMapper is the IMF's current public JSON
+            # API and gives us a real data response rather than merely a web
+            # server status page.
+            url = f"{DATAMAPPER_BASE_URL}/NGDP_RPCH/USA"
+            response = requests.get(
+                url,
+                headers={"Accept": "application/json", "User-Agent": DEFAULT_IMF_USER_AGENT},
+                timeout=10,
+            )
 
             if response.status_code == 200:
+                payload = response.json()
+                values = payload.get("values", {}).get("NGDP_RPCH", {})
                 return {
                     "success": True,
-                    "message": "Successfully connected to IMF Data API"
+                    "message": "Successfully connected to IMF Data API",
+                    "details": {
+                        "test_indicator": "NGDP_RPCH",
+                        "countries_returned": len(values),
+                    },
                 }
             else:
                 return {
@@ -130,7 +146,41 @@ class IMFPlugin(DataSourcePlugin):
             DataFrame with Date and Value columns
         """
         try:
-            # Parse indicator ID to extract components
+            # DataMapper identifiers can be passed as ``INDICATOR/COUNTRY``
+            # when an operator selects a current IMF DataMapper series.
+            if "/" in indicator_id:
+                indicator, country = indicator_id.split("/", 1)
+                response = requests.get(
+                    f"{DATAMAPPER_BASE_URL}/{indicator}/{country}",
+                    params={
+                        "periods": ",".join(
+                            str(year) for year in range(start_date.year, end_date.year + 1)
+                        )
+                    },
+                    headers={"Accept": "application/json", "User-Agent": DEFAULT_IMF_USER_AGENT},
+                    timeout=float(self.config.get("timeout", 30)),
+                )
+                response.raise_for_status()
+                payload = response.json()
+                country_values = payload.get("values", {}).get(indicator, {}).get(country, {})
+                if not country_values:
+                    return None
+                result = pd.DataFrame(
+                    {
+                        "date": pd.to_datetime(list(country_values.keys()), format="%Y"),
+                        "value": pd.to_numeric(list(country_values.values()), errors="coerce"),
+                    }
+                ).dropna(subset=["date", "value"])
+                result = result[
+                    (result["date"] >= pd.Timestamp(start_date))
+                    & (result["date"] <= pd.Timestamp(end_date))
+                ]
+                return result.sort_values("date") if not result.empty else None
+
+            # Parse legacy SDMX indicator ID to extract components.  The
+            # retired endpoint is retained as a compatibility path for an
+            # operator-provided IMF gateway, but the default health probe no
+            # longer depends on it.
             # Format: Database.Frequency.Country.Indicator
             parts = indicator_id.split('.')
             if len(parts) < 4:

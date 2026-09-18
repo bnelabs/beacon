@@ -12,7 +12,7 @@ schema at `/openapi.json` or the Swagger UI at `/docs`.
 
 Application: **BEACON API - Banking Network Engine** v4.0.0
 
-**122 operations across 22 tags.**
+**123 operations across 22 tags.**
 
 
 ## Pipeline (DATA-ENGINE-RESULTS)
@@ -52,6 +52,7 @@ Application: **BEACON API - Banking Network Engine** v4.0.0
 | `POST` | `/api/v1/data-sources/` | `DataSourceResponse` | Create a new data source. |
 | `GET` | `/api/v1/data-sources/disclosure` | untyped | Provenance disclosure: every feed, its publisher, and what is inferred. |
 | `GET` | `/api/v1/data-sources/health` | untyped | Feed health: cadence, last outcome, and what is overdue, per source. |
+| `GET` | `/api/v1/data-sources/plugins` | untyped | Return the registered plugin configuration schemas for the UI. |
 | `POST` | `/api/v1/data-sources/test` | `DataSourceTestResponse` | Test a data source configuration before saving it. |
 | `GET` | `/api/v1/data-sources/{data_source_id}` | `DataSourceResponse` | Get details of a specific data source. |
 | `PUT` | `/api/v1/data-sources/{data_source_id}` | `DataSourceResponse` | Update an existing data source. |

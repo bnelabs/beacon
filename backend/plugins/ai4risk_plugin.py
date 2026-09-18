@@ -20,7 +20,9 @@ graph.
 
 import logging
 import os
+import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -91,6 +93,34 @@ class AI4RiskInterbankPlugin(DataSourcePlugin):
 
         expected = ("interbank_network.csv", "bank_features.csv", "credit_ratings.csv")
         present = [name for name in expected if name in files]
+        if present:
+            return {
+                "success": True,
+                "message": f"AI4Risk dataset found ({len(present)}/{len(expected)} files present)",
+                "details": {"data_dir": self.data_dir, "files": present},
+            }
+
+        # The published AI4Risk repository stores one edge file and one node
+        # file per quarter under datasets/edges and datasets/nodes.  The old
+        # adapter only looked for three invented aggregate filenames, so a
+        # correctly downloaded upstream dataset was reported as missing.
+        edge_files = sorted(Path(self.data_dir, "edges").glob("edge_*.csv"))
+        node_files = sorted(Path(self.data_dir, "nodes").glob("*.csv"))
+        if edge_files and node_files:
+            return {
+                "success": True,
+                "message": (
+                    "AI4Risk dataset found in the published quarterly layout "
+                    f"({len(edge_files)} edge files, {len(node_files)} node files)"
+                ),
+                "details": {
+                    "data_dir": self.data_dir,
+                    "layout": "datasets/edges + datasets/nodes",
+                    "edge_files": len(edge_files),
+                    "node_files": len(node_files),
+                },
+            }
+
         if not present:
             return {
                 "success": False,
@@ -176,23 +206,110 @@ class AI4RiskInterbankPlugin(DataSourcePlugin):
     def _read_dataset(self, filename: str) -> pd.DataFrame:
         """Read a dataset file, failing loudly when it is absent or unreadable."""
         path = os.path.join(self.data_dir, filename)
-        if not os.path.isfile(path):
+        if os.path.isfile(path):
+            try:
+                return pd.read_csv(path)
+            except (OSError, pd.errors.ParserError, pd.errors.EmptyDataError) as exc:
+                raise SchemaValidationError(
+                    f"AI4Risk dataset file could not be parsed: {path}",
+                    context={"file": path, "error": str(exc)},
+                    cause=exc,
+                ) from exc
+
+        # Read the real upstream repository layout without requiring an
+        # operator to rename or concatenate its files by hand.
+        if filename == "interbank_network.csv":
+            return self._read_upstream_edges()
+        if filename == "bank_features.csv":
+            return self._read_upstream_nodes()
+
+        if filename == "credit_ratings.csv" and Path(self.data_dir, "nodes").is_dir():
             raise DatasetMissingError(
-                f"AI4Risk dataset file not found: {path}",
+                "AI4Risk upstream release contains edge and feature tables but no "
+                "separate credit_ratings.csv; refusing to infer ratings or SRISK",
                 context={
                     "file": path,
                     "download_url": DOWNLOAD_URL,
-                    "remediation": f"Download the dataset from {DOWNLOAD_URL} into {self.data_dir}",
+                    "remediation": (
+                        "Use network_topology or bank_features with the published "
+                        "quarterly dataset; provide a separately sourced ratings file "
+                        "if credit_ratings is required"
+                    ),
                 },
             )
-        try:
-            return pd.read_csv(path)
-        except (OSError, pd.errors.ParserError, pd.errors.EmptyDataError) as exc:
-            raise SchemaValidationError(
-                f"AI4Risk dataset file could not be parsed: {path}",
-                context={"file": path, "error": str(exc)},
-                cause=exc,
-            ) from exc
+
+        raise DatasetMissingError(
+            f"AI4Risk dataset file not found: {path}",
+            context={
+                "file": path,
+                "download_url": DOWNLOAD_URL,
+                "remediation": f"Download the dataset from {DOWNLOAD_URL} into {self.data_dir}",
+            },
+        )
+
+    def _quarterly_files(self, directory: str, pattern: str) -> List[tuple[Path, pd.Timestamp]]:
+        """Return upstream quarterly files with their declared quarter dates."""
+        result: List[tuple[Path, pd.Timestamp]] = []
+        for path in sorted(Path(self.data_dir, directory).glob(pattern)):
+            match = re.search(r"(\d{4})Q([1-4])", path.name)
+            if not match:
+                continue
+            year, quarter = int(match.group(1)), int(match.group(2))
+            result.append((path, pd.Timestamp(year, (quarter - 1) * 3 + 1, 1)))
+        return result
+
+    def _read_upstream_edges(self) -> pd.DataFrame:
+        """Load the published AI4Risk ``datasets/edges`` files."""
+        frames: List[pd.DataFrame] = []
+        for path, date in self._quarterly_files("edges", "edge_*.csv"):
+            frame = pd.read_csv(path)
+            columns = {str(column).lower(): column for column in frame.columns}
+            source = columns.get("sourceid") or columns.get("source")
+            target = columns.get("targetid") or columns.get("target")
+            weight = columns.get("weights") or columns.get("weight")
+            if not source or not target or not weight:
+                raise SchemaValidationError(
+                    "AI4Risk edge file is missing Sourceid, Targetid or Weights",
+                    context={"file": str(path), "columns": list(frame.columns)},
+                )
+            frames.append(
+                pd.DataFrame(
+                    {
+                        "Date": date,
+                        "source_bank": frame[source].astype(str),
+                        "target_bank": frame[target].astype(str),
+                        "Value": pd.to_numeric(frame[weight], errors="coerce"),
+                    }
+                ).dropna(subset=["Value"])
+            )
+        if not frames:
+            raise DatasetMissingError(
+                f"AI4Risk edge files not found below {Path(self.data_dir, 'edges')}",
+                context={"download_url": DOWNLOAD_URL},
+            )
+        return pd.concat(frames, ignore_index=True)
+
+    def _read_upstream_nodes(self) -> pd.DataFrame:
+        """Load the published AI4Risk ``datasets/nodes`` feature files."""
+        frames: List[pd.DataFrame] = []
+        for path, date in self._quarterly_files("nodes", "*.csv"):
+            frame = pd.read_csv(path)
+            id_column = next((column for column in ("index", "bank_id", "BANK_ID") if column in frame.columns), None)
+            if id_column is None:
+                raise SchemaValidationError(
+                    "AI4Risk node file has no bank identifier column",
+                    context={"file": str(path), "columns": list(frame.columns)},
+                )
+            frame = frame.rename(columns={id_column: "bank_id"})
+            frame["bank_id"] = frame["bank_id"].astype(str)
+            frame["Date"] = date
+            frames.append(frame)
+        if not frames:
+            raise DatasetMissingError(
+                f"AI4Risk node files not found below {Path(self.data_dir, 'nodes')}",
+                context={"download_url": DOWNLOAD_URL},
+            )
+        return pd.concat(frames, ignore_index=True)
 
     def _resolve_date_column(self, df: pd.DataFrame, filename: str) -> pd.DataFrame:
         """Normalise the quarter/date column onto a 'Date' column."""
@@ -420,7 +537,7 @@ class AI4RiskInterbankPlugin(DataSourcePlugin):
         """Get plugin metadata."""
         return {
             "name": "AI4Risk Interbank Network",
-            "description": "Real interbank network topology and bank features for 4,548 banks (2016Q1-2023Q1)",
+            "description": "Real interbank network topology and bank features for 4,548 banks (2016Q1-2023Q4)",
             "version": "1.1.0",
             "author": "BEACON",
             "free": True,

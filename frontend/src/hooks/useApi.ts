@@ -18,6 +18,7 @@ import type {
   BacktestReport,
   NetworkGraphPayload,
   NormalizedNetworkGraph,
+  PluginDefinition,
   ProbeResult,
   SystemStatus,
   ValidationReport
@@ -90,6 +91,15 @@ export function useDataDisclosure() {
     queryKey: ['dataSources', 'disclosure'],
     queryFn: () => fetchApi<DataDisclosure>('/v1/data-sources/disclosure'),
     staleTime: 300_000
+  })
+}
+
+export function useDataSourcePlugins() {
+  return useQuery({
+    queryKey: ['dataSources', 'plugins'],
+    queryFn: () => fetchApi<PluginDefinition[]>('/v1/data-sources/plugins'),
+    staleTime: 300_000,
+    retry: false
   })
 }
 

@@ -410,11 +410,39 @@ export interface DataSourceFormPayload {
   config: Record<string, unknown>
 }
 
-/** A plugin selectable in the source form, derived from the disclosure
- *  registry (never a hand-maintained frontend list). */
+/** A schema field declared by a backend data-source plugin. */
+export interface PluginConfigField {
+  type?: string
+  required?: boolean
+  label?: string
+  help?: string
+  description?: string
+  placeholder?: string
+  default?: unknown
+  secret?: boolean
+  min?: number
+  max?: number
+  options?: Array<{ value: string; label: string }> | string[]
+}
+
+/** A plugin selectable in the source form, derived from the runtime registry. */
 export interface PluginOption {
   value: string
   label: string
+  description?: string | null
+  registration_required?: boolean
+  registration_url?: string | null
+  config_schema?: Record<string, PluginConfigField> | null
+}
+
+/** `GET /v1/data-sources/plugins`. */
+export interface PluginDefinition {
+  type: string
+  name: string
+  description?: string | null
+  registration_required?: boolean
+  registration_url?: string | null
+  config_schema?: Record<string, PluginConfigField> | null
 }
 
 /** A catalogue dataset row from `/v1/catalogue`

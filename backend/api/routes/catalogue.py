@@ -362,13 +362,11 @@ async def test_catalogue_item(
             )
 
         # Get the plugin for this data source
-        from backend.plugins import get_plugin
-        plugin_config = item.data_source.config or {}
-
-        # Inject API keys from environment if needed
-        import os
-        if item.data_source.plugin_type == 'fred' and 'api_key' not in plugin_config:
-            plugin_config['api_key'] = os.getenv('FRED_API_KEY', '')
+        from backend.plugins import config_with_env_keys, get_plugin
+        plugin_config = config_with_env_keys(
+            item.data_source.plugin_type,
+            item.data_source.config,
+        )
 
         plugin_class = get_plugin(item.data_source.plugin_type)
         if not plugin_class:

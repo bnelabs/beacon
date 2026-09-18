@@ -7,6 +7,7 @@ import ErrorMessage from '../components/ui/ErrorMessage'
 import {
   useCreateDataSource,
   useDataDisclosure,
+  useDataSourcePlugins,
   useDataSourceHealth,
   useDataSources,
   useProbeDataSource,
@@ -227,6 +228,7 @@ function DataSourceCard({
 export default function DataSources() {
   const { data: sources, isLoading, error, refetch } = useDataSources()
   const { data: disclosure } = useDataDisclosure()
+  const { data: pluginDefinitions } = useDataSourcePlugins()
   const syncMutation = useSyncDataSource()
   const createMutation = useCreateDataSource()
   const updateMutation = useUpdateDataSource()
@@ -265,12 +267,25 @@ export default function DataSources() {
   const [formSource, setFormSource] = useState<DataSource | null>(null)
   const [detailsSource, setDetailsSource] = useState<DataSource | null>(null)
 
-  // Plugin options come from the backend disclosure (the runtime registry),
-  // not a hand-maintained frontend list: a feed the API cannot resolve must
-  // not be selectable, and a feed it can must not be missing.
+  // Plugin options and configuration fields come from the runtime registry,
+  // not a hand-maintained frontend list.  The disclosure remains a fallback
+  // for a rolling upgrade where the new metadata endpoint is not ready yet.
   const pluginOptions = useMemo(() => {
     const seen = new Set<string>()
-    const base: Array<{ value: string; label: string }> = []
+    const base: Array<import('../types/api').PluginOption> = []
+    ;(pluginDefinitions || []).forEach((plugin) => {
+      if (plugin.type && !seen.has(plugin.type)) {
+        base.push({
+          value: plugin.type,
+          label: plugin.name || plugin.type,
+          description: plugin.description,
+          registration_required: plugin.registration_required,
+          registration_url: plugin.registration_url,
+          config_schema: plugin.config_schema
+        })
+        seen.add(plugin.type)
+      }
+    })
     ;(disclosure?.sources || []).forEach((source) => {
       if (source.plugin_type && !seen.has(source.plugin_type)) {
         base.push({ value: source.plugin_type, label: source.name || source.plugin_type })
@@ -285,7 +300,7 @@ export default function DataSources() {
       }
     })
     return base
-  }, [disclosure, sources])
+  }, [disclosure, pluginDefinitions, sources])
 
   const [selectedDatasets, setSelectedDatasets] = useState<SelectedDataset[]>([])
   const selectedDatasetIds = useMemo<EntityId[]>(() => selectedDatasets.map((dataset) => dataset.id), [selectedDatasets])

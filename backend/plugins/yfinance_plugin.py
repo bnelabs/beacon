@@ -1,15 +1,15 @@
 """Yahoo Finance data source plugin."""
 
-import yfinance as yf
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 import logging
 
 from .base import DataSourcePlugin, register_plugin
-from .http_client import retry_call
-
 logger = logging.getLogger(__name__)
+
+YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
+DEFAULT_YAHOO_USER_AGENT = "BEACON/4.0 beacon@bnelabs.com"
 
 
 class YFinancePlugin(DataSourcePlugin):
@@ -23,18 +23,20 @@ class YFinancePlugin(DataSourcePlugin):
     def test_connection(self) -> Dict[str, Any]:
         """Test Yahoo Finance connectivity."""
         try:
-            # Try fetching a well-known ticker
-            test_ticker = yf.Ticker("AAPL")
-            # yfinance hides its own transport, so the plugin-wide exponential
-            # backoff policy is applied around the opaque SDK call rather than
-            # at the HTTP layer.
-            info = retry_call(lambda: test_ticker.info, retries=2)
+            # ``Ticker.info`` uses Yahoo's quoteSummary endpoint, which is
+            # frequently rate-limited (HTTP 429) even when the public chart
+            # endpoint is healthy.  Probe the same chart contract used by
+            # collection instead of treating quote metadata as connectivity.
+            end_date = datetime.utcnow()
+            data = self._fetch_chart_data(
+                "AAPL", end_date - timedelta(days=7), end_date
+            )
 
-            if info and 'symbol' in info:
+            if data is not None and not data.empty:
                 return {
                     "success": True,
                     "message": "Successfully connected to Yahoo Finance",
-                    "details": {"test_symbol": "AAPL"}
+                    "details": {"test_symbol": "AAPL", "rows": len(data)}
                 }
             else:
                 return {
@@ -46,6 +48,61 @@ class YFinancePlugin(DataSourcePlugin):
                 "success": False,
                 "message": f"Failed to connect to Yahoo Finance: {str(e)}"
             }
+
+    def _fetch_chart_data(
+        self,
+        symbol: str,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> Optional[pd.DataFrame]:
+        """Fetch one symbol from Yahoo's public chart JSON endpoint.
+
+        The pinned yfinance client uses quoteSummary for ``Ticker.info`` and
+        can report a false outage when that endpoint is rate-limited.  Yahoo's
+        chart endpoint is the stable data path needed by Beacon and returns
+        the OHLCV arrays without a crumb or API key.
+        """
+        response = self.http.get(
+            f"{YAHOO_CHART_URL}/{symbol}",
+            params={
+                "period1": int(start_date.timestamp()),
+                # Yahoo treats period2 as exclusive; include the requested
+                # end date even when callers pass a midnight boundary.
+                "period2": int((end_date + timedelta(days=1)).timestamp()),
+                "interval": "1d",
+                "events": "div,splits",
+            },
+            headers={"User-Agent": DEFAULT_YAHOO_USER_AGENT},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        chart = payload.get("chart") or {}
+        result = (chart.get("result") or [None])[0]
+        if not result:
+            error = chart.get("error") or {}
+            raise ValueError(error.get("description") or f"No chart data for {symbol}")
+
+        timestamps = result.get("timestamp") or []
+        quote = ((result.get("indicators") or {}).get("quote") or [None])[0]
+        if not timestamps or not quote:
+            return None
+
+        frame = pd.DataFrame(
+            {
+                "Date": pd.to_datetime(timestamps, unit="s", utc=True).tz_localize(None),
+                "Open": quote.get("open"),
+                "High": quote.get("high"),
+                "Low": quote.get("low"),
+                "Close": quote.get("close"),
+                "Volume": quote.get("volume"),
+            }
+        )
+        frame = frame.dropna(subset=["Date", "Close"])
+        frame = frame[
+            (frame["Date"] >= pd.Timestamp(start_date.date()))
+            & (frame["Date"] <= pd.Timestamp(end_date.date()))
+        ]
+        return frame.sort_values("Date").reset_index(drop=True)
 
     def fetch_asset_data(
         self,
@@ -65,53 +122,15 @@ class YFinancePlugin(DataSourcePlugin):
             DataFrame with standardized columns
         """
         try:
-            # Download data (wrapped in the shared backoff policy; yfinance does
-            # its own HTTP so retries belong around the call, not the socket).
-            data = retry_call(
-                lambda: yf.download(
-                    symbols,
-                    start=start_date.strftime("%Y-%m-%d"),
-                    end=end_date.strftime("%Y-%m-%d"),
-                    group_by='ticker',
-                    auto_adjust=False,
-                    progress=False
-                ),
-                retries=2,
-            )
-
-            if data.empty:
-                logger.warning(f"No data returned for symbols: {symbols}")
-                return None
-
-            # Handle single vs multiple tickers
-            if len(symbols) == 1:
-                if not isinstance(data.columns, pd.MultiIndex):
-                    data = data.copy()
-                    data.columns = pd.MultiIndex.from_product(
-                        [data.columns, symbols],
-                        names=['Metric', 'Asset']
-                    )
-
-            # Convert to standardized format
             frames = []
             for symbol in symbols:
                 try:
-                    symbol_data = data[symbol] if len(symbols) > 1 else data[symbol]
+                    symbol_data = self._fetch_chart_data(symbol, start_date, end_date)
+                    if symbol_data is None or symbol_data.empty:
+                        logger.warning("No data returned for symbol: %s", symbol)
+                        continue
                     symbol_data = symbol_data.copy()
-                    symbol_data['Asset'] = symbol
-                    symbol_data = symbol_data.reset_index()
-
-                    # Rename columns to standard format
-                    symbol_data = symbol_data.rename(columns={
-                        'Date': 'Date',
-                        'Open': 'Open',
-                        'High': 'High',
-                        'Low': 'Low',
-                        'Close': 'Close',
-                        'Volume': 'Volume'
-                    })
-
-                    # Select only required columns
+                    symbol_data["Asset"] = symbol
                     required_cols = ['Date', 'Asset', 'Open', 'High', 'Low', 'Close', 'Volume']
                     symbol_data = symbol_data[required_cols]
 
@@ -143,8 +162,17 @@ class YFinancePlugin(DataSourcePlugin):
 
     @classmethod
     def get_config_schema(cls) -> Dict[str, Any]:
-        """Yahoo Finance requires no configuration."""
-        return {}
+        """Yahoo Finance requires no credentials; rate limiting is optional."""
+        return {
+            "rate_limit": {
+                "type": "number",
+                "required": False,
+                "default": 0,
+                "label": "Rate Limit (seconds)",
+                "help": "Optional delay between Yahoo Finance requests.",
+                "min": 0,
+            }
+        }
 
     @classmethod
     def get_plugin_info(cls) -> Dict[str, Any]:

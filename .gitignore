@@ -66,6 +66,8 @@ data/cache/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/cache/.gitkeep
+# AI4Risk is a published external dataset; keep the local download out of git.
+data/ai4risk/
 logs/*.log
 *.log
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -36,32 +37,47 @@ class KagglePlugin(DataSourcePlugin):
     # Configuration helpers
     # ------------------------------------------------------------------
     def validate_config(self) -> None:
-        if KaggleApi is None:
-            message = (
-                "kaggle package is required. Install it via pip and provide credentials."
-            )
-            if _kaggle_import_error is not None:
-                message = f"{message} (original error: {_kaggle_import_error})"
-            raise ImportError(message) from _kaggle_import_error
-
         if not self.config.get("dataset"):
-            raise ValueError("'dataset' (e.g., finnhub/reported-financials) is required")
+            raise ValueError(
+                "Kaggle dataset is required (for example, finnhub/reported-financials). "
+                "Set it in Configure."
+            )
         if not self.config.get("file_name"):
-            raise ValueError("'file_name' inside the dataset archive is required")
+            raise ValueError(
+                "Kaggle file name is required (the file inside the dataset archive). "
+                "Set it in Configure."
+            )
 
         cache_dir = Path(self.config.get("cache_dir", "/app/data/kaggle"))
         cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_api(self) -> KaggleApi:
         if self._api is None:
-            if KaggleApi is None:
-                message = (
-                    "kaggle package is required. Install it via pip and provide credentials."
-                )
-                if _kaggle_import_error is not None:
-                    message = f"{message} (original error: {_kaggle_import_error})"
-                raise ImportError(message) from _kaggle_import_error
-            api = KaggleApi()
+            username = self.config.get("username") or os.getenv("KAGGLE_USERNAME")
+            api_key = self.config.get("api_key") or os.getenv("KAGGLE_KEY")
+            if username:
+                os.environ["KAGGLE_USERNAME"] = str(username)
+            if api_key:
+                os.environ["KAGGLE_KEY"] = str(api_key)
+
+            api_class = KaggleApi
+            if api_class is None:
+                # Importing the top-level kaggle package authenticates
+                # immediately.  The module-level import above therefore
+                # fails on a clean host before the per-source credentials can
+                # be applied.  Retry the class import after setting the
+                # configured environment credentials.
+                try:
+                    from kaggle.api.kaggle_api_extended import KaggleApi as LoadedKaggleApi
+
+                    api_class = LoadedKaggleApi
+                except Exception as exc:
+                    raise ImportError(
+                        "Kaggle credentials are required. Enter Kaggle username and API key "
+                        "in Configure, or set KAGGLE_USERNAME and KAGGLE_KEY."
+                    ) from exc
+
+            api = api_class()
             api.authenticate()
             self._api = api
         return self._api
@@ -156,6 +172,9 @@ class KagglePlugin(DataSourcePlugin):
     # ------------------------------------------------------------------
     def test_connection(self) -> Dict[str, Any]:
         try:
+            # Validate credentials and dataset access without downloading the
+            # full file twice.  ``_load_dataset`` is intentionally the same
+            # path used by collection so the probe is meaningful.
             df = self._load_dataset().head(5)
             return {
                 "success": True,
@@ -169,7 +188,7 @@ class KagglePlugin(DataSourcePlugin):
             logger.error("Kaggle dataset test failed: %s", exc)
             return {
                 "success": False,
-                "message": str(exc),
+                "message": f"Kaggle connection failed: {exc}",
             }
 
     def fetch_asset_data(
@@ -286,6 +305,19 @@ class KagglePlugin(DataSourcePlugin):
     @classmethod
     def get_config_schema(cls) -> Dict[str, Any]:
         return {
+            "username": {
+                "type": "string",
+                "required": False,
+                "label": "Kaggle Username",
+                "help": "Your Kaggle account username; alternatively set KAGGLE_USERNAME.",
+            },
+            "api_key": {
+                "type": "string",
+                "required": False,
+                "secret": True,
+                "label": "Kaggle API Key",
+                "help": "Create a token in Kaggle Account settings; alternatively set KAGGLE_KEY.",
+            },
             "dataset": {
                 "type": "string",
                 "required": True,
