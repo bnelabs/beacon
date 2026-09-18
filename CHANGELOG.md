@@ -10,6 +10,46 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **Early-warning pre-registration v5 — the owner-initiated wider family.**
+  v4 published family NO (1/5) with the record's first criteria-passing pair
+  (`FRED_STLFSI4` × frozen hazard logit) and confirmed the standing
+  diagnosis: the constraint is the family, not the machinery. Its outcome
+  handling recorded "there is no planned v5" — a statement about the record,
+  not a lock; every version since v1 says any resumption is owner-initiated,
+  a new protocol, frozen before its run, and the owner initiated this one
+  (2026-09-18) with one explicit aim: a wider family from multiple sources.
+  v5 changes the family and adds the monthly track it needs; **no grading
+  criterion changes** — the four frozen criteria, labeller quantile, windows,
+  model config, seed protocol, baselines, alarm point (q98), permutation
+  test, Holm level, family rule and single-run rule are identical to v1–v4
+  by shared code, pinned by `test_prereg_v5.py` beside the untouched v4
+  pins. Family (probe-first, criteria declared before any request —
+  `docs/probes/prereg_v5_source_probe.md`): daily `FRED_DCOILWTICO` (EIA,
+  1986–, GREEN); weekly `FRED_MORTGAGE30US` (Freddie Mac, 1971–, GREEN,
+  copyright line recorded) and `FRED_NFCI` (Chicago Fed, 1971–, GREEN);
+  monthly `FRED_FEDFUNDS` (1954–), `FRED_UMCSENT` (1952–, direction −1,
+  citation recorded) and `FRED_KCFSI` **reassigned weekly→monthly** at its
+  measured ~31-day cadence (v4's weekly refusal is the evidence; no
+  resampling then, none now); quarterly `BIS_CREDIT_GAP_US` revalidated
+  GREEN (274 rows, 1957-Q4–2026-Q1). Probe-RED excluded pre-fetch:
+  `FRED_DTWEXBGS` (history starts 2006 — under one year of pre-2007
+  training data) and the NY Fed recession probability (the documented URL
+  serves HTML; no structured transport in the plugin zoo — recorded, not
+  substituted). All five new directions declared in the semantics registry
+  with literature rationale BEFORE any fetch. Declared pre-run consequences:
+  the wider family makes the family rule HARDER (~11 testable ⇒ a system
+  claim needs ≥6 full passes); Holm feasibility at the 44-pair pool checked
+  against published numbers (min attainable p 0.001 × 44 = 0.044 ≤ 0.05);
+  monthly alarm arithmetic (q98 ⇒ ~0.24 alarms/yr ⇒ the FA ceiling cannot
+  bind; lift and lead bind) and the stricter monthly lead floor (1 step ≈ 21
+  bd vs the 10-bd intent) are declared, not hidden. New mechanics are
+  data-availability only: the monthly `TRACK_PARAMS` row (intent
+  translation pinned by test), the per-track coverage expectation at the
+  track's own cadence, and the v5 protocol entry. Outcome handling frozen
+  before the run: PASS ⇒ the README gate moves carrying these numbers;
+  FAIL ⇒ the line remains parked with a five-run record and there is no
+  planned v6. `docs/prereg/early_warning_v5.md` + `configs/event_eval_v5.yaml`,
+  to be tagged `prereg-early-warning-v5` before the single run.
 - **The v4 early-warning run executed — family verdict NO (1 of 5), and the
   line remains parked as its own protocol declared.** One clean run under tag
   `prereg-early-warning-v4` (tag → fetch → evaluate; attempt 3 is the run of

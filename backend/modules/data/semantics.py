@@ -59,6 +59,34 @@ STRESS_DIRECTION = {
     # (docs/probes/prereg_v4_source_probe.md: keyless, quarterly, 1957-Q4
     # onward, licence GREEN with attribution).
     "BIS_CREDIT_GAP_US": +1,
+    # WTI crude (EIA via FRED, daily since 1986): oil-price spikes as
+    # recession/stress precursors (Hamilton 1983, 2003); rising = stress.
+    # Declared 2026-09-18, BEFORE any v5 fetch (docs/probes/
+    # prereg_v5_source_probe.md P1: GREEN).
+    "FRED_DCOILWTICO": +1,
+    # 30-year mortgage rate (Freddie Mac PMMS via FRED, weekly since 1971):
+    # the rate-shock channel — surging mortgage rates tighten credit and
+    # precede/attend stress (2007 housing, 2022-23 rate shock); rising =
+    # stress. "Copyright, 2016, Freddie Mac. Reprinted with permission."
+    # (probe P3: GREEN). Declared BEFORE any v5 fetch.
+    "FRED_MORTGAGE30US": +1,
+    # Chicago Fed National Financial Conditions Index (weekly since 1971):
+    # positive values are tighter-than-average conditions BY CONSTRUCTION
+    # (the source's own definition, probe P4); rising = stress. The second
+    # national stress composite beside STLFSI4. Declared BEFORE any v5 fetch.
+    "FRED_NFCI": +1,
+    # Effective federal funds rate (monthly since 1954): the policy-
+    # tightening channel — sustained rate rises precede stress episodes
+    # (2000, 2006-07, 2022-23); rising = stress. Level, not change: the
+    # scorers' lookback features carry the change channel. Declared BEFORE
+    # any v5 fetch (probe P5: GREEN).
+    "FRED_FEDFUNDS": +1,
+    # University of Michigan consumer sentiment (monthly since 1952): the
+    # demand-side channel — collapsing confidence attends/precedes crises;
+    # FALLING = stress, so -1 (same convention as the term-structure
+    # spreads). Citation requirement recorded (probe P6: GREEN). Declared
+    # BEFORE any v5 fetch.
+    "FRED_UMCSENT": -1,
     # Liquidity levels and coverage: falling = deterioration.
     "HQLA_LEVEL": -1,
     "LCR_RATIO": -1,
