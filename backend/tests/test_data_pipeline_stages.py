@@ -14,6 +14,8 @@ each stage promises:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -109,3 +111,37 @@ class TestCollectorRetry:
         with pytest.raises(DatasetMissingError):
             collector._fetch_with_retry(object(), "2024-01-01", "2024-02-01")
         assert flaky.calls == 1  # a decision, not a blip
+
+
+def test_indicator_provider_is_not_routed_through_asset_transport(monkeypatch):
+    import backend.modules.data.collector as collector_module
+
+    calls = []
+
+    class IndicatorPlugin:
+        def __init__(self, config):
+            self.config = config
+
+        def fetch_asset_data(self, symbols, start_date, end_date):
+            raise AssertionError("indicator provider was routed as an asset")
+
+        def fetch_indicator_data(self, indicator_id, start_date, end_date):
+            calls.append(indicator_id)
+            return pd.DataFrame({"date": [pd.Timestamp("2024-01-01")], "value": [4.2]})
+
+    monkeypatch.setattr(collector_module, "get_plugin", lambda plugin_type: IndicatorPlugin)
+    monkeypatch.setattr(collector_module, "config_with_env_keys", lambda plugin_type, config: config)
+
+    item = SimpleNamespace(
+        category="bonds",
+        endpoint="DGS10",
+        parameters={},
+        data_source=SimpleNamespace(plugin_type="fred", config={}),
+    )
+    collector = DataCollector.__new__(DataCollector)
+
+    frame = collector._fetch_item_data(item, "2024-01-01", "2024-01-31")
+
+    assert calls == ["DGS10"]
+    assert len(frame) == 1
+    assert list(frame.columns) == ["Date", "Value"]

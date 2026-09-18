@@ -190,6 +190,28 @@ class TestFredKeyless:
         assert df is not None and df["Value"].tolist() == [0.98]
         assert calls == []
 
+    def test_keyed_path_falls_back_when_api_is_unreachable(self, monkeypatch):
+        import backend.plugins.fred_plugin as fred
+
+        class FailingFred:
+            def __init__(self, api_key):
+                self.api_key = api_key
+
+            def get_series(self, series, observation_start=None, observation_end=None):
+                raise OSError("api.stlouisfed.org is unavailable")
+
+        fake_module = type("fredapi", (), {"Fred": FailingFred})
+        monkeypatch.setitem(__import__("sys").modules, "fredapi", fake_module)
+        monkeypatch.setattr(
+            fred.requests, "get", lambda *a, **k: _FakeResponse(text=FRED_CSV)
+        )
+
+        df = _fred_plugin({"api_key": "TESTKEY"}).fetch_indicator_data(
+            "STLFSI4", datetime(2024, 1, 1), datetime(2024, 2, 1)
+        )
+
+        assert df is not None and df["Value"].tolist() == [0.98, 1.02]
+
     def test_keyless_connection_probe(self, monkeypatch):
         import backend.plugins.fred_plugin as fred
 
@@ -202,6 +224,195 @@ class TestFredKeyless:
 
     def test_missing_key_is_not_a_validation_error(self):
         _fred_plugin().validate_config()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# SEC public submissions fallback
+# ---------------------------------------------------------------------------
+
+
+def test_sec_public_submissions_uses_current_filing_date_field(monkeypatch):
+    from backend.plugins.sec_plugin import SECPlugin
+
+    plugin = SECPlugin.__new__(SECPlugin)
+    plugin.config = {"user_agent": "BEACON/test@example.com"}
+    payload = {
+        "cik": "0000019617",
+        "name": "JPMORGAN CHASE & CO",
+        "filings": {
+            "recent": {
+                "filingDate": ["2024-02-16"],
+                "form": ["10-K"],
+                "accessionNumber": ["0000019617-24-000001"],
+                "primaryDocument": ["jpm-20231231.htm"],
+                "reportDate": ["2023-12-31"],
+            }
+        },
+    }
+    monkeypatch.setattr(plugin, "_official_submissions", lambda ticker: payload)
+
+    frame = plugin._fetch_official_data(
+        "JPM",
+        datetime(2000, 1, 1),
+        datetime(2026, 12, 31),
+        {"filing_types": ["10-K"]},
+    )
+
+    assert len(frame) == 1
+    assert frame.iloc[0]["form_type"] == "10-K"
+
+
+def test_sec_catalogue_tickers_do_not_require_ticker_manifest(monkeypatch):
+    from backend.plugins.sec_plugin import SECPlugin
+
+    plugin = SECPlugin.__new__(SECPlugin)
+    plugin.config = {}
+
+    def manifest_must_not_be_called(*args, **kwargs):
+        raise AssertionError("catalogue tickers should use their stable CIK")
+
+    monkeypatch.setattr(plugin, "_official_get", manifest_must_not_be_called)
+
+    assert plugin._ticker_cik("JPM") == "0000019617"
+    assert plugin._ticker_cik("BLK") == "0001364742"
+
+
+def test_sec_public_submissions_reads_historical_submission_blocks(monkeypatch):
+    from backend.plugins.sec_plugin import SECPlugin
+
+    plugin = SECPlugin.__new__(SECPlugin)
+    plugin.config = {"user_agent": "BEACON/test@example.com"}
+    payload = {
+        "cik": "0000019617",
+        "name": "JPMORGAN CHASE & CO",
+        "filings": {
+            "recent": {
+                "filingDate": ["2024-02-16"],
+                "form": ["10-K"],
+                "accessionNumber": ["0000019617-24-000001"],
+                "primaryDocument": ["jpm-20231231.htm"],
+                "reportDate": ["2023-12-31"],
+            },
+            "files": [
+                {
+                    "name": "CIK0000019617-submissions-001.json",
+                    "filingFrom": "2020-01-01",
+                    "filingTo": "2023-12-31",
+                },
+                {
+                    "name": "CIK0000019617-submissions-002.json",
+                    "filingFrom": "2010-01-01",
+                    "filingTo": "2019-12-31",
+                },
+            ],
+        },
+    }
+    historical = {
+        "filingDate": ["2023-02-17", "2019-02-15"],
+        "form": ["10-K", "10-K"],
+        "accessionNumber": ["0000019617-23-000001", "0000019617-19-000001"],
+        "primaryDocument": ["jpm-20221231.htm", "jpm-20181231.htm"],
+        "reportDate": ["2022-12-31", "2018-12-31"],
+    }
+    monkeypatch.setattr(plugin, "_official_submissions", lambda ticker: payload)
+    monkeypatch.setattr(
+        plugin,
+        "_official_get",
+        lambda url: historical if url.endswith("-001.json") else {"filingDate": [], "form": []},
+    )
+
+    frame = plugin._fetch_official_data(
+        "JPM",
+        datetime(2000, 1, 1),
+        datetime(2026, 12, 31),
+        {"filing_types": ["10-K"]},
+    )
+
+    assert len(frame) == 3
+    assert frame.index.is_monotonic_increasing
+
+
+def test_sec_public_timeout_remains_retryable(monkeypatch):
+    import requests
+
+    from backend.exceptions import DataSourceUnavailableError
+    from backend.plugins.sec_plugin import SECPlugin
+
+    plugin = SECPlugin.__new__(SECPlugin)
+    plugin.config = {}
+
+    def fail(*args, **kwargs):
+        raise requests.Timeout("SEC timed out")
+
+    monkeypatch.setattr(plugin, "fetch_data", fail)
+
+    with pytest.raises(DataSourceUnavailableError) as exc_info:
+        plugin.fetch_indicator_data(
+            "JPM.10-K",
+            datetime(2020, 1, 1),
+            datetime(2026, 12, 31),
+        )
+
+    assert exc_info.value.code == "DATA_SOURCE_UNAVAILABLE"
+
+
+def test_sec_public_submissions_keeps_rows_when_one_history_block_times_out(monkeypatch):
+    import requests
+
+    from backend.plugins.sec_plugin import SECPlugin
+
+    plugin = SECPlugin.__new__(SECPlugin)
+    plugin.config = {"user_agent": "BEACON/test@example.com"}
+    payload = {
+        "cik": "0000019617",
+        "name": "JPMORGAN CHASE & CO",
+        "filings": {
+            "recent": {
+                "filingDate": ["2024-02-16"],
+                "form": ["10-K"],
+                "accessionNumber": ["0000019617-24-000001"],
+                "primaryDocument": ["jpm-20231231.htm"],
+                "reportDate": ["2023-12-31"],
+            },
+            "files": [
+                {
+                    "name": "CIK0000019617-submissions-001.json",
+                    "filingFrom": "2020-01-01",
+                    "filingTo": "2023-12-31",
+                },
+                {
+                    "name": "CIK0000019617-submissions-002.json",
+                    "filingFrom": "2010-01-01",
+                    "filingTo": "2019-12-31",
+                },
+            ],
+        },
+    }
+    historical = {
+        "filingDate": ["2023-02-17"],
+        "form": ["10-K"],
+        "accessionNumber": ["0000019617-23-000001"],
+        "primaryDocument": ["jpm-20221231.htm"],
+        "reportDate": ["2022-12-31"],
+    }
+
+    monkeypatch.setattr(plugin, "_official_submissions", lambda ticker: payload)
+
+    def get_block(url):
+        if url.endswith("-001.json"):
+            return historical
+        raise requests.Timeout("SEC archive shard timed out")
+
+    monkeypatch.setattr(plugin, "_official_get", get_block)
+
+    frame = plugin._fetch_official_data(
+        "JPM",
+        datetime(2000, 1, 1),
+        datetime(2026, 12, 31),
+        {"filing_types": ["10-K"]},
+    )
+
+    assert len(frame) == 2
 
 
 # ---------------------------------------------------------------------------

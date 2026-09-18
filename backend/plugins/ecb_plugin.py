@@ -2,14 +2,17 @@
 
 import requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 import logging
 import time
 
 from .base import DataSourcePlugin, register_plugin
+from .http_client import retry_call
 
 logger = logging.getLogger(__name__)
+
+FRANKFURTER_BASE_URL = "https://api.frankfurter.app"
 
 
 class ECBPlugin(DataSourcePlugin):
@@ -24,6 +27,14 @@ class ECBPlugin(DataSourcePlugin):
     - Government finance (GFS)
     - Balance of payments (BP6, IIP)
     """
+
+    # The ECB data portal can time out on a long daily EXR query even though
+    # the same series is available when the response is bounded.  Keep each
+    # page below the portal's practical response size while preserving the
+    # caller's requested date range.
+    EXCHANGE_RATE_PAGE_SIZE = 1000
+    EXCHANGE_RATE_TIMEOUT = 10
+    INDICATOR_TIMEOUT = 30
 
     def validate_config(self) -> None:
         """ECB API requires no authentication."""
@@ -106,18 +117,29 @@ class ECBPlugin(DataSourcePlugin):
                         key = f"D.{currency}.EUR.SP00.A"
                         url = f"{base_url}/EXR/{key}"
 
-                    params = {
-                        "format": "jsondata",
-                        "detail": "dataonly",
-                        "startPeriod": start_date.strftime("%Y-%m-%d"),
-                        "endPeriod": end_date.strftime("%Y-%m-%d")
-                    }
+                    try:
+                        df = self._fetch_exchange_rate_series(
+                            url, headers, start_date, end_date
+                        )
+                    except Exception as exc:
+                        # Frankfurter republishes the ECB reference-rate data
+                        # and supports the same EUR-base daily series.  It is
+                        # a bounded, source-compatible fallback when the ECB
+                        # portal's historical query is unavailable.
+                        logger.warning(
+                            "ECB portal failed for %s (%s); trying the "
+                            "ECB-backed Frankfurter mirror",
+                            symbol,
+                            exc,
+                        )
+                        df = self._fetch_frankfurter_series(
+                            currency, start_date, end_date
+                        )
 
-                    response = requests.get(url, headers=headers, params=params, timeout=30)
-                    response.raise_for_status()
-
-                    data = response.json()
-                    df = self._parse_ecb_json(data)
+                    if df.empty:
+                        df = self._fetch_frankfurter_series(
+                            currency, start_date, end_date
+                        )
 
                     if not df.empty:
                         # Convert to standardized format
@@ -148,6 +170,193 @@ class ECBPlugin(DataSourcePlugin):
             logger.error(f"Error fetching data from ECB: {e}")
             return None
 
+    def _fetch_exchange_rate_series(
+        self,
+        url: str,
+        headers: Dict[str, str],
+        start_date: datetime,
+        end_date: datetime,
+    ) -> pd.DataFrame:
+        """Fetch a daily EXR series in bounded pages.
+
+        A full 2000--present request for some ECB currency series currently
+        hangs or returns HTTP 500, while the official API responds normally to
+        the same query with ``firstNObservations``.  Advance the cursor past
+        the last returned observation so pages are disjoint and concatenate
+        them back into the exact requested window.
+        """
+        return self._fetch_paged_series(
+            url,
+            headers,
+            start_date,
+            end_date,
+            page_size=self.EXCHANGE_RATE_PAGE_SIZE,
+            timeout=self.EXCHANGE_RATE_TIMEOUT,
+            page_delay=0.5,
+            retries=1,
+        )
+
+    def _fetch_paged_series(
+        self,
+        url: str,
+        headers: Dict[str, str],
+        start_date: datetime,
+        end_date: datetime,
+        *,
+        page_size: int,
+        timeout: float,
+        page_delay: float,
+        retries: int,
+    ) -> pd.DataFrame:
+        """Fetch any ECB series in bounded observation pages."""
+        def request_page(params: Dict[str, Any]) -> pd.DataFrame:
+            def request_json():
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    params=params,
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+                return response.json()
+
+            return self._parse_ecb_json(
+                retry_call(
+                    request_json,
+                    retries=retries,
+                    backoff_factor=0.5,
+                    max_backoff=4.0,
+                    exceptions=(requests.RequestException, ValueError),
+                )
+            )
+
+        def combine(pages: List[pd.DataFrame]) -> pd.DataFrame:
+            if not pages:
+                return pd.DataFrame()
+            return (
+                pd.concat(pages, ignore_index=True)
+                .drop_duplicates(subset=["date"])
+                .sort_values("date")
+                .reset_index(drop=True)
+            )
+
+        try:
+            cursor = start_date
+            pages = []
+
+            while cursor.date() <= end_date.date():
+                page = request_page(
+                    {
+                        "format": "jsondata",
+                        "detail": "dataonly",
+                        "startPeriod": cursor.strftime("%Y-%m-%d"),
+                        "endPeriod": end_date.strftime("%Y-%m-%d"),
+                        "firstNObservations": page_size,
+                    }
+                )
+
+                if page.empty:
+                    break
+                pages.append(page)
+
+                last_date = pd.to_datetime(page["date"], errors="coerce").max()
+                # A short page is the provider's explicit end-of-series signal.
+                # Do not issue a speculative next request for sparse monthly or
+                # quarterly series; some ECB routes return a non-JSON empty body
+                # for a cursor beyond their last observation.
+                if (
+                    len(page) < page_size
+                    or pd.isna(last_date)
+                    or last_date.date() >= end_date.date()
+                ):
+                    break
+
+                next_cursor = last_date.to_pydatetime() + timedelta(days=1)
+                if next_cursor.date() <= cursor.date():
+                    # Defensive guard against a malformed provider response that
+                    # never advances the observation cursor.
+                    break
+                cursor = next_cursor
+                if page_delay:
+                    time.sleep(page_delay)
+
+            return combine(pages)
+        except Exception as forward_error:
+            # Some ECB series fail when the server has to seek from their oldest
+            # observation, but respond to the equivalent backwards query. This
+            # is especially common for CISS. Walk backward from the requested
+            # end date with ``lastNObservations`` before giving up to the caller.
+            logger.warning(
+                "ECB forward paging failed for %s (%s); retrying backwards",
+                url,
+                forward_error,
+            )
+            try:
+                cursor_end = end_date
+                pages = []
+                while cursor_end.date() >= start_date.date():
+                    page = request_page(
+                        {
+                            "format": "jsondata",
+                            "detail": "dataonly",
+                            "startPeriod": start_date.strftime("%Y-%m-%d"),
+                            "endPeriod": cursor_end.strftime("%Y-%m-%d"),
+                            "lastNObservations": page_size,
+                        }
+                    )
+                    if page.empty:
+                        break
+                    pages.append(page)
+                    first_date = pd.to_datetime(page["date"], errors="coerce").min()
+                    if (
+                        len(page) < page_size
+                        or pd.isna(first_date)
+                        or first_date.date() <= start_date.date()
+                    ):
+                        break
+                    previous_cursor = first_date.to_pydatetime() - timedelta(days=1)
+                    if previous_cursor.date() >= cursor_end.date():
+                        break
+                    cursor_end = previous_cursor
+                    if page_delay:
+                        time.sleep(page_delay)
+                return combine(pages)
+            except Exception:
+                raise forward_error
+
+    def _fetch_frankfurter_series(
+        self,
+        currency: str,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> pd.DataFrame:
+        """Fetch the same EUR-base reference rate from Frankfurter.
+
+        Frankfurter's response is already a date-keyed map, so unlike the
+        ECB SDMX response it does not need pagination.  The mirror is only
+        used for exchange-rate assets; ECB indicators continue to use their
+        original endpoint and fail honestly if that endpoint is unavailable.
+        """
+        url = (
+            f"{FRANKFURTER_BASE_URL}/"
+            f"{start_date.strftime('%Y-%m-%d')}..{end_date.strftime('%Y-%m-%d')}"
+        )
+        response = requests.get(
+            url,
+            params={"from": "EUR", "to": currency},
+            headers={"Accept": "application/json", "User-Agent": "BEACON/2.0"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        rows = []
+        for date_text, rates in (payload.get("rates") or {}).items():
+            value = (rates or {}).get(currency)
+            if value is None:
+                continue
+            rows.append({"date": self._parse_ecb_date(date_text), "value": float(value)})
+        return pd.DataFrame(rows, columns=["date", "value"])
+
     def fetch_indicator_data(
         self,
         indicator_id: str,
@@ -173,18 +382,20 @@ class ECBPlugin(DataSourcePlugin):
             }
 
             url = f"{base_url}/{indicator_id}"
-            params = {
-                "format": "jsondata",
-                "detail": "dataonly",
-                "startPeriod": start_date.strftime("%Y-%m-%d"),
-                "endPeriod": end_date.strftime("%Y-%m-%d")
-            }
-
-            response = requests.get(url, headers=headers, params=params, timeout=30)
-            response.raise_for_status()
-
-            data = response.json()
-            df = self._parse_ecb_json(data)
+            # The portal is prone to timing out on an unbounded historical
+            # request for some series (not only EXR). Use the same official
+            # firstNObservations paging contract for rates, CISS and policy
+            # series while preserving the requested dates.
+            df = self._fetch_paged_series(
+                url,
+                headers,
+                start_date,
+                end_date,
+                page_size=self.EXCHANGE_RATE_PAGE_SIZE,
+                timeout=self.INDICATOR_TIMEOUT,
+                page_delay=0.2,
+                retries=2,
+            )
 
             if not df.empty:
                 df = df.rename(columns={'date': 'Date', 'value': 'Value'})
