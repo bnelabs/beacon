@@ -108,6 +108,27 @@ def _value_column(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
+def _duplicate_key_columns(df: pd.DataFrame, date_col: str) -> List[str]:
+    """Return the natural observation key for duplicate detection.
+
+    A plain date is the grain for scalar economic series, but it is not the
+    grain for panels or edge tables.  In particular, AI4Risk publishes one
+    row per bank-to-bank edge for each quarter, so repeated dates are expected
+    and only a repeated ``(date, source, target)`` edge is a duplicate.
+    """
+    for identity in (
+        ("source_bank", "target_bank"),
+        ("bank_id",),
+        ("ticker",),
+        ("Asset",),
+        ("asset",),
+        ("instrument",),
+    ):
+        if all(column in df.columns for column in identity):
+            return [date_col, *identity]
+    return [date_col]
+
+
 class DataValidator:
     def __init__(self, job_id: str):
         self.job_id = job_id
@@ -142,11 +163,14 @@ class DataValidator:
             # -- duplicate timestamps (integrity) ------------------------------
             if date_col:
                 stamps = pd.to_datetime(df[date_col], errors="coerce")
-                duplicated = int(stamps.duplicated().sum())
+                duplicate_keys = _duplicate_key_columns(df, date_col)
+                duplicated = int(df.duplicated(subset=duplicate_keys).sum())
                 inconsistency_cells += len(df)
                 inconsistency_hits += duplicated
                 if duplicated:
-                    positions = np.flatnonzero(stamps.duplicated().to_numpy())[:10]
+                    positions = np.flatnonzero(
+                        df.duplicated(subset=duplicate_keys).to_numpy()
+                    )[:10]
                     self._record(report, code, "duplicate_timestamps", duplicated, positions)
 
                 # -- future timestamps (look-ahead at ingest) ------------------

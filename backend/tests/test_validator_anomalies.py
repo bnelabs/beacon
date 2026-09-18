@@ -51,6 +51,32 @@ class TestDuplicateTimestamps:
         assert kinds["duplicate_timestamps"]["count"] == 2
         assert report.inconsistency_ratio == pytest.approx(2 / 60)
 
+    def test_edge_panels_use_date_and_endpoints_as_the_grain(self):
+        frame = pd.DataFrame(
+            {
+                "Date": [pd.Timestamp("2026-01-01")] * 3,
+                "source_bank": ["A", "A", "B"],
+                "target_bank": ["B", "C", "A"],
+                "Value": [1.0, 2.0, 3.0],
+            }
+        )
+        report = _validate(frame)
+        assert report.inconsistency_ratio == 0.0
+        assert not report.anomalies
+
+    def test_repeated_edge_is_still_a_duplicate(self):
+        frame = pd.DataFrame(
+            {
+                "Date": [pd.Timestamp("2026-01-01")] * 2,
+                "source_bank": ["A", "A"],
+                "target_bank": ["B", "B"],
+                "Value": [1.0, 1.5],
+            }
+        )
+        report = _validate(frame)
+        kinds = {entry["kind"]: entry for entry in report.anomalies}
+        assert kinds["duplicate_timestamps"]["count"] == 1
+
 
 class TestFutureTimestamps:
     def test_lookahead_at_ingest_is_flagged(self):

@@ -126,6 +126,26 @@ class DataOrchestrator:
 
         NotificationService(self.db).create_data_quality_alert(source_name, issue, severity)
 
+    def _event_series_codes(self, catalogue_items: List[int]) -> set[str]:
+        """Return catalogue codes whose values are occurrence markers.
+
+        Filing feeds are event streams: their dates carry the observation and
+        ``Value=1`` marks that a filing occurred.  They must not be evaluated
+        as stochastic level series by the stationarity gate.
+        """
+        if not catalogue_items:
+            return set()
+        items = (
+            self.db.query(DataCatalogueItem)
+            .filter(DataCatalogueItem.id.in_(catalogue_items))
+            .all()
+        )
+        return {
+            item.code
+            for item in items
+            if str(getattr(item, "unit", "") or "").strip().lower() in {"filings", "events"}
+        }
+
     def _update_progress(self, progress: float, message: str):
         """Update internal progress and call callback if provided."""
         self.progress = progress
@@ -262,6 +282,7 @@ class DataOrchestrator:
                 job_id=self.job_id,
                 components=quality_report.components,
                 snapshot_id=self.snapshot.snapshot_id,
+                event_series_codes=self._event_series_codes(catalogue_items),
             )
             quality_report.quality_score = float(self.attestation.quality_score or 0.0)
             quality_report.fit_for_engine = self.attestation.verified
