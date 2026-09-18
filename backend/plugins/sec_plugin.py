@@ -2,9 +2,11 @@
 
 from typing import Dict, Any, List, Optional
 import pandas as pd
+import requests
 from datetime import datetime, timedelta
 from .base import DataSourcePlugin, register_plugin
 from .http_client import retry_call
+from backend.exceptions import DataSourceUnavailableError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,6 +14,13 @@ logger = logging.getLogger(__name__)
 SEC_DATA_URL = "https://data.sec.gov"
 SEC_TICKER_URL = "https://www.sec.gov/files/company_tickers.json"
 DEFAULT_SEC_USER_AGENT = "BEACON/4.0 beacon@bnelabs.com"
+KNOWN_SEC_CIKS = {
+    # The catalogue's keyless SEC rows use these stable issuers. Avoiding the
+    # multi-megabyte ticker manifest makes those jobs independent of a second
+    # SEC endpoint that is especially prone to proxy/read timeouts.
+    "JPM": "0000019617",
+    "BLK": "0001364742",
+}
 
 
 class SECPlugin(DataSourcePlugin):
@@ -96,8 +105,16 @@ class SECPlugin(DataSourcePlugin):
 
     def _ticker_cik(self, ticker: str) -> str:
         """Resolve a ticker to the zero-padded CIK used by data.sec.gov."""
-        payload = self._official_get(SEC_TICKER_URL)
         wanted = ticker.strip().upper()
+        configured_cik = self.config.get("cik")
+        if configured_cik is not None and str(configured_cik).isdigit():
+            return str(int(configured_cik)).zfill(10)
+        if wanted.isdigit():
+            return str(int(wanted)).zfill(10)
+        if wanted in KNOWN_SEC_CIKS:
+            return KNOWN_SEC_CIKS[wanted]
+
+        payload = self._official_get(SEC_TICKER_URL)
         for row in payload.values():
             if str(row.get("ticker", "")).upper() == wanted:
                 return str(int(row["cik_str"])).zfill(10)
@@ -118,46 +135,100 @@ class SECPlugin(DataSourcePlugin):
         effective_config = {**self.config, **(config or {})}
         filing_types = set(effective_config.get("filing_types", ["10-K", "10-Q"]))
         payload = self._official_submissions(ticker)
-        recent = payload.get("filings", {}).get("recent", {})
         rows = []
-        for index, filed_text in enumerate(recent.get("filed", [])):
-            filed = pd.to_datetime(filed_text, errors="coerce")
-            if pd.isna(filed) or filed < pd.Timestamp(start_date) or filed > pd.Timestamp(end_date):
+
+        submission_sets = [payload.get("filings", {}).get("recent", {})]
+        # ``recent`` covers only the newest portion of a company's history.
+        # SEC publishes older filing blocks in the ``files`` manifest; without
+        # reading those blocks a 2000--present query silently returned only one
+        # annual filing for JPM. Fetch only blocks whose declared date range
+        # overlaps the caller's window.
+        requested_start = pd.Timestamp(start_date)
+        requested_end = pd.Timestamp(end_date)
+        historical_failures = 0
+        for manifest in payload.get("filings", {}).get("files", []):
+            file_start = pd.to_datetime(manifest.get("filingFrom"), errors="coerce")
+            file_end = pd.to_datetime(manifest.get("filingTo"), errors="coerce")
+            if (
+                pd.isna(file_start)
+                or pd.isna(file_end)
+                or file_end < requested_start
+                or file_start > requested_end
+            ):
                 continue
-            form_type = recent.get("form", [None])[index]
-            if filing_types and form_type not in filing_types:
-                continue
-            accession = recent.get("accessionNumber", [None])[index]
-            primary_document = recent.get("primaryDocument", [None])[index]
-            accession_path = str(accession or "").replace("-", "")
-            cik = str(payload.get("cik", "")).zfill(10)
-            filing_url = None
-            if accession_path and primary_document:
-                filing_url = (
-                    f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/"
-                    f"{accession_path}/{primary_document}"
+            file_name = manifest.get("name")
+            if file_name:
+                try:
+                    submission_sets.append(
+                        self._official_get(f"{SEC_DATA_URL}/submissions/{file_name}")
+                    )
+                except requests.RequestException as exc:
+                    # A single historical archive shard can time out while
+                    # the current submissions document and other shards are
+                    # available. Keep the valid filings we already have and
+                    # continue; the warning makes the coverage degradation
+                    # visible without manufacturing rows.
+                    historical_failures += 1
+                    logger.warning(
+                        "SEC historical submissions block %s unavailable; "
+                        "continuing with remaining blocks (%s)",
+                        file_name,
+                        exc,
+                    )
+
+        for submission in submission_sets:
+            # The public submissions API calls this field ``filingDate``.
+            # Older SEC API payloads used ``filed``; accepting both keeps the
+            # keyless path compatible with recorded fixtures and gateways.
+            filing_dates = submission.get("filingDate") or submission.get("filed") or []
+            forms = submission.get("form") or []
+            accessions = submission.get("accessionNumber") or []
+            documents = submission.get("primaryDocument") or []
+            report_dates = submission.get("reportDate") or []
+            for index, filed_text in enumerate(filing_dates):
+                filed = pd.to_datetime(filed_text, errors="coerce")
+                if pd.isna(filed) or filed < requested_start or filed > requested_end:
+                    continue
+                form_type = forms[index] if index < len(forms) else None
+                if filing_types and form_type not in filing_types:
+                    continue
+                accession = accessions[index] if index < len(accessions) else None
+                primary_document = documents[index] if index < len(documents) else None
+                accession_path = str(accession or "").replace("-", "")
+                cik = str(payload.get("cik", "")).zfill(10)
+                filing_url = None
+                if accession_path and primary_document:
+                    filing_url = (
+                        f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/"
+                        f"{accession_path}/{primary_document}"
+                    )
+                report_date = report_dates[index] if index < len(report_dates) else None
+                rows.append(
+                    {
+                        "date": filed,
+                        "ticker": ticker.upper(),
+                        "form_type": form_type,
+                        "company_name": payload.get("name"),
+                        "cik": payload.get("cik"),
+                        "accession_no": accession,
+                        "filing_url": filing_url,
+                        "period_end": pd.to_datetime(report_date, errors="coerce"),
+                        "data_type": "financial_statement"
+                        if form_type in {"10-K", "10-Q"}
+                        else "filing",
+                    }
                 )
-            rows.append(
-                {
-                    "date": filed,
-                    "ticker": ticker.upper(),
-                    "form_type": form_type,
-                    "company_name": payload.get("name"),
-                    "cik": payload.get("cik"),
-                    "accession_no": accession,
-                    "filing_url": filing_url,
-                    "period_end": pd.to_datetime(
-                        recent.get("reportDate", [None])[index], errors="coerce"
-                    ),
-                    "data_type": "financial_statement"
-                    if form_type in {"10-K", "10-Q"}
-                    else "filing",
-                }
-            )
         if not rows:
             return pd.DataFrame()
+        if historical_failures:
+            logger.warning(
+                "SEC filings for %s have reduced historical coverage: "
+                "%d submissions block(s) were unavailable",
+                ticker,
+                historical_failures,
+            )
         frame = pd.DataFrame(rows).set_index("date")
-        return frame.sort_index()
+        return frame[~frame.index.duplicated(keep="first")].sort_index()
 
     def _test_official(self) -> Dict[str, Any]:
         """Probe Apple submissions through the public SEC API."""
@@ -235,6 +306,17 @@ class SECPlugin(DataSourcePlugin):
 
             return None
 
+        except requests.RequestException as e:
+            # Preserve the provider outage as retryable instead of converting
+            # it to ``None``.  The collector's bounded retry policy can then
+            # recover from a transient SEC timeout; an empty frame is reserved
+            # for a reachable API that genuinely has no matching filings.
+            logger.error(f"SEC provider unavailable for {indicator_id}: {e}")
+            raise DataSourceUnavailableError(
+                f"SEC public API unavailable for '{indicator_id}'",
+                context={"indicator": indicator_id, "provider": "sec_edgar"},
+                cause=e,
+            ) from e
         except Exception as e:
             logger.error(f"Error fetching SEC indicator {indicator_id}: {e}")
             return None

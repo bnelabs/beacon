@@ -246,6 +246,7 @@ def populate_catalogue():
                 "granularity": "macro",
                 "unit": "percentage",
                 "default_selected": False,
+                "enabled": False,  # LIBOR series was retired and the public ID is gone
                 "priority": 50,
                 "tags": ["money_market", "historical", "interbank"]
             },
@@ -583,13 +584,13 @@ def populate_catalogue():
             },
             {
                 "code": "COMM_GOLD",
-                "name": "Gold Price",
-                "description": "Gold fixing price (London PM)",
+                "name": "Gold Futures Price",
+                "description": "Gold futures price from Yahoo Finance (GC=F)",
                 "category": DataCategory.COMMODITIES,
                 "region": DataRegion.GLOBAL,
                 "risk_types": [RiskType.MARKET_LIQUIDITY.value],
-                "data_source_id": sources["FRED"].id,
-                "endpoint": "GOLDPMGBD228NLBM",
+                "data_source_id": sources["Yahoo Finance"].id,
+                "endpoint": "GC=F",
                 "frequency": "daily",
                 "granularity": "macro",
                 "unit": "USD per troy ounce",
@@ -613,7 +614,7 @@ def populate_catalogue():
                 "frequency": "annual",
                 "granularity": "micro",
                 "unit": "filings",
-                "default_selected": False,  # SEC requires API key
+                "default_selected": True,  # public SEC submissions API is keyless
                 "priority": 95,
                 "tags": ["banks", "financials", "10-k", "jpm"]
             },
@@ -629,7 +630,7 @@ def populate_catalogue():
                 "frequency": "quarterly",
                 "granularity": "meso",
                 "unit": "filings",
-                "default_selected": False,  # SEC requires API key
+                "default_selected": True,  # public SEC submissions API is keyless
                 "priority": 85,
                 "tags": ["institutional", "13f", "holdings", "blackrock"]
             },
@@ -645,7 +646,7 @@ def populate_catalogue():
                 "region": DataRegion.GLOBAL,
                 "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.SYSTEMIC_RISK.value],
                 "data_source_id": sources["BIS"].id,
-                "endpoint": "WS_GLI/Q.5A.N.5J.N",
+                "endpoint": "WS_GLI/Q.USD.3P.N.A.I.B.USD",
                 "frequency": "quarterly",
                 "granularity": "macro",
                 "unit": "USD billions",
@@ -729,7 +730,8 @@ def populate_catalogue():
                 "frequency": "quarterly",
                 "granularity": "macro",
                 "unit": "percentage",
-                "default_selected": True,
+                "default_selected": False,
+                "enabled": False,
                 "priority": 85,
                 "tags": ["debt_sustainability", "household_debt", "europe"]
             },
@@ -765,7 +767,8 @@ def populate_catalogue():
                 "frequency": "annual",
                 "granularity": "macro",
                 "unit": "percentage",
-                "default_selected": False,  # IMF requires full indicator format
+                "default_selected": False,
+                "enabled": False,  # legacy IMF SDMX endpoint is retired
                 "priority": 90,
                 "tags": ["financial_stability", "banking_health", "capital_adequacy"]
             },
@@ -781,7 +784,8 @@ def populate_catalogue():
                 "frequency": "monthly",
                 "granularity": "macro",
                 "unit": "USD millions",
-                "default_selected": True,
+                "default_selected": False,
+                "enabled": False,  # legacy IMF SDMX endpoint is retired
                 "priority": 85,
                 "tags": ["reserves", "forex", "central_bank"]
             },
@@ -853,7 +857,8 @@ def populate_catalogue():
                 "frequency": "annual",
                 "granularity": "macro",
                 "unit": "percentage",
-                "default_selected": True,
+                "default_selected": False,
+                "enabled": False,  # World Bank publishes no EU aggregate for this indicator
                 "priority": 80,
                 "tags": ["capital_adequacy", "regulatory_capital", "europe"]
             },
@@ -869,7 +874,8 @@ def populate_catalogue():
                 "frequency": "annual",
                 "granularity": "macro",
                 "unit": "percentage",
-                "default_selected": True,
+                "default_selected": False,
+                "enabled": False,  # World Bank publishes no EU aggregate for this indicator
                 "priority": 90,
                 "tags": ["credit_quality", "npl", "loan_quality", "europe"]
             },
@@ -1294,6 +1300,7 @@ def populate_catalogue():
                 "granularity": "macro",
                 "unit": "percentage_points",
                 "default_selected": False,
+                "enabled": False,  # LIBOR series was retired and the public ID is gone
                 "priority": 60,
                 "tags": ["spread", "credit_risk", "historical"]
             },
@@ -1341,7 +1348,8 @@ def populate_catalogue():
                 "frequency": "daily",
                 "granularity": "macro",
                 "unit": "index",
-                "default_selected": True,
+                "default_selected": False,
+                "enabled": False,  # FRED retired the public MOVE series
                 "priority": 90,
                 "tags": ["volatility", "bonds", "risk"]
             },
@@ -1377,7 +1385,8 @@ def populate_catalogue():
                 "frequency": "quarterly",
                 "granularity": "micro",
                 "unit": "rating_score",
-                "default_selected": True,
+                "default_selected": False,
+                "enabled": False,  # no separate ratings file exists in the mounted release
                 "priority": 95,
                 "tags": ["credit_rating", "srisk", "systemic_risk", "bank_health"]
             },
@@ -1393,7 +1402,8 @@ def populate_catalogue():
                 "frequency": "quarterly",
                 "granularity": "macro",
                 "unit": "risk_score",
-                "default_selected": True,
+                "default_selected": False,
+                "enabled": False,  # systemic risk is derived from the missing ratings file
                 "priority": 98,
                 "tags": ["systemic_risk", "network_metrics", "contagion", "early_warning"]
             },

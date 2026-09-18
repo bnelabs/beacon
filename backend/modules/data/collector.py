@@ -242,17 +242,18 @@ class DataCollector:
                 context={"code": item.code, "item_id": item.id},
             )
 
-        plugin_class = get_plugin(data_source.plugin_type)
+        plugin_type = data_source.plugin_type
+        plugin_class = get_plugin(plugin_type)
         if not plugin_class:
             raise DataSourceUnavailableError(
-                f"Plugin type '{data_source.plugin_type}' is not registered",
-                context={"code": item.code, "plugin_type": data_source.plugin_type},
+                f"Plugin type '{plugin_type}' is not registered",
+                context={"code": item.code, "plugin_type": plugin_type},
             )
 
         # API keys live in the environment rather than the database so they are
         # never returned by the configuration endpoints; the registry owns the
         # plugin->env-var map so the probe route injects identically.
-        config = config_with_env_keys(data_source.plugin_type, data_source.config)
+        config = config_with_env_keys(plugin_type, data_source.config)
 
         plugin = plugin_class(config)
 
@@ -261,7 +262,26 @@ class DataCollector:
 
         endpoint = item.endpoint if item.endpoint else item.code
 
-        if item.category in ['exchange_rates', 'stocks', 'bonds', 'commodities']:
+        # Catalogue categories describe the economic meaning of a series, not
+        # the transport shape returned by its provider.  FRED publishes bond
+        # yields and commodity benchmarks as indicator series, so routing all
+        # ``bonds``/``commodities`` items to ``fetch_asset_data`` makes valid
+        # FRED IDs fail with its intentional "does not support asset price
+        # data" response.  Keep the category fallback for true market-price
+        # providers while allowing a catalogue item to opt into indicator
+        # mode explicitly.
+        configured_data_type = (getattr(item, "parameters", None) or {}).get("data_type")
+        indicator_plugins = {
+            "fred",
+            "sec_edgar",
+            "world_bank",
+            "bis",
+            "imf",
+            "ai4risk_interbank",
+        }
+        is_indicator = configured_data_type == "indicator" or plugin_type in indicator_plugins
+
+        if not is_indicator and item.category in ['exchange_rates', 'stocks', 'bonds', 'commodities']:
             df = plugin.fetch_asset_data([endpoint], start_dt, end_dt)
         else:
             df = plugin.fetch_indicator_data(endpoint, start_dt, end_dt)
@@ -272,4 +292,20 @@ class DataCollector:
                 context={"code": item.code, "endpoint": endpoint},
             )
 
-        return df
+        # The plugin contract is canonical ``Date``/``Value`` (or ``Close``
+        # for assets), but several public statistical APIs naturally expose
+        # lowercase ``date``/``value``. Normalize those names at the collector
+        # boundary so the validator and quality gate see the same schema for
+        # every provider; this does not alter values or add observations.
+        frame = df.copy()
+        for canonical in ("Date", "Value", "Close"):
+            if canonical in frame.columns:
+                continue
+            match = next(
+                (column for column in frame.columns if str(column).lower() == canonical.lower()),
+                None,
+            )
+            if match is not None:
+                frame = frame.rename(columns={match: canonical})
+
+        return frame

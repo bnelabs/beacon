@@ -3,12 +3,13 @@
 Two access paths, one contract
 ------------------------------
 
-With an API key the official ``fredapi`` client is used. Without one the
-plugin falls back to ``fredgraph.csv`` -- the CSV endpoint behind FRED's own
-graph pages, which needs no key. The fallback exists because the curated
-stress-index catalogue (STLFSI4, KCFSI, CISS, ...) should not be dark on a
-fresh deployment that has not registered a key yet; FRED is free either way,
-the key only buys documented rate limits and metadata access.
+With an API key the official ``fredapi`` client is used. Without one -- or
+when the keyed API is temporarily unreachable -- the plugin falls back to
+``fredgraph.csv``, the CSV endpoint behind FRED's own graph pages, which needs
+no key. The fallback exists because the curated stress-index catalogue
+(STLFSI4, KCFSI, CISS, ...) should not be dark on a fresh deployment that has
+not registered a key yet; FRED is free either way, the key only buys
+documented rate limits and metadata access.
 
 The fallback is deliberately conservative: one series per request, the
 declared observation window passed through (``cosd``/``coed``), the configured
@@ -215,8 +216,12 @@ class FREDPlugin(DataSourcePlugin):
             )
 
             if data is None or data.empty:
-                logger.warning(f"No data returned for FRED series: {indicator_id}")
-                return None
+                logger.warning(
+                    "Keyed FRED API returned no data for %s; trying the "
+                    "keyless fredgraph.csv fallback",
+                    indicator_id,
+                )
+                return self._fetch_indicator_keyless(indicator_id, start_date, end_date)
 
             # Convert to DataFrame
             df = data.reset_index()
@@ -229,8 +234,17 @@ class FREDPlugin(DataSourcePlugin):
             return df
 
         except Exception as e:
-            logger.error(f"Error fetching data from FRED: {e}")
-            return None
+            # A configured key should not make the otherwise public keyless
+            # path unavailable.  In particular, fredapi raises low-level DNS
+            # and timeout errors when api.stlouisfed.org is down, while
+            # fredgraph.csv can remain healthy and serve the same series.
+            logger.warning(
+                "Keyed FRED fetch failed for %s (%s); trying the keyless "
+                "fredgraph.csv fallback",
+                indicator_id,
+                e,
+            )
+            return self._fetch_indicator_keyless(indicator_id, start_date, end_date)
 
     def _fetch_indicator_keyless(
         self,
@@ -241,7 +255,7 @@ class FREDPlugin(DataSourcePlugin):
         """Keyless path: typed errors are logged; the contract still returns None."""
         try:
             df = self._fetch_keyless_csv(indicator_id, start_date, end_date)
-        except FredKeylessError as exc:
+        except (FredKeylessError, requests.RequestException) as exc:
             logger.error("Keyless FRED fetch failed for %s: %s", indicator_id, exc)
             return None
         if df is None:
