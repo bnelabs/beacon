@@ -324,6 +324,23 @@ def test_gate_fails_a_constant_value_column_as_degenerate() -> None:
     assert attestation.verified is False
 
 
+def test_gate_allows_constant_occurrence_marker_for_declared_event_series() -> None:
+    gate = DataQualityGate(QualityPolicy(min_total_rows=5))
+    attestation = gate.enforce(
+        {"FILINGS": _frame(np.ones(40))},
+        job_id="job-filing-events",
+        event_series_codes={"FILINGS"},
+    )
+
+    check = next(
+        check for check in attestation.checks if check.name == "stationarity[FILINGS.Value]"
+    )
+    assert check.passed is True
+    assert check.severity == "warning"
+    assert "event dates" in check.detail
+    assert attestation.verified is True
+
+
 def test_stationarity_scan_can_be_disabled() -> None:
     gate = DataQualityGate(QualityPolicy(min_total_rows=5, check_stationarity=False))
     attestation = gate.evaluate({"MACRO": _frame(range(40))}, job_id="job-off")

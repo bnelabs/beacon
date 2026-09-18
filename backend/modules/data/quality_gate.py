@@ -69,7 +69,7 @@ import math
 import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set
 
 import numpy as np
 import pandas as pd
@@ -430,6 +430,7 @@ class DataQualityGate:
         job_id: str,
         components: Optional[QualityComponents] = None,
         snapshot_id: Optional[str] = None,
+        event_series_codes: Optional[Set[str]] = None,
     ) -> QualityAttestation:
         """Evaluate a payload and return an attestation carrying the gate's score.
 
@@ -468,7 +469,7 @@ class DataQualityGate:
         # expected for legitimate levels and must not silently move the gate's
         # arithmetic.
         if policy.check_stationarity:
-            checks.extend(self._stationarity_checks(non_empty))
+            checks.extend(self._stationarity_checks(non_empty, event_series_codes=event_series_codes))
 
         # The composite is always the gate's own arithmetic.
         if not non_empty:
@@ -518,6 +519,7 @@ class DataQualityGate:
         job_id: str,
         components: Optional[QualityComponents] = None,
         snapshot_id: Optional[str] = None,
+        event_series_codes: Optional[Set[str]] = None,
     ) -> QualityAttestation:
         """Evaluate and raise when the payload is not fit for consumption.
 
@@ -526,7 +528,11 @@ class DataQualityGate:
             DataQualityError: When the payload fails one or more quality checks.
         """
         attestation = self.evaluate(
-            datasets, job_id=job_id, components=components, snapshot_id=snapshot_id
+            datasets,
+            job_id=job_id,
+            components=components,
+            snapshot_id=snapshot_id,
+            event_series_codes=event_series_codes,
         )
         if attestation.verified:
             logger.info(attestation.summary())
@@ -667,7 +673,10 @@ class DataQualityGate:
         return None
 
     def _stationarity_checks(
-        self, datasets: Mapping[str, pd.DataFrame]
+        self,
+        datasets: Mapping[str, pd.DataFrame],
+        *,
+        event_series_codes: Optional[Set[str]] = None,
     ) -> List[QualityCheck]:
         """KPSS findings for every non-empty value column.
 
@@ -730,6 +739,20 @@ class DataQualityGate:
                             f"KPSS not assessed: {series.size} finite observation(s), "
                             f"need at least {KPSS_MIN_OBSERVATIONS}; sample size is "
                             f"governed by the row-count checks"
+                        ),
+                    )
+                )
+                continue
+            if float(np.ptp(series)) == 0.0 and code in (event_series_codes or set()):
+                checks.append(
+                    QualityCheck(
+                        name=name,
+                        passed=True,
+                        severity="warning",
+                        detail=(
+                            "stationarity not applicable: this declared event "
+                            "series uses a constant occurrence marker; information "
+                            "is carried by its event dates"
                         ),
                     )
                 )
