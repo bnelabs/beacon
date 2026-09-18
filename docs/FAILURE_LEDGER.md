@@ -115,6 +115,37 @@ log. Status: **PARKED** (four-run record; no planned v5 — resumption needs a
 new owner decision and new recorded axes) — tag `prereg-early-warning-v4`,
 `docs/prereg/runs/early_warning_v4/report.md` + `execution_log.md`.
 
+**L-27. Crisis early-warning v5: family NO (2 of 11) — the wider family
+produced a second pass and the same verdict, and the line stays parked.**
+The owner initiated the second resumption (2026-09-18: "wider data collection
+from multiple sources") — the family axis the four-run record kept
+diagnosing. Criteria-first probe admitted five new series across four tracks
+and three publishers (11 testable; DTWEXBGS excluded RED on history length,
+the NY Fed recession probability RED on transport — both recorded, not
+substituted); no grading criterion changed; the declared pre-run consequence
+held: the wider family made the family rule HARDER (≥6 of 11 needed).
+Verdict: 2 of 11 passed — `FRED_STLFSI4` (reproducing its v4 pass
+byte-identically) and new `FRED_DCOILWTICO` (WTI crude, daily, frozen hazard
+logit: AUC 0.813, AP 0.309, 14.5-business-day median lead, 1.14
+FA/quiet-year, both baselines beaten, p=0.001, Holm-surviving across the
+44-pair pool) — published as facts, NOT upgraded into a system claim. The
+claim gate stays closed; under the outcome handling frozen before the run the
+line **remains parked with a five-run record; there is no planned v6.**
+Measured findings: the frozen hazard logit is the only scorer that has ever
+passed (2 of 2; rolling refits again rescue nothing — that axis is now closed
+by two independent runs); the monthly track starves the lead criterion (KCFSI
+AUC 0.917, zero detections inside its 2-month max_lead; FEDFUNDS p=0.031 does
+not survive Holm at the wider pool — multiplicity working as designed, not a
+defect); NFCI is significant yet persistence still beats it; T10Y3M's frozen
+TAN missed the FA ceiling by 0.2 for the third consecutive run, identically.
+Reproducibility held a fifth time at its strongest: 20/20 shared v4 pairs
+(5 indicators × 4 scorers, frozen AND rolling) byte-identical on fresh
+fetches. Single attempt, run detached (the v4 process-group lesson applied),
+zero retries, zero pre-metric defects. Status: **PARKED** (five-run record;
+resumption needs a new owner decision and new recorded axes) — tag
+`prereg-early-warning-v5`, `docs/prereg/runs/early_warning_v5/report.md` +
+`execution_log.md`.
+
 ## B. Data and licence compliance
 
 **L-7. The repo committed data its licence prohibits reproducing.**
