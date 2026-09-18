@@ -10,6 +10,41 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
+- **The v5 early-warning run executed — family verdict NO (2 of 11), and the
+  line remains parked as its own protocol declared.** One clean run under tag
+  `prereg-early-warning-v5` (tag → fetch → evaluate; a single attempt, run
+  detached under the v4 attempt-1 lesson; zero retries; 1h50m on 2 CPUs; key
+  grep-verified absent from every committed file; licence screen refused the
+  ICE BofA series pre-download again; CISS's declared keyless attempt recorded
+  HTTP 400, not substituted). The wider family delivered exactly what the
+  probe projected: **11 testable indicators across four tracks and three
+  publishers** (4 daily, 3 weekly, 3 monthly, 1 quarterly). **Passed: 2 of
+  11 — `FRED_STLFSI4` and `FRED_DCOILWTICO`, both via the *frozen* hazard
+  logit.** STLFSI4 reproduced its v4 pass byte-identically on a fresh fetch
+  (AUC 0.9223, AP 0.3836, p=0.0010, median lead 2.0 weeks ≈10 business days,
+  FA 0.483/quiet-year); DCOILWTICO (WTI crude, daily) is the record's second
+  pass and first on the daily track: AUC 0.813, AP 0.309, median lead 14.5
+  business days, FA 1.14/quiet-year, strictly above both baselines, p=0.0010,
+  Holm-surviving across the 44-pair pool. Two of eleven is published as fact
+  and NOT upgraded into a system claim: the frozen family rule requires at
+  least half (≥6), so under the outcome handling frozen before the run the
+  line **remains parked with a five-run record; there is no planned v6** —
+  any resumption is again an owner decision plus a new protocol with new
+  recorded axes. Findings published as measured: the frozen hazard logit is
+  the only scorer that has ever passed (2 of 2 passes; rolling refits again
+  rescue nothing, and the rolling hazard passes no indicator); the monthly
+  track starves the lead criterion (KCFSI reaches AUC 0.917 but detects
+  nothing within its 2-month max_lead; FEDFUNDS' p=0.031 does not survive
+  Holm at the wider pool); NFCI is significant (p=0.0010) yet persistence
+  still beats it — the weekly composite's lift, not its significance, is the
+  binding gap; the quarterly credit gap reproduces v4 exactly (3 events,
+  under-powered by construction); T10Y3M's frozen TAN misses the FA ceiling
+  by 0.2 for the THIRD consecutive run (4.202, identical). Reproducibility
+  held a fifth time and at its strongest: **all 20 shared v4 pairs (5
+  indicators × 4 scorers, frozen AND rolling) are byte-identical on fresh
+  fetches with new SHA-256s.** README gate updated to the five-run record;
+  execution log carries the attempt table, per-indicator timings, fetch facts
+  and the reproducibility diff.
 - **Early-warning pre-registration v5 — the owner-initiated wider family.**
   v4 published family NO (1/5) with the record's first criteria-passing pair
   (`FRED_STLFSI4` × frozen hazard logit) and confirmed the standing

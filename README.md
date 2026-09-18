@@ -218,11 +218,11 @@ register now, and it is kept short on purpose:
   are computed per source wherever the payload's own held-out residuals
   support a calibration window, and are `null` — with `confidence_method`
   recording why — wherever they do not.
-- **No event target — line parked after four pre-registered runs.** Crisis
+- **No event target — line parked after five pre-registered runs.** Crisis
   early-warning needs a labelled stress-event target and a pre-registered
   evaluation; until a run passes one, the platform is a data-governance and
   scenario laboratory, not a demonstrated early-warning system, and it does
-  not claim to be one. Four protocol versions were frozen, tagged, run once
+  not claim to be one. Five protocol versions were frozen, tagged, run once
   each, and published unchanged:
   [v1](docs/prereg/runs/early_warning_v1/report.md) — under-powered NO (one
   testable indicator, below the declared family minimum);
@@ -235,23 +235,34 @@ register now, and it is kept short on purpose:
   [v4](docs/prereg/runs/early_warning_v4/report.md) — the owner-initiated
   resumption testing exactly v3's two recorded axes (annual rolling refits;
   weekly + quarterly tracks admitting the BIS credit-to-GDP gap). Family
-  verdict NO again — **1 of 5 indicators passed** against a rule requiring at
-  least half — so **the line remains parked with a four-run record and there
-  is no planned v5**. The run produced the record's first criteria-passing
-  pair: `FRED_STLFSI4` (weekly) via the *frozen* hazard logit — AUC 0.922,
-  AP 0.384, median lead 2.0 weeks (≈10 business days), 0.48 false alarms per
-  quiet year, strictly above both baselines, permutation p=0.001,
-  Holm-surviving across the 20-pair pool. One pair of twenty is published as
-  a fact, not upgraded into a system claim. What v4 else established: rolling
-  refits did not rescue the daily family (T10Y3M's rolling TAN got worse —
-  FA 4.2→5.4/quiet-yr, lead below the floor; T10Y2Y and VIX rolling ≈
-  frozen), closing that recorded axis; the quarterly credit gap was weak
-  under this operationalisation (AUC 0.39–0.65, 3 labelled events, no
-  detection within max_lead — under-powered by construction); and the frozen
-  scorers reproduced v3's published numbers exactly on all six shared pairs —
-  byte-identical reproducibility across four runs. Any resumption is a new
+  verdict NO — **1 of 5 indicators passed** against a rule requiring at
+  least half — producing the record's first criteria-passing pair
+  (`FRED_STLFSI4`, weekly, frozen hazard logit) and closing the
+  rolling-refit axis by measurement (it rescued nothing on the daily
+  family);
+  [v5](docs/prereg/runs/early_warning_v5/report.md) — the second
+  owner-initiated resumption: the **wider family** the four-run record kept
+  diagnosing — 11 testable indicators across four tracks (daily/weekly/
+  monthly/quarterly) and three publishers, criteria-first probed
+  ([source probe](docs/probes/prereg_v5_source_probe.md)), no grading
+  criterion changed. Family verdict NO — **2 of 11 passed** against a rule
+  requiring at least half (≥6), so **the line remains parked with a
+  five-run record; there is no planned v6** — any resumption is again an
   owner decision plus a new protocol with new recorded axes, frozen before
-  its run, like all four of these.
+  its run. The two individual passes are published as facts, not upgraded
+  into a system claim: `FRED_STLFSI4` (weekly) reproduced its v4 pass
+  **byte-identically on a fresh fetch** (frozen hazard logit: AUC 0.922,
+  AP 0.384, p=0.001, lead 2.0 weeks, FA 0.48/quiet-yr), and new
+  `FRED_DCOILWTICO` (daily, WTI crude) passed via the same frozen hazard
+  logit — AUC 0.813, AP 0.309, median lead 14.5 business days, 1.14 false
+  alarms per quiet year, strictly above both baselines, p=0.001,
+  Holm-surviving across the 44-pair pool. What v5 else established: the
+  frozen hazard logit is the only scorer that has ever passed (2 of 2
+  passes; rolling refits still rescue nothing); the monthly track starves
+  the lead criterion (KCFSI reaches AUC 0.917 but detects nothing within
+  its 2-month max_lead); NFCI is significant (p=0.001) yet persistence
+  still beats it; and every frozen daily number reproduced v4 exactly —
+  byte-identical reproducibility across five runs.
 
 - **No cross-source score aggregation.** A per-indicator stress *direction*
   registry does exist (`backend/modules/data/semantics.py`, used by the
