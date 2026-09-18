@@ -89,11 +89,10 @@ def _load_plugins() -> Dict[str, str]:
 _loaded_plugins = _load_plugins()
 
 
-#: Environment variables holding per-plugin API keys. Keys live in the
-#: environment rather than the database so configuration endpoints never
-#: return them; every place that instantiates a plugin from a saved config
-#: (the collector, the probe route) must inject them through
-#: ``config_with_env_keys`` or a keyed feed would test differently than it runs.
+#: Environment variables holding optional per-plugin API keys. A source may
+#: also store its key in its encrypted/protected configuration path; response
+#: schemas redact secret fields, while this helper keeps environment-based
+#: deployments working exactly as before.
 ENV_API_KEY_VARS = {
     "fred": "FRED_API_KEY",
     "alpha_vantage": "ALPHA_VANTAGE_API_KEY",

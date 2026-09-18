@@ -1,6 +1,7 @@
 """BIS (Bank for International Settlements) API plugin."""
 
 from typing import Dict, Any, List, Optional
+import io
 import pandas as pd
 from datetime import datetime
 import logging
@@ -65,14 +66,27 @@ class BISPlugin(DataSourcePlugin):
     def test_connection(self) -> Dict[str, Any]:
         """Test BIS API connectivity."""
         try:
-            # Test with a simple query to BIS Statistics API
-            url = "https://stats.bis.org/api/v1/data"
-            response = self.http.get(url, timeout=10)
+            # The collection root is not a valid SDMX data query and returns
+            # HTTP 400.  Probe a small, public flow/key that is also used by
+            # the built-in catalogue instead.
+            url = "https://stats.bis.org/api/v1/data/WS_CREDIT_GAP/Q.US"
+            response = self.http.get(
+                url,
+                params={"format": "csv"},
+                headers={"User-Agent": "BEACON/4.0 (+https://github.com/bnelabs/beacon)"},
+                timeout=10,
+            )
 
             if response.status_code == 200:
+                sample = pd.read_csv(io.StringIO(response.text), nrows=1)
                 return {
                     "success": True,
-                    "message": "Successfully connected to BIS Statistics API"
+                    "message": "Successfully connected to BIS Statistics API",
+                    "details": {
+                        "flow": "WS_CREDIT_GAP",
+                        "key": "Q.US",
+                        "columns": list(sample.columns),
+                    },
                 }
             else:
                 return {
@@ -171,27 +185,32 @@ class BISPlugin(DataSourcePlugin):
             DataFrame with Date and Value columns
         """
         try:
-            # BIS API endpoint for data (returns XML by default)
+            # BIS's documented CSV representation is stable and easier to
+            # validate than the default SDMX XML envelope.  The old health
+            # check hit /data without a flow/key and the old parser then
+            # silently lost the provider's current dimension fields.
             url = "https://stats.bis.org/api/v1/data"
 
-            # Parameters for API request
             params = {
-                "startPeriod": start_date.strftime("%Y"),  # BIS uses year format
-                "endPeriod": end_date.strftime("%Y")
+                "format": "csv",
             }
 
             # Add indicator ID to URL path
             full_url = f"{url}/{indicator_id}"
 
             headers = {
-                "User-Agent": "BEACON/2.0"
+                "User-Agent": "BEACON/4.0 (+https://github.com/bnelabs/beacon)"
             }
 
             response = self.http.get(full_url, headers=headers, params=params, timeout=30)
             response.raise_for_status()
 
-            # Parse XML response
-            df = self._parse_bis_xml(response.text)
+            df = self._parse_bis_csv(response.text)
+            if df is not None and not df.empty:
+                df = df[
+                    (df["date"] >= pd.Timestamp(start_date))
+                    & (df["date"] <= pd.Timestamp(end_date))
+                ]
 
             if df is not None and not df.empty:
                 logger.info(f"Fetched {len(df)} records for {indicator_id} from BIS")
@@ -202,6 +221,40 @@ class BISPlugin(DataSourcePlugin):
 
         except Exception as e:
             logger.error(f"Error fetching indicator {indicator_id} from BIS: {e}")
+            return None
+
+    def _parse_bis_csv(self, csv_text: str) -> Optional[pd.DataFrame]:
+        """Parse the current BIS SDMX CSV representation."""
+        try:
+            frame = pd.read_csv(io.StringIO(csv_text))
+            required = {"TIME_PERIOD", "OBS_VALUE"}
+            if not required.issubset(frame.columns):
+                logger.error(
+                    "BIS CSV schema missing %s; received %s",
+                    sorted(required - set(frame.columns)),
+                    list(frame.columns),
+                )
+                return None
+
+            def parse_period(value: object) -> pd.Timestamp:
+                text = str(value)
+                if "-Q" in text:
+                    year, quarter = text.split("-Q", 1)
+                    month = (int(quarter) - 1) * 3 + 1
+                    return pd.Timestamp(f"{year}-{month:02d}-01")
+                return pd.Timestamp(f"{text}-01-01")
+
+            result = pd.DataFrame(
+                {
+                    "date": frame["TIME_PERIOD"].map(parse_period),
+                    "value": pd.to_numeric(frame["OBS_VALUE"], errors="coerce"),
+                }
+            ).dropna(subset=["date", "value"])
+            if result.empty:
+                return None
+            return result.sort_values("date").drop_duplicates("date", keep="first")
+        except Exception as e:
+            logger.error(f"Error parsing BIS CSV: {e}")
             return None
 
     def _parse_bis_xml(self, xml_text: str) -> Optional[pd.DataFrame]:

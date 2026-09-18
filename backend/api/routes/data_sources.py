@@ -52,6 +52,30 @@ async def list_data_sources(
         )
 
 
+@router.get("/plugins")
+async def list_data_source_plugins() -> List[Dict[str, Any]]:
+    """Return the registered plugin configuration schemas for the UI.
+
+    The source plugins already own their configuration metadata.  Exposing it
+    here keeps the Configure dialog in sync with the runtime registry without
+    copying API-key fields into TypeScript by hand.  Schemas contain field
+    metadata and defaults, never configured values.
+    """
+    from backend.plugins import list_plugins
+
+    return [
+        {
+            "type": info["type"],
+            "name": info.get("name", info["type"]),
+            "description": info.get("description"),
+            "registration_required": bool(info.get("registration_required", False)),
+            "registration_url": info.get("registration_url"),
+            "config_schema": info.get("config_schema", {}),
+        }
+        for info in sorted(list_plugins(), key=lambda entry: entry["type"])
+    ]
+
+
 @router.get("/disclosure")
 async def get_provenance_disclosure(
     db: Session = Depends(get_db)

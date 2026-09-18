@@ -1,8 +1,37 @@
 """Pydantic schemas for data source API."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional, Dict, Any
 from datetime import datetime
+
+
+CONFIG_SECRET_MASK = "********"
+
+
+def _redact_config_secrets(plugin_type: str, config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Return a response-safe copy of a plugin configuration.
+
+    Data-source configuration is returned by the list and detail endpoints, so
+    secret fields must never be echoed back to the browser.  The stored value
+    remains available to probes and collectors; only the response model is
+    masked.  Importing the registry lazily avoids making schema imports depend
+    on optional plugin dependencies.
+    """
+    safe_config = dict(config or {})
+    try:
+        from backend.plugins import get_plugin
+
+        plugin_class = get_plugin(plugin_type)
+        schema = plugin_class.get_config_schema() if plugin_class else {}
+    except Exception:
+        schema = {}
+
+    for key, field in (schema or {}).items():
+        if isinstance(field, dict) and field.get("secret") and key in safe_config:
+            value = safe_config.get(key)
+            if value not in (None, ""):
+                safe_config[key] = CONFIG_SECRET_MASK
+    return safe_config
 
 
 class DataSourceConfigBase(BaseModel):
@@ -67,6 +96,11 @@ class DataSourceResponse(DataSourceConfigBase):
     last_sync_rows: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def mask_secret_config(self) -> "DataSourceResponse":
+        self.config = _redact_config_secrets(self.plugin_type, self.config)
+        return self
 
 
 class DataSourceTestRequest(BaseModel):

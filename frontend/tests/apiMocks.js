@@ -422,6 +422,64 @@ const dataSourcesList = [
   }
 ]
 
+// Runtime plugin metadata served by GET /api/v1/data-sources/plugins.  The
+// real UI uses this endpoint to render provider-specific settings; keeping the
+// fixture explicit makes the mocked frontend contract match production rather
+// than turning the new query into an expected 404.
+const dataSourcePlugins = [
+  {
+    type: 'fdic',
+    name: 'FDIC Call Reports',
+    description: 'Quarterly balance sheet metrics for US banks.',
+    registration_required: false,
+    registration_url: null,
+    config_schema: {
+      endpoint: {
+        type: 'string',
+        label: 'API Endpoint',
+        required: false
+      }
+    }
+  },
+  {
+    type: 'ecb_banking',
+    name: 'ECB Banking',
+    description: 'European Central Bank supervisory statistics.',
+    registration_required: false,
+    registration_url: null,
+    config_schema: {}
+  },
+  {
+    type: 'world_bank',
+    name: 'World Bank Finance',
+    description: 'Macro-financial indicators from the World Bank.',
+    registration_required: false,
+    registration_url: null,
+    config_schema: {}
+  },
+  {
+    type: 'fred',
+    name: 'FRED',
+    description: 'Federal Reserve Economic Data.',
+    registration_required: false,
+    registration_url: 'https://fred.stlouisfed.org/docs/api/api_key.html',
+    config_schema: {
+      api_key: {
+        type: 'string',
+        label: 'FRED API Key',
+        secret: true,
+        required: false
+      },
+      rate_limit: {
+        type: 'number',
+        label: 'Rate Limit (seconds)',
+        required: false,
+        default: 0.5
+      }
+    }
+  }
+]
+
 // The scheduler's view of each feed, as GET /api/v1/data-sources/health
 // serves it: cadence, last outcome, next due date, and the backoff factor
 // while a feed fails. 402 is deliberately overdue-and-backing-off so the e2e
@@ -1048,6 +1106,10 @@ export async function registerApiMocks(page) {
 
       if (normalizedPath === '/api/v1/data-sources/disclosure') {
         return respond(dataDisclosure)
+      }
+
+      if (normalizedPath === '/api/v1/data-sources/plugins') {
+        return respond(dataSourcePlugins)
       }
 
       if (normalizedPath === '/api/v1/data-sources/health') {

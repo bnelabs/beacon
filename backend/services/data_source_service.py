@@ -42,11 +42,9 @@ class DataSourceService:
             raise ValueError(f"Data source with name '{data_source.name}' already exists")
 
         # Validate plugin type
-        valid_plugins = [
-            "yfinance", "fred", "alpha_vantage", "csv", "custom_api",
-            "ecb", "sec_edgar", "bis", "imf", "world_bank",
-            "ecb_banking", "fmp", "kaggle", "ai4risk_interbank"
-        ]
+        from backend.plugins import list_plugins
+
+        valid_plugins = sorted(info["type"] for info in list_plugins())
         if data_source.plugin_type not in valid_plugins:
             raise ValueError(f"Invalid plugin type. Must be one of: {', '.join(valid_plugins)}")
 
@@ -109,9 +107,35 @@ class DataSourceService:
                 raise ValueError(f"Data source with name '{name}' already exists")
             db_data_source.name = name
 
-        for field in ("plugin_type", "config"):
-            if fields.get(field) is not None:
-                setattr(db_data_source, field, fields[field])
+        if fields.get("plugin_type") is not None:
+            db_data_source.plugin_type = fields["plugin_type"]
+
+        if "config" in fields and fields["config"] is not None:
+            # Secret fields are masked in GET responses.  The Configure dialog
+            # therefore omits an unchanged secret (or sends the mask) rather
+            # than echoing the existing value back to the browser.  Merge those
+            # fields server-side so saving a non-secret setting does not erase a
+            # working API key.
+            incoming_config = dict(fields["config"] or {})
+            existing_config = dict(db_data_source.config or {})
+            try:
+                from backend.plugins import get_plugin
+
+                plugin_class = get_plugin(db_data_source.plugin_type)
+                config_schema = plugin_class.get_config_schema() if plugin_class else {}
+            except Exception:
+                config_schema = {}
+
+            for key, field in (config_schema or {}).items():
+                if not isinstance(field, dict) or not field.get("secret"):
+                    continue
+                value = incoming_config.get(key)
+                if value in (None, "", "********"):
+                    if key in existing_config and existing_config[key] not in (None, ""):
+                        incoming_config[key] = existing_config[key]
+                    else:
+                        incoming_config.pop(key, None)
+            db_data_source.config = incoming_config
 
         enabled = fields.get("enabled")
         if enabled is not None:
