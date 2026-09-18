@@ -212,12 +212,20 @@ def run_data_collection(self, job_id: int, parameters: dict):
         default_end = today.isoformat()
         start_date = parameters.get('start_date') or default_start
         end_date = parameters.get('end_date') or default_end
+        raw_fail_on_any_error = parameters.get("fail_on_any_error", True)
+        if isinstance(raw_fail_on_any_error, str):
+            fail_on_any_error = raw_fail_on_any_error.strip().lower() not in {
+                "0", "false", "no", "off"
+            }
+        else:
+            fail_on_any_error = bool(raw_fail_on_any_error)
 
         logger.info(
-            "Running data collection with %d catalogue items (regions=%s, countries=%s)...",
+            "Running data collection with %d catalogue items (regions=%s, countries=%s, strict=%s)...",
             len(catalogue_items),
             selected_regions or "all",
             selected_countries or "all",
+            fail_on_any_error,
         )
 
         # Run the complete data pipeline
@@ -228,6 +236,7 @@ def run_data_collection(self, job_id: int, parameters: dict):
             user_id="system",
             countries=selected_countries or None,
             regions=selected_regions or None,
+            fail_on_any_error=fail_on_any_error,
         )
 
         self.update_progress(job_id, 95.0)
@@ -250,6 +259,8 @@ def run_data_collection(self, job_id: int, parameters: dict):
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "regions": selected_regions,
             "countries": selected_countries,
+            "collection_report": (data_package.metadata or {}).get("collection_report"),
+            "fail_on_any_error": fail_on_any_error,
         })
 
         service.update_job_status(
