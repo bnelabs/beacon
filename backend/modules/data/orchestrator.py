@@ -143,6 +143,7 @@ class DataOrchestrator:
         user_id: str,
         countries: Optional[List[str]] = None,
         regions: Optional[List[str]] = None,
+        fail_on_any_error: bool = True,
     ) -> DataPackage:
         """
         Execute complete DATA pipeline.
@@ -154,6 +155,10 @@ class DataOrchestrator:
             user_id: User who initiated
             countries: Optional list of country names for filtering
             regions: Optional list of region codes from UI
+            fail_on_any_error: Whether one failed item should fail the whole
+                collection. Strict mode remains the default; an explicit
+                false value records provider failures and continues with the
+                usable panel.
 
         Returns:
             DataPackage ready for ENGINE
@@ -172,6 +177,7 @@ class DataOrchestrator:
                 end_date=end_date,
                 country_filters=countries,
                 region_filters=regions,
+                fail_on_any_error=fail_on_any_error,
             )
 
             self._update_progress(20.0, f"Collected {len(raw_data)} datasets from sources")
