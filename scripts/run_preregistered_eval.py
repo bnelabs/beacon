@@ -98,15 +98,18 @@ MIN_MEDIAN_LEAD = 10          # business days
 MAX_FALSE_ALARMS_PER_QUIET_YEAR = 4.0
 
 # --------------------------------------------------------------------------
-# Per-track step semantics (protocol v4; declared BEFORE any v4 fetch).
+# Per-track step semantics (protocol v4; declared BEFORE any v4 fetch. The
+# monthly row is the v5 addition, declared BEFORE any v5 fetch under the same
+# intent-translation rule and pinned by test_prereg_v5.py).
 # The daily row re-states the frozen v1-v3 constants exactly -- it exists so
 # the mapping is explicit and testable, not because v4 changes the daily
 # track's parameters. The weekly/quarterly rows translate the SAME design
 # intent (a ~21-business-day move horizon, ~5-business-day persistence, a
 # >=10-business-day median-lead floor, a ~one-quarter hazard lookback) onto
 # coarser grids, at the coarsest granularity each grid can express. Every
-# value is declared in configs/event_eval_v4.yaml and docs/prereg/
-# early_warning_v4.md before the run; nothing here is tuned afterwards.
+# value is declared in configs/event_eval_v4.yaml (v5: event_eval_v5.yaml)
+# and docs/prereg/early_warning_v4.md (v5: early_warning_v5.md) before the
+# run; nothing here is tuned afterwards.
 # --------------------------------------------------------------------------
 TRACK_PARAMS: Dict[str, Dict[str, float]] = {
     "daily": {
@@ -120,6 +123,14 @@ TRACK_PARAMS: Dict[str, Dict[str, float]] = {
         "horizon": 4, "min_duration": 1, "max_lead": 8, "min_median_lead": 2,
         "steps_per_year": 52, "hazard_lookback": 13, "bd_per_step": 5.0,
         "gap_min": 1.5, "gap_max": 8.0,
+    },
+    "monthly": {
+        # 21 bd ~ 1 month -> 1 step; persistence 5 bd -> 1 step (coarsest
+        # expressible); lead floor 10 bd -> 1 step (~21 bd -- STRICTER than
+        # the intent, declared not hidden); quarter lookback -> 3 steps.
+        "horizon": 1, "min_duration": 1, "max_lead": 2, "min_median_lead": 1,
+        "steps_per_year": 12, "hazard_lookback": 3, "bd_per_step": 21.0,
+        "gap_min": 8.0, "gap_max": 35.0,
     },
     "quarterly": {
         # The coarsest expressible grid: horizon 1 quarter (~63 bd, >= the
@@ -206,6 +217,37 @@ TRACKS_V4: Dict[str, str] = {
     "FRED_KCFSI":        "weekly",
     "ECB_CISS":          "weekly",
     "BIS_CREDIT_GAP_US": "quarterly",
+}
+
+# v5 = v4's candidate set (rules re-derive every skip at fetch time; nothing
+# is excluded merely because v4 skipped it) PLUS the probe-GREEN wider family
+# (docs/probes/prereg_v5_source_probe.md, criteria-first, 2026-09-18):
+# daily WTI crude; weekly 30y mortgage rate and NFCI; monthly FEDFUNDS,
+# UMCSENT, and KCFSI REASSIGNED to the monthly track it is actually served at
+# (v4's weekly track refused it on measured frequency -- no resampling then,
+# no resampling now). Probe-RED exclusions (DTWEXBGS start 2006; NY Fed
+# rp_prob HTML-only transport) never enter the family. Directions for every
+# entering code are declared in backend/modules/data/semantics.py BEFORE any
+# v5 fetch.
+FAMILY_V5: Dict[str, Dict[str, Any]] = {
+    **{k: v for k, v in FAMILY_V4.items()},
+    "FRED_DCOILWTICO":   {"source": "fred", "series_id": "DCOILWTICO"},
+    "FRED_MORTGAGE30US": {"source": "fred", "series_id": "MORTGAGE30US"},
+    "FRED_NFCI":         {"source": "fred", "series_id": "NFCI"},
+    "FRED_FEDFUNDS":     {"source": "fred", "series_id": "FEDFUNDS"},
+    "FRED_UMCSENT":      {"source": "fred", "series_id": "UMCSENT"},
+}
+
+# Declared track per candidate (v5). KCFSI moves weekly -> monthly (its
+# measured cadence: median gap ~31 days; the v4 weekly refusal stands as the
+# evidence for the reassignment). New monthly codes join the new track.
+TRACKS_V5: Dict[str, str] = {
+    **{k: v for k, v in TRACKS_V4.items() if k != "FRED_KCFSI"},
+    "FRED_KCFSI":        "monthly",
+    "FRED_MORTGAGE30US": "weekly",
+    "FRED_NFCI":         "weekly",
+    "FRED_FEDFUNDS":     "monthly",
+    "FRED_UMCSENT":      "monthly",
 }
 
 # BIS licence screen: the live terms page and the attribution its
@@ -314,6 +356,51 @@ PROTOCOLS: Dict[str, Dict[str, Any]] = {
         # frozen TAN's eval-only warmup drops); each scorer is graded against
         # baselines recomputed on its OWN grid. v1-v3 keep the single shared
         # grid and byte-identical report shapes.
+        "per_scorer_grids": True,
+    },
+    "v5": {
+        "name": "early_warning_v5",
+        "tag": "prereg-early-warning-v5",
+        # v5 is the owner-initiated resumption of 2026-09-18 ("wider data
+        # collection from multiple sources"). v4's outcome handling said
+        # "there is no planned v5" -- a statement about the record, not a
+        # lock: the README gate has always said any resumption is owner-
+        # initiated, a new protocol, frozen before its run. v5 changes the
+        # FAMILY (probe-GREEN additions across four tracks and three
+        # publishers, plus the monthly track they need) and NOTHING else:
+        # the four frozen criteria, labeller quantile, windows, model
+        # config, seed protocol, baselines, permutation test, Holm level,
+        # family rule and single-run rule are identical to v1-v4 by shared
+        # code. Declared consequence (pre-run): a wider family makes the
+        # family rule HARDER -- with ~11 testable, a system-level claim needs
+        # >=6 full passes. Holm feasibility at the wider pool: minimum
+        # attainable permutation p is 1/1000; 0.001 x (4 scorers x 11
+        # indicators = 44 pairs) = 0.044 <= 0.05, so Holm survival remains
+        # attainable (L-19 rule: criteria feasibility-checked against each
+        # other BEFORE the freeze, on published numbers only).
+        "family": FAMILY_V5,
+        "tracks": TRACKS_V5,
+        "data_dir": REPO / "data" / "prereg" / "v5",
+        "report_dir": REPO / "docs" / "prereg" / "runs" / "early_warning_v5",
+        "keyed": True,
+        "licence_screen": True,
+        # Alarm arithmetic, declared pre-run from PUBLISHED facts only.
+        # Uniform rule unchanged: alarm on the top 2% of each scorer's own
+        # score grid.
+        #   daily (~252 steps/yr):   ~5.0 alarms/yr; ceiling 4 needs precision
+        #     >= ~20% -- v3 measured 23-29% at q98 (identical arithmetic to
+        #     v3/v4's frozen declarations).
+        #   weekly (~52 steps/yr):   ~1.0 alarm/yr -> ceiling cannot bind;
+        #     lift and lead bind (declared consequence, as v4).
+        #   monthly (~12 steps/yr):  ~0.24 alarms/yr -> ceiling cannot bind;
+        #     lift and lead bind (declared consequence, pre-run).
+        #   quarterly (~4 steps/yr): 1-2 alarms in the whole window -> ceiling
+        #     cannot bind; lift and lead bind (as v4).
+        "alarm_quantile": 0.98,
+        # The same four declared scorers as v4; the frozen two reproduce
+        # v3/v4 on unchanged sources -- the run's own reproducibility check.
+        "scorers": ("tan_frozen", "tan_rolling", "hazard_logit", "hazard_logit_rolling"),
+        "rolling_refit": "annual",
         "per_scorer_grids": True,
     },
 }
@@ -575,7 +662,11 @@ def fetch_phase(proto: Dict[str, Any]) -> int:
         if track == "daily":
             coverage_frac = float(len(eval_rows)) / eval_busdays if eval_busdays else 0.0
         else:
-            expected_steps = (eval_cal_days / 7.0) if track == "weekly" else (eval_cal_days * 4.0 / 365.25)
+            expected_steps = (
+                (eval_cal_days / 7.0) if track == "weekly"
+                else (eval_cal_days * 12.0 / 365.25) if track == "monthly"
+                else (eval_cal_days * 4.0 / 365.25)
+            )
             coverage_frac = float(len(eval_rows)) / expected_steps if expected_steps else 0.0
 
         # Frequency is a data-availability fact, measured before any metric.

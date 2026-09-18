@@ -1,0 +1,198 @@
+# Pre-registered early-warning evaluation — protocol v5 (FROZEN)
+#
+# Machine-readable half of docs/prereg/early_warning_v5.md. Committed and
+# git-tagged `prereg-early-warning-v5` BEFORE the evaluation runs. After the
+# tag, any change requires protocol v6 plus a CHANGELOG entry. Runner:
+# scripts/run_preregistered_eval.py --protocol v5. On disagreement between
+# this file and the runner, this file and the tag win.
+
+protocol: early_warning_v5
+supersedes: early_warning_v4
+status: frozen-pending-run
+
+# --- WHY v5 EXISTS (owner-initiated resumption; the family axis, nothing else)
+# v4 published family NO (1/5) with the record's first criteria-passing pair
+# (FRED_STLFSI4 x frozen hazard logit) and recorded that public DAILY stress
+# families are thin. Its outcome handling said "there is no planned v5" -- a
+# statement about the record, not a lock: the README gate has always said any
+# resumption is owner-initiated, a new protocol, frozen before its run. The
+# owner initiated v5 on 2026-09-18 with one explicit aim: a WIDER FAMILY from
+# MULTIPLE SOURCES. v5 changes the family (and adds the monthly track the
+# wider family needs); it changes NO grading criterion: the four frozen
+# criteria, the labeller quantile, the windows, the model config, the seed
+# protocol, the baselines, the permutation test, the Holm level, the minimum
+# testable family, the family rule and the single-run rule are identical to
+# v1/v2/v3/v4 by shared code, not by promise.
+#
+# DECLARED CONSEQUENCE (pre-run): a wider family makes the family rule
+# HARDER, not easier -- with ~11 testable indicators a system-level claim
+# needs >=6 full passes. v5 is a better-powered scientific record and more
+# individual shots at the STLFSI4-style pass, NOT a route to an easier claim.
+# Holm feasibility at the wider pool (L-19 rule — feasibility-checked before
+# the freeze, published numbers only): minimum attainable permutation p is
+# 1/1000 = 0.001; pool = 4 scorers x 11 indicators = 44 pairs; 0.001 x 44 =
+# 0.044 <= 0.05, so Holm survival remains attainable.
+
+# --- windows (identical to v1/v2/v3/v4) ---
+train_end: "2006-12-31"
+eval_start: "2007-01-01"
+eval_end: "2024-12-31"
+
+# --- labelling (quantile identical; horizon/min_duration per declared track)
+labelling:
+  quantile: 0.95
+  direction: per-indicator, from backend/modules/data/semantics.py (declared
+    BEFORE any v5 fetch; DCOILWTICO/MORTGAGE30US/NFCI/FEDFUNDS/UMCSENT added
+    2026-09-18 with literature rationale)
+  threshold_span: full evaluation window (declared historical mode)
+
+# --- tracks (v4's three rows unchanged; the monthly row is v5's addition) ---
+# Each row translates the SAME design intent onto its grid at the coarsest
+# granularity the grid can express: ~21-business-day move horizon, ~5-bd
+# persistence, >=10-bd median-lead floor, ~one-quarter hazard lookback.
+tracks:
+  daily:      {horizon: 21, min_duration: 5, max_lead: 42, min_median_lead: 10,
+               steps_per_year: 252, hazard_lookback: 63, bd_per_step: 1}
+  weekly:     {horizon: 4,  min_duration: 1, max_lead: 8,  min_median_lead: 2,
+               steps_per_year: 52,  hazard_lookback: 13, bd_per_step: 5}
+  monthly:    {horizon: 1,  min_duration: 1, max_lead: 2,  min_median_lead: 1,
+               steps_per_year: 12,  hazard_lookback: 3,  bd_per_step: 21}
+  quarterly:  {horizon: 1,  min_duration: 1, max_lead: 2,  min_median_lead: 1,
+               steps_per_year: 4,   hazard_lookback: 1,  bd_per_step: 63}
+  declared_consequences:
+    - weekly lead floor = 2 steps ~ 10 business days (the frozen intent)
+    - monthly lead floor = 1 step ~ 21 business days and monthly horizon =
+      1 step ~ 21 bd (equal to the daily intent); min_duration 1 step is the
+      coarsest expressible — declared, not hidden
+    - quarterly lead floor = 1 step ~ 63 business days — STRICTER than the
+      10-bd intent; quarterly horizon COARSER than the 21-bd intent (as v4)
+    - frequency is verified per track at fetch (gap-band matched); a series
+      whose measured cadence does not match its declared track is a
+      data-availability skip, never resampled
+    - coverage expectation per track is computed at the track's own cadence
+      (weekly /7 days; monthly x12/365.25; quarterly x4/365.25)
+
+# --- family (v4's dispositions re-derived on a fresh fetch, PLUS the
+# --- probe-GREEN wider candidates; probe: docs/probes/prereg_v5_source_probe.md)
+family:
+  daily track: FRED_T10Y2Y, FRED_T10Y3M, FRED_VIXCLS (as v2/v3/v4), plus
+    FRED_DCOILWTICO (WTI crude, EIA, daily 1986-; probe P1 GREEN)
+  weekly track: FRED_STLFSI4 (v4's passing indicator), FRED_MORTGAGE30US
+    (Freddie Mac PMMS, weekly 1971-; probe P3 GREEN, copyright line recorded),
+    FRED_NFCI (Chicago Fed, weekly 1971-; probe P4 GREEN); ECB_CISS keeps its
+    declared v1-style keyless FRED attempt — its skip will be RECORDED, not
+    substituted
+  monthly track (NEW): FRED_FEDFUNDS (monthly 1954-; probe P5 GREEN),
+    FRED_UMCSENT (monthly 1952-; probe P6 GREEN, citation requirement
+    recorded), FRED_KCFSI REASSIGNED weekly->monthly (its measured cadence is
+    ~31-day; v4's weekly refusal is the evidence for the reassignment — no
+    resampling then, none now)
+  quarterly track: BIS_CREDIT_GAP_US = WS_CREDIT_GAP/Q.US.P.A.C.E (probe P7
+    revalidated GREEN — 274 rows, 1957-Q4 onward, homogeneous series, terms
+    unchanged; attribution recorded)
+  dispositions re-derived at fetch (never skipped from memory): FRED_SOFR
+    (coverage), FRED_BAMLH0A0HYM2 (licence, refused pre-download),
+    FRED_RRPONTSYD (owner exclusion), six operator-reported codes (no public
+    source; the PRA probe confirmed bank-level data is supervisory-confidential)
+  excluded_pre_fetch:
+    FRED_DTWEXBGS: >-
+      Broad trade-weighted USD index probed daily and licence-clean but RED:
+      history starts 2006-01-02 (probe P2), under one year of pre-2007
+      training data — excluded by the probe's declared disposition rule
+      BEFORE any v5 metric.
+    NYFED_RECESSION_PROB: >-
+      NY Fed 12-month recession probability: the documented medialog URL
+      serves text/html, not the spreadsheet (probe P8), and the plugin zoo
+      has no NY Fed research transport (nyfed_plugin serves reference rates
+      only) — RED, recorded, not substituted.
+    BIS_DEBT_SERVICE_RATIO: >-
+      Stays excluded on v4's recorded YELLOW (US history from 1999-Q1 — ~32
+      pre-2007 quarters cannot honestly train the declared architecture).
+
+# --- alarm rule (uniform quantile; per-track arithmetic from PUBLISHED facts)
+alarm:
+  score_quantile: 0.98
+  applies_to: every scorer AND both baselines, identically, on the scorer's
+    own declared grid
+  arithmetic_declared_pre_run:
+    daily: "~5.0 alarms/yr; FA ceiling 4 needs precision >= ~20% — v3 measured
+      23-29% at q98 for two of three indicators: demanding but reachable
+      (identical arithmetic to v3/v4's frozen declarations)"
+    weekly: "~1.0 alarm/yr => ceiling cannot bind; lift and lead bind (as v4)"
+    monthly: "~0.24 alarms/yr => ceiling cannot bind; lift and lead are the
+      binding criteria (declared consequence, pre-run)"
+    quarterly: "1-2 alarms in the whole 18-year window => ceiling cannot bind;
+      lift and lead bind (as v4)"
+
+# --- scorers (the same four as v4; frozen two reproduce v3/v4 on unchanged
+# --- sources — the run's own reproducibility check) ---------------------------
+scorers:
+  tan_frozen: identical to v1/v2/v3/v4 (config, seed 11, <=2007 train span)
+  hazard_logit: identical to v3/v4 (features, labels, estimator defaults,
+    absence rule) with the per-track hazard_lookback
+  tan_rolling: as v4 — refit at every calendar-year boundary on the EXPANDING
+    window strictly before it (strictly causal); a boundary whose window
+    cannot support the fit (< sequence_length + 10 rows) contributes NO
+    scores — declared absence, not zero
+  hazard_logit_rolling: as v4 — same feature/estimator spec; a year with no
+    training-span onsets contributes NO scores (the frozen refusal rule)
+  per_scorer_grids: as v4 — EACH scorer is graded against baselines
+    recomputed on its own grid
+
+# --- baselines (identical definitions; recomputed per scorer grid) -----------
+baselines: [persistence, ar1]
+
+# --- criteria (IDENTICAL to v1/v2/v3/v4 — frozen since before v1's run; each
+# --- track states them in its own declared steps via the tracks block) ------
+criteria:
+  min_median_lead_business_days: 10
+  max_false_alarms_per_quiet_year: 4
+  beat_baselines: AUC and AP strictly above BOTH persistence and AR(1) on the
+    scorer's own grid
+  ap_above_base_rate: true (on the scorer's own grid)
+  significance: permutation p (1000 shuffles, seed 20260917) surviving
+    Holm-Bonferroni at alpha 0.05
+
+# --- multiplicity (declared) -------------------------------------------------
+verdict_rules:
+  holm_pool: ALL scorer-indicator pairs the protocol runs (4 scorers x ~11
+    indicators projected = ~44 hypotheses; pooling fewer would understate
+    multiplicity)
+  indicator_pass: ANY declared scorer passes all four criteria with a
+    Holm-surviving AP
+  family_claim: ">= half of tested indicators pass AND >= 3 testable
+    (identical to v1/v2/v3/v4)"
+
+# --- transport ----------------------------------------------------------------
+transport:
+  fred: FRED_API_KEY from the environment; never written to any file;
+    recorded endpoints carry api_key=<redacted>
+  bis: stats.bis.org SDMX REST, keyless CSV; quarter periods map to
+    quarter-END calendar dates (declared convention); payload must be one
+    homogeneous series or the fetch refuses (format drift is a refusal)
+  licence_screen: >-
+    BEFORE download for every series. FRED: the series' own notes vs
+    LICENCE_PROHIBITION_RE. BIS: the live terms page (data.bis.org/help/legal)
+    vs the same patterns, permission sentence required to be observable
+    (drift => licence_unconfirmed => refuse; the BoE-404 precedent), with the
+    attribution recorded: "Source: BIS Data Portal - Bank for International
+    Settlements"
+
+# --- run rules (identical, plus v5's outcome handling) ------------------------
+run_rules:
+  single_run: one evaluation run per tagged protocol; re-runs only for
+    documented pre-metric infrastructure defects, logged with diffs
+  negative_results: published unchanged
+  sequence: tag -> fetch -> evaluate (the v3/v4 sequence; the manifest with
+    per-series SHA-256, licence lines and redacted endpoints commits with
+    the report)
+  outcome_handling: declared before the run. PASS (family claim warranted —
+    at least half of tested indicators pass, at least 3 testable) -> the
+    README claim gate
+    moves, carrying these numbers. FAIL -> the line REMAINS PARKED, now with
+    a five-run documented record; there is no planned v6 — any further
+    iteration needs a new owner decision and new recorded axes, exactly as
+    v4 and v5 needed. Individual indicator passes (the STLFSI4 class of
+    result) are published as facts either way and are NOT upgraded into
+    system claims. Neither outcome gets argued with after the fact.
+  execution: in-process (declared deviation, as v1/v2/v3/v4)
