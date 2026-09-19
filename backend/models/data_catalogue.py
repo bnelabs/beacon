@@ -68,7 +68,7 @@ class DataCatalogueItem(Base):
     # API/Query information
     endpoint = Column(String(500))  # API endpoint or query string
     parameters = Column(JSON, default={})  # Default parameters
-    frequency = Column(String(50))  # daily, weekly, monthly, quarterly, annual
+    frequency = Column(String(50))  # daily, weekly, monthly, quarterly, annual, event
 
     # Metadata
     granularity = Column(String(50))  # micro, meso, macro

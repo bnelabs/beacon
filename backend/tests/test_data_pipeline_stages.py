@@ -49,6 +49,56 @@ class TestFormatter:
         out = DataFormatter("job").format({"SRC": pd.DataFrame(), "OK": _plugin_frame()}, "timeseries")
         assert len(out) == 5
 
+    def test_metadata_and_series_identity_are_carried_into_the_package(self):
+        frame = pd.DataFrame({
+            "Date": pd.date_range("2024-01-01", periods=3, freq="D"),
+            "Value": [1.0, 2.0, 3.0],
+        })
+        out = DataFormatter("job").format(
+            {"SRC": frame},
+            "timeseries",
+            source_metadata={
+                "SRC": {
+                    "frequency": "monthly",
+                    "unit": "index",
+                    "granularity": "macro",
+                }
+            },
+        )
+        assert out["frequency"].tolist() == ["monthly"] * 3
+        assert out["unit"].tolist() == ["index"] * 3
+        assert out["series_id"].tolist() == ["SRC"] * 3
+
+    def test_features_do_not_cross_source_or_panel_boundaries(self):
+        dates = pd.date_range("2024-01-01", periods=8, freq="D")
+        scalar = pd.DataFrame({"Date": dates, "Value": np.arange(8, dtype=float)})
+        panel = pd.DataFrame({
+            "Date": list(dates) + list(dates),
+            "source_bank": ["A"] * 8 + ["B"] * 8,
+            "target_bank": ["B"] * 8 + ["A"] * 8,
+            "Value": list(np.arange(8, dtype=float)) + list(100 + np.arange(8, dtype=float)),
+        })
+        formatter = DataFormatter("job")
+        out = formatter.format(
+            {"SRC": scalar, "PANEL": panel},
+            "timeseries",
+            source_metadata={
+                "SRC": {"frequency": "daily"},
+                "PANEL": {"frequency": "quarterly"},
+            },
+        )
+        features = formatter.extract_features(out)
+
+        # The first row of every independent series has only its own value in
+        # the rolling mean; it must not inherit the preceding source or edge.
+        assert features.loc[out["series_id"] == "SRC", "value_mean"].iloc[0] == pytest.approx(0.0)
+        panel_first = features.loc[
+            out["series_id"].eq("PANEL::A::B") | out["series_id"].eq("PANEL::B::A"),
+            "value_mean",
+        ]
+        assert panel_first.iloc[0] == pytest.approx(0.0)
+        assert panel_first.iloc[8] == pytest.approx(100.0)
+
 
 class TestCleaner:
     def test_gaps_are_preserved_not_imputed(self):
@@ -145,3 +195,33 @@ def test_indicator_provider_is_not_routed_through_asset_transport(monkeypatch):
     assert calls == ["DGS10"]
     assert len(frame) == 1
     assert list(frame.columns) == ["Date", "Value"]
+
+
+def test_collector_clips_provider_padding_to_the_requested_window(monkeypatch):
+    import backend.modules.data.collector as collector_module
+
+    class IndicatorPlugin:
+        def __init__(self, config):
+            self.config = config
+
+        def fetch_indicator_data(self, indicator_id, start_date, end_date):
+            return pd.DataFrame({
+                "Date": pd.to_datetime(["2019-12-31", "2020-01-01", "2020-01-31", "2020-02-01"]),
+                "Value": [0.0, 1.0, 2.0, 3.0],
+            })
+
+    monkeypatch.setattr(collector_module, "get_plugin", lambda plugin_type: IndicatorPlugin)
+    monkeypatch.setattr(collector_module, "config_with_env_keys", lambda plugin_type, config: config)
+
+    item = SimpleNamespace(
+        code="PADDED",
+        category="economic_indicators",
+        endpoint="PADDED",
+        parameters={},
+        data_source=SimpleNamespace(plugin_type="fred", config={}),
+    )
+    collector = DataCollector.__new__(DataCollector)
+    collector.job_id = "job"
+
+    frame = collector._fetch_item_data(item, "2020-01-01", "2020-01-31")
+    assert frame["Date"].tolist() == [pd.Timestamp("2020-01-01"), pd.Timestamp("2020-01-31")]

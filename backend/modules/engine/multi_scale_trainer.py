@@ -64,14 +64,23 @@ class MultiSourceDataset(Dataset):
         self.sequence_length = sequence_length
         self.data = data.copy()
 
-        # Group by source
-        self.sources = self.data['source_code'].unique()
+        # ``source_code`` identifies a feed, not necessarily a single time
+        # series.  Panel feeds (for example AI4Risk's bank-to-bank edges) must
+        # keep their entity history separate or a window will jump from one
+        # edge to another at the same quarter.  ``series_id`` is added by the
+        # DATA formatter for those panels; legacy frames without it retain the
+        # original source grouping.
+        self.series_column = 'series_id' if 'series_id' in self.data.columns else 'source_code'
+        if 'source_code' in self.data.columns:
+            self.sources = self.data['source_code'].dropna().astype(str).unique()
+        else:
+            self.sources = self.data[self.series_column].dropna().astype(str).unique()
 
         # Use provided mapping or create new one
         if source_to_id is not None:
             self.source_to_id = source_to_id
         else:
-            self.source_to_id = {src: i for i, src in enumerate(self.sources)}
+            self.source_to_id = {str(src): i for i, src in enumerate(self.sources)}
 
         # Per-source normalization stats. `external_stats` marks a dataset that
         # must not invent its own: a source with no training-split stats was
@@ -90,8 +99,18 @@ class MultiSourceDataset(Dataset):
         self.targets = []
         self.source_ids = []
 
-        for source in self.sources:
-            source_data = self.data[self.data['source_code'] == source].copy()
+        if self.series_column == 'source_code':
+            series_groups = self.data.groupby('source_code', sort=False, dropna=False)
+        else:
+            series_groups = self.data.groupby('series_id', sort=False, dropna=False)
+
+        for _, source_data in series_groups:
+            source_data = source_data.copy()
+            source = (
+                str(source_data['source_code'].iloc[0])
+                if 'source_code' in source_data.columns
+                else str(source_data[self.series_column].iloc[0])
+            )
             source_data = source_data.sort_values('Date')
 
             # Extract values - use 'Close' column from timeseries data. Gaps are

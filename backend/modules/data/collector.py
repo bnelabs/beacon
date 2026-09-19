@@ -15,6 +15,7 @@ from backend.exceptions import (
     DataQualityError,
     DataSourceUnavailableError,
     EmptyDatasetError,
+    SchemaValidationError,
 )
 from backend.models.data_catalogue import DataCatalogueItem
 from backend.models.data_source import DataSource
@@ -307,5 +308,48 @@ class DataCollector:
             )
             if match is not None:
                 frame = frame.rename(columns={match: canonical})
+
+        # Providers occasionally return a small amount of padding around a
+        # requested window (the ECB fallback did this for four exchange-rate
+        # series).  The collector owns the requested-window contract, so clip
+        # only after schema normalisation and never let an out-of-window row
+        # enter validation, feature engineering, or the certified snapshot.
+        date_column = next(
+            (column for column in ("Date", "date", "timestamp", "time") if column in frame.columns),
+            None,
+        )
+        if date_column is not None:
+            parsed_dates = pd.to_datetime(frame[date_column], errors="coerce", utc=True)
+            if parsed_dates.isna().any():
+                invalid = int(parsed_dates.isna().sum())
+                raise SchemaValidationError(
+                    f"Provider returned {invalid} unparseable date(s) for '{item.code}'",
+                    context={"code": item.code, "date_column": date_column, "invalid_dates": invalid},
+                )
+            parsed_dates = parsed_dates.dt.tz_localize(None)
+            start_ts = pd.Timestamp(start_dt)
+            end_ts = pd.Timestamp(end_dt)
+            in_window = (parsed_dates >= start_ts) & (parsed_dates <= end_ts)
+            clipped = int((~in_window).sum())
+            if clipped:
+                logger.info(
+                    "[%s] Clipped %d out-of-window row(s) from %s (%s..%s)",
+                    self.job_id,
+                    clipped,
+                    item.code,
+                    start_date,
+                    end_date,
+                )
+            frame = frame.loc[in_window].copy()
+            frame[date_column] = parsed_dates.loc[in_window].to_numpy()
+            if frame.empty:
+                raise EmptyDatasetError(
+                    f"Source returned no rows for '{item.code}' inside the requested window",
+                    context={
+                        "code": item.code,
+                        "start_date": start_date,
+                        "end_date": end_date,
+                    },
+                )
 
         return frame

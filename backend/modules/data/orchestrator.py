@@ -146,6 +146,24 @@ class DataOrchestrator:
             if str(getattr(item, "unit", "") or "").strip().lower() in {"filings", "events"}
         }
 
+    def _catalogue_metadata(self, catalogue_items: List[int]) -> Dict[str, Dict[str, Optional[str]]]:
+        """Return cadence and semantic metadata for the selected sources."""
+        if not catalogue_items:
+            return {}
+        items = (
+            self.db.query(DataCatalogueItem)
+            .filter(DataCatalogueItem.id.in_(catalogue_items))
+            .all()
+        )
+        return {
+            item.code: {
+                "frequency": getattr(item, "frequency", None),
+                "unit": getattr(item, "unit", None),
+                "granularity": getattr(item, "granularity", None),
+            }
+            for item in items
+        }
+
     def _update_progress(self, progress: float, message: str):
         """Update internal progress and call callback if provided."""
         self.progress = progress
@@ -190,6 +208,7 @@ class DataOrchestrator:
             # Step 1: Collection
             self.status = DataStatus.COLLECTING
             self._update_progress(0.0, "Initializing data collection...")
+            source_metadata = self._catalogue_metadata(catalogue_items)
 
             raw_data = self.collector.collect(
                 catalogue_items=catalogue_items,
@@ -206,7 +225,14 @@ class DataOrchestrator:
             self.status = DataStatus.VALIDATING
             self._update_progress(25.0, "Validating data quality and completeness...")
 
-            validation_report = self.validator.validate(raw_data)
+            validation_report = self.validator.validate(
+                raw_data,
+                frequencies={
+                    code: str(metadata["frequency"])
+                    for code, metadata in source_metadata.items()
+                    if metadata.get("frequency")
+                },
+            )
 
             if validation_report.critical_errors > 0:
                 logger.warning(f"[{self.job_id}] Validation found {validation_report.critical_errors} critical errors, continuing with valid data")
@@ -245,7 +271,8 @@ class DataOrchestrator:
 
             formatted_data = self.formatter.format(
                 clean_data,
-                target_schema="engine_v1"
+                target_schema="engine_v1",
+                source_metadata=source_metadata,
             )
 
             self._update_progress(80.0, f"Formatting complete: {len(formatted_data.columns)} features generated")
@@ -306,6 +333,7 @@ class DataOrchestrator:
                 user_id,
                 regions=regions,
                 countries=countries,
+                source_metadata=source_metadata,
             )
 
             self._update_progress(100.0, f"Data certified and ready for training")
@@ -381,7 +409,9 @@ class DataOrchestrator:
                           end_date: str,
                           user_id: str,
                           regions: Optional[List[str]] = None,
-                          countries: Optional[List[str]] = None) -> DataPackage:
+                          countries: Optional[List[str]] = None,
+                          source_metadata: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
+                          ) -> DataPackage:
         """Save formatted data and create package."""
 
         # Create job-specific directory
@@ -398,6 +428,19 @@ class DataOrchestrator:
         features = self.formatter.extract_features(data)
         features.to_parquet(features_path, compression='snappy')
 
+        source_metadata = source_metadata or {}
+        frequencies = sorted(
+            {
+                str(value.get("frequency")).strip()
+                for value in source_metadata.values()
+                if value.get("frequency")
+            }
+        )
+        package_frequency = (
+            frequencies[0] if len(frequencies) == 1
+            else "mixed" if frequencies else "unknown"
+        )
+
         return DataPackage(
             job_id=self.job_id,
             timeseries_path=timeseries_path,
@@ -406,7 +449,18 @@ class DataOrchestrator:
                 "start_date": start_date,
                 "end_date": end_date,
                 "num_sources": len(data['source'].unique()) if 'source' in data.columns else 0,
-                "frequency": "daily",
+                "frequency": package_frequency,
+                "frequencies": frequencies,
+                "frequency_by_source": {
+                    code: metadata.get("frequency")
+                    for code, metadata in source_metadata.items()
+                    if metadata.get("frequency")
+                },
+                "unit_by_source": {
+                    code: metadata.get("unit")
+                    for code, metadata in source_metadata.items()
+                    if metadata.get("unit")
+                },
                 "regions": regions or [],
                 "countries": countries or [],
                 "quality_score": quality_report.quality_score,
