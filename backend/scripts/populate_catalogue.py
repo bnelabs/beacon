@@ -174,7 +174,9 @@ def populate_catalogue():
                 "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.MARKET_LIQUIDITY.value],
                 "data_source_id": sources["ECB"].id,
                 "endpoint": "FM/B.U2.EUR.4F.KR.MRR_FR.LEV",
-                "frequency": "daily",
+                # ECB publishes this as a policy-rate change series: dates are
+                # irregular event dates, not daily observations.
+                "frequency": "event",
                 "granularity": "macro",
                 "unit": "percentage",
                 "default_selected": True,
@@ -190,7 +192,9 @@ def populate_catalogue():
                 "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.FUNDING_LIQUIDITY.value],
                 "data_source_id": sources["ECB"].id,
                 "endpoint": "FM/B.U2.EUR.4F.KR.DFR.LEV",
-                "frequency": "daily",
+                # ECB publishes this as a policy-rate change series: dates are
+                # irregular event dates, not daily observations.
+                "frequency": "event",
                 "granularity": "macro",
                 "unit": "percentage",
                 "default_selected": True,
@@ -226,7 +230,7 @@ def populate_catalogue():
                 "risk_types": [RiskType.SYSTEMIC_RISK.value, RiskType.FUNDING_LIQUIDITY.value],
                 "data_source_id": sources["FRED"].id,
                 "endpoint": "FEDFUNDS",
-                "frequency": "daily",
+                "frequency": "monthly",
                 "granularity": "macro",
                 "unit": "percentage",
                 "default_selected": False,  # FRED requires API key
@@ -331,7 +335,7 @@ def populate_catalogue():
                 "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.SYSTEMIC_RISK.value],
                 "data_source_id": sources["FRED"].id,
                 "endpoint": "TOTRESNS",
-                "frequency": "weekly",
+                "frequency": "monthly",
                 "granularity": "macro",
                 "unit": "USD millions",
                 "default_selected": True,
@@ -347,7 +351,7 @@ def populate_catalogue():
                 "risk_types": [RiskType.CREDIT_RISK.value, RiskType.SYSTEMIC_RISK.value],
                 "data_source_id": sources["FRED"].id,
                 "endpoint": "BUSLOANS",
-                "frequency": "weekly",
+                "frequency": "monthly",
                 "granularity": "macro",
                 "unit": "USD billions",
                 "default_selected": True,

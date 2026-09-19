@@ -416,11 +416,11 @@ class EngineOrchestrator:
         else:
             raise ValueError("Timeseries data must contain 'value' or 'Value' column")
 
-        group_col = None
-        for candidate in ('source_code', 'source'):
-            if candidate in df.columns:
-                group_col = candidate
-                break
+        source_col = next(
+            (candidate for candidate in ('source_code', 'source') if candidate in df.columns),
+            None,
+        )
+        group_col = 'series_id' if 'series_id' in df.columns else source_col
 
         date_col = None
         for candidate in ('date', 'Date'):
@@ -438,12 +438,18 @@ class EngineOrchestrator:
         scores_parts = []
         timestamp_parts = []
         source_parts = []
+        series_parts = []
         endpos_parts = []
         stats_provenance: Dict[str, str] = {}
         dropped_for_history = 0
 
-        for raw_source, group in groups:
-            source = str(raw_source)
+        for raw_series, group in groups:
+            source = (
+                str(group[source_col].iloc[0])
+                if source_col is not None and not group.empty
+                else str(raw_series)
+            )
+            series = str(raw_series)
             ordered = (
                 group.sort_values(date_col)
                 if date_col is not None and date_col in group.columns
@@ -452,7 +458,12 @@ class EngineOrchestrator:
             raw = pd.to_numeric(ordered[value_col], errors='coerce').to_numpy(dtype=float)
             finite = raw[np.isfinite(raw)]
             if finite.size == 0:
-                logger.warning("[%s] Source %s has no numeric values; skipped", self.job_id, source)
+                logger.warning(
+                    "[%s] Series %s (source %s) has no numeric values; skipped",
+                    self.job_id,
+                    series,
+                    source,
+                )
                 continue
 
             checkpoint_stats = (self.source_stats or {}).get(source)
@@ -474,8 +485,8 @@ class EngineOrchestrator:
             if normalized.size <= sequence_length:
                 dropped_for_history += int(normalized.size)
                 logger.warning(
-                    "[%s] Source %s has %d row(s), too few for a %d-step window; skipped",
-                    self.job_id, source, normalized.size, sequence_length,
+                    "[%s] Series %s (source %s) has %d row(s), too few for a %d-step window; skipped",
+                    self.job_id, series, source, normalized.size, sequence_length,
                 )
                 continue
 
@@ -521,6 +532,7 @@ class EngineOrchestrator:
             scores_parts.append(scores)
             timestamp_parts.append(window_timestamps)
             source_parts.append(np.full(scores.size, source, dtype=object))
+            series_parts.append(np.full(scores.size, series, dtype=object))
             endpos_parts.append(ends)
 
         if not scores_parts:
@@ -531,6 +543,7 @@ class EngineOrchestrator:
                 "timestamps": [],
                 "scores": np.asarray([], dtype=float),
                 "sources": np.asarray([], dtype=object),
+                "series_ids": np.asarray([], dtype=object),
                 "score_end_positions": np.asarray([], dtype=int),
                 "insufficient_history": True,
                 "stats_provenance": stats_provenance,
@@ -550,6 +563,7 @@ class EngineOrchestrator:
             "timestamps": np.concatenate(timestamp_parts),
             "scores": np.concatenate(scores_parts),
             "sources": np.concatenate(source_parts),
+            "series_ids": np.concatenate(series_parts),
             "score_end_positions": np.concatenate(endpos_parts),
             "insufficient_history": False,
             "stats_provenance": stats_provenance,
@@ -646,6 +660,10 @@ class EngineOrchestrator:
 
         pred_array = np.asarray(predictions.get("scores", []), dtype=float)
         source_array = np.asarray(predictions.get("sources", []), dtype=object)
+        series_array = np.asarray(
+            predictions.get("series_ids", predictions.get("sources", [])),
+            dtype=object,
+        )
         endpos_array = np.asarray(predictions.get("score_end_positions", []), dtype=int)
 
         target_col = None
@@ -655,11 +673,11 @@ class EngineOrchestrator:
                 break
 
         if target_col is not None and pred_array.size and source_array.size == pred_array.size:
-            group_col = None
-            for candidate in ('source_code', 'source'):
-                if candidate in df.columns:
-                    group_col = candidate
-                    break
+            source_col = next(
+                (candidate for candidate in ('source_code', 'source') if candidate in df.columns),
+                None,
+            )
+            group_col = 'series_id' if 'series_id' in df.columns else source_col
             date_col = None
             for candidate in ('date', 'Date'):
                 if candidate in df.columns:
@@ -668,6 +686,7 @@ class EngineOrchestrator:
 
             score_frame = pd.DataFrame({
                 "source": source_array.astype(str),
+                "series": series_array.astype(str),
                 "end_pos": endpos_array,
                 "score": pred_array,
             })
@@ -680,7 +699,7 @@ class EngineOrchestrator:
                 [("__single__", df)] if group_col is None
                 else list(df.groupby(group_col, sort=True))
             )
-            for raw_source, group in groups:
+            for raw_series, group in groups:
                 ordered = (
                     group.sort_values(date_col)
                     if date_col is not None and date_col in group.columns
@@ -689,8 +708,14 @@ class EngineOrchestrator:
                 values = pd.to_numeric(ordered[target_col], errors='coerce').to_numpy(dtype=float)
                 if values.size < 2:
                     continue
+                source = (
+                    str(group[source_col].iloc[0])
+                    if source_col is not None and not group.empty
+                    else str(raw_series)
+                )
                 target_frames.append(pd.DataFrame({
-                    "source": str(raw_source),
+                    "source": source,
+                    "series": str(raw_series),
                     "target_pos": np.arange(1, values.size),
                     "actual": values[1:],
                 }))
@@ -698,7 +723,7 @@ class EngineOrchestrator:
             if target_frames:
                 merged = score_frame.merge(
                     pd.concat(target_frames, ignore_index=True),
-                    on=["source", "target_pos"],
+                    on=["series", "target_pos"],
                     how="inner",
                 )
                 merged = merged[np.isfinite(merged["actual"]) & np.isfinite(merged["score"])]
@@ -745,8 +770,16 @@ class EngineOrchestrator:
         path = f"{self.output_dir}/{self.job_id}/predictions.parquet"
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-        array_keys = ("timestamps", "scores", "sources", "score_end_positions")
-        columns = {key: np.asarray(predictions.get(key, [])) for key in array_keys}
+        array_keys = ("timestamps", "scores", "sources", "series_ids", "score_end_positions")
+        columns = {
+            key: np.asarray(
+                predictions.get(
+                    key,
+                    predictions.get("sources", []) if key == "series_ids" else [],
+                )
+            )
+            for key in array_keys
+        }
         lengths = {key: value.size for key, value in columns.items()}
         if len(set(lengths.values())) > 1:
             raise ValueError(f"Prediction arrays disagree in length: {lengths}")

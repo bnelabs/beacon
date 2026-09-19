@@ -1,7 +1,7 @@
 """Data Formatter - Standardization and feature engineering."""
 
 import logging
-from typing import Dict
+from typing import Dict, Mapping, Optional
 import pandas as pd
 import numpy as np
 
@@ -11,8 +11,30 @@ class DataFormatter:
     def __init__(self, job_id: str):
         self.job_id = job_id
 
-    def format(self, data: Dict[str, pd.DataFrame], target_schema: str) -> pd.DataFrame:
+    @staticmethod
+    def _identity_columns(df: pd.DataFrame):
+        """Return panel dimensions that identify an independent series."""
+        for identity in (
+            ("source_bank", "target_bank"),
+            ("bank_id", "feature"),
+            ("bank_id",),
+            ("ticker",),
+            ("Asset",),
+            ("asset",),
+            ("instrument",),
+        ):
+            if all(column in df.columns for column in identity):
+                return list(identity)
+        return []
+
+    def format(
+        self,
+        data: Dict[str, pd.DataFrame],
+        target_schema: str,
+        source_metadata: Optional[Mapping[str, Mapping[str, object]]] = None,
+    ) -> pd.DataFrame:
         logger.info(f"[{self.job_id}] Formatting to {target_schema}")
+        source_metadata = source_metadata or {}
 
         # Combine all datasets
         all_data = []
@@ -74,6 +96,26 @@ class DataFormatter:
                         df['value'] = pd.to_numeric(df['Close'], errors='coerce')
 
                 df['source_code'] = code
+                metadata = source_metadata.get(code, {})
+                # The previous package-level ``frequency: daily`` claim was
+                # false for mixed panels.  Carry the catalogue contract on
+                # every row so downstream consumers can keep cadence and unit
+                # semantics attached to the observation.
+                df['frequency'] = metadata.get('frequency')
+                df['unit'] = metadata.get('unit')
+                df['granularity'] = metadata.get('granularity')
+
+                identity_columns = self._identity_columns(df)
+                if identity_columns:
+                    identity = (
+                        df[identity_columns]
+                        .astype('string')
+                        .fillna('<NA>')
+                        .agg('::'.join, axis=1)
+                    )
+                    df['series_id'] = code + '::' + identity
+                else:
+                    df['series_id'] = code
                 all_data.append(df)
 
         if not all_data:
@@ -97,14 +139,56 @@ class DataFormatter:
 
         if value_col:
             value_series = pd.to_numeric(data[value_col], errors='coerce')
-            features['value_mean'] = value_series.rolling(7, min_periods=1).mean()
+            group_col = 'series_id' if 'series_id' in data.columns else (
+                'source_code' if 'source_code' in data.columns else None
+            )
+
+            # Format concatenates sources source-by-source.  A global rolling
+            # window therefore used the last six rows of one dataset as the
+            # history for the first row of the next, and a panel such as
+            # AI4Risk also crossed bank-edge boundaries.  Compute the same
+            # seven-observation features chronologically inside each natural
+            # series and restore the original row alignment.
+            working = pd.DataFrame({
+                '__value': value_series.to_numpy(),
+                '__row_position': np.arange(len(data)),
+            })
+            if group_col is None:
+                working['__series'] = '__single__'
+            else:
+                working['__series'] = data[group_col].astype('string').fillna('<NA>').to_numpy()
+            date_column = next((c for c in ('Date', 'date', 'timestamp', 'time') if c in data.columns), None)
+            if date_column is not None:
+                working['__date'] = pd.to_datetime(data[date_column], errors='coerce').to_numpy()
+                ordered = working.sort_values(
+                    ['__series', '__date', '__row_position'],
+                    kind='mergesort',
+                    na_position='last',
+                )
+            else:
+                ordered = working.sort_values(['__series', '__row_position'], kind='mergesort')
+
+            grouped = ordered.groupby('__series', sort=False, dropna=False)['__value']
+            ordered['__value_mean'] = grouped.transform(
+                lambda series: series.rolling(7, min_periods=1).mean()
+            )
+            ordered['__value_std'] = grouped.transform(
+                lambda series: series.rolling(7, min_periods=2).std()
+            )
+
+            value_mean = np.full(len(data), np.nan, dtype=float)
+            value_std = np.full(len(data), np.nan, dtype=float)
+            positions = ordered['__row_position'].to_numpy(dtype=int)
+            value_mean[positions] = ordered['__value_mean'].to_numpy(dtype=float)
+            value_std[positions] = ordered['__value_std'].to_numpy(dtype=float)
+            features['value_mean'] = value_mean
             # `min_periods=2` because dispersion is undefined for a single
             # observation, and the result is deliberately NOT filled afterwards. It
             # used to be `.fillna(0)`, which wrote "volatility is exactly zero" for
             # the first row of every series -- a fabricated number of the same kind
             # the point-in-time store exists to prevent. A missing dispersion stays
             # missing and the consumer decides what to do about it.
-            features['value_std'] = value_series.rolling(7, min_periods=2).std()
+            features['value_std'] = value_std
 
         return features
 

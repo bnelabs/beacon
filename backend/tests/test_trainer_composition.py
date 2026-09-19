@@ -218,6 +218,37 @@ class TestNormalizationStatsComeFromTheTrainSplit:
         )
         assert len(unseen_ds) == 0
 
+    def test_panel_series_do_not_share_temporal_windows(self):
+        dates = pd.date_range("2024-01-01", periods=40, freq="D")
+        frame = pd.concat(
+            [
+                pd.DataFrame({
+                    "Date": dates,
+                    "Close": np.arange(40, dtype=float),
+                    "Value": np.arange(40, dtype=float),
+                    "source_code": "PANEL",
+                    "series_id": "PANEL::A::B",
+                }),
+                pd.DataFrame({
+                    "Date": dates,
+                    "Close": 100.0 + np.arange(40, dtype=float),
+                    "Value": 100.0 + np.arange(40, dtype=float),
+                    "source_code": "PANEL",
+                    "series_id": "PANEL::B::A",
+                }),
+            ],
+            ignore_index=True,
+        )
+
+        dataset = MultiSourceDataset(frame, sequence_length=SEQUENCE_LENGTH)
+
+        # Each 40-row entity contributes 40 - window observations. A source-
+        # grouped implementation would incorrectly produce one extra window
+        # per seam and a sequence containing the end of A followed by B.
+        assert len(dataset) == 2 * (40 - SEQUENCE_LENGTH)
+        assert set(dataset.source_ids.tolist()) == {dataset.source_to_id["PANEL"]}
+        assert dataset.sources.tolist() == ["PANEL"]
+
     def test_time_series_dataset_uses_provided_stats(self):
         rng = np.random.default_rng(9)
         n = 80

@@ -38,7 +38,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 import numpy as np
 import pandas as pd
@@ -57,6 +57,19 @@ SCALE_BREAK_LOG_RATIO = np.log(10.0)
 MIN_STALE_RUN = 10
 #: Days since the newest observation beyond which a dated dataset is stale.
 TIMELINESS_MAX_DAYS = 40.0
+# A single 40-day rule is only a safe fallback.  It labels perfectly healthy
+# quarterly and annual feeds as stale, while it gives daily feeds too much
+# slack.  These are deliberately warning thresholds rather than hard rejects:
+# historical data can still be useful, but its freshness must remain visible.
+FREQUENCY_MAX_STALENESS_DAYS = {
+    "daily": 14.0,
+    "weekly": 35.0,
+    "monthly": 120.0,
+    "quarterly": 300.0,
+    "annual": 730.0,
+    "event": 120.0,
+    "irregular": 120.0,
+}
 
 
 @dataclass
@@ -70,6 +83,8 @@ class ValidationReport:
     anomalies_count: int = 0
     #: Structured anomaly findings, sixth round: one entry per (dataset, kind).
     anomalies: List[Dict[str, Any]] = field(default_factory=list)
+    #: Per-dataset freshness evidence, including the cadence-specific threshold.
+    timeliness_by_dataset: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self):
         if self.warnings is None:
@@ -118,6 +133,7 @@ def _duplicate_key_columns(df: pd.DataFrame, date_col: str) -> List[str]:
     """
     for identity in (
         ("source_bank", "target_bank"),
+        ("bank_id", "feature"),
         ("bank_id",),
         ("ticker",),
         ("Asset",),
@@ -129,13 +145,49 @@ def _duplicate_key_columns(df: pd.DataFrame, date_col: str) -> List[str]:
     return [date_col]
 
 
+def _identity_columns(df: pd.DataFrame) -> List[str]:
+    """Return the entity dimensions that define independent value series."""
+    for identity in (
+        ("source_bank", "target_bank"),
+        ("bank_id", "feature"),
+        ("bank_id",),
+        ("ticker",),
+        ("Asset",),
+        ("asset",),
+        ("instrument",),
+    ):
+        if all(column in df.columns for column in identity):
+            return list(identity)
+    return []
+
+
+def timeliness_tolerance_days(frequency: Optional[str]) -> float:
+    """Return the freshness warning threshold for a declared cadence.
+
+    ``None`` preserves the legacy 40-day fallback used by callers that do not
+    have catalogue metadata.  The orchestrator passes declared frequencies for
+    production collection jobs.
+    """
+    if frequency is None or not str(frequency).strip():
+        return TIMELINESS_MAX_DAYS
+    return FREQUENCY_MAX_STALENESS_DAYS.get(
+        str(frequency).strip().lower(),
+        TIMELINESS_MAX_DAYS,
+    )
+
+
 class DataValidator:
     def __init__(self, job_id: str):
         self.job_id = job_id
 
-    def validate(self, data: Dict[str, pd.DataFrame]) -> ValidationReport:
+    def validate(
+        self,
+        data: Dict[str, pd.DataFrame],
+        frequencies: Optional[Mapping[str, str]] = None,
+    ) -> ValidationReport:
         logger.info(f"[{self.job_id}] Validating {len(data)} datasets")
         report = ValidationReport()
+        frequencies = frequencies or {}
         # Naive UTC: provider timestamps arrive naive by convention, and
         # comparing aware against naive raises rather than informs.
         as_of = pd.Timestamp.now(tz="UTC").tz_localize(None)
@@ -184,56 +236,108 @@ class DataValidator:
                 if not observed.empty:
                     timeliness_measurable += 1
                     age_days = (as_of - observed.max()).total_seconds() / 86400.0
-                    if age_days <= TIMELINESS_MAX_DAYS:
+                    frequency = frequencies.get(code)
+                    max_staleness_days = timeliness_tolerance_days(frequency)
+                    timely = age_days <= max_staleness_days
+                    report.timeliness_by_dataset[code] = {
+                        "frequency": frequency,
+                        "age_days": float(age_days),
+                        "max_staleness_days": float(max_staleness_days),
+                        "passed": bool(timely),
+                    }
+                    if timely:
                         timeliness_pass += 1
                     else:
                         report.warnings.append(
-                            {"code": code, "warning": f"newest observation is {age_days:.0f} days old"}
+                            {
+                                "code": code,
+                                "warning": (
+                                    f"newest observation is {age_days:.0f} days old "
+                                    f"(cadence={frequency or 'unspecified'}, "
+                                    f"tolerance={max_staleness_days:.0f} days)"
+                                ),
+                            }
                         )
 
             # -- value-series checks -------------------------------------------
             if value_col:
-                values = pd.to_numeric(df[value_col], errors="coerce").to_numpy(dtype=float)
+                # Every value-series check is performed within the natural
+                # entity grain.  Running first differences over a panel's row
+                # order turns a bank-edge transition into a fake spike and a
+                # panel boundary into a fake scale break.
+                working = df.copy()
+                working["__row_position"] = np.arange(len(working))
+                if date_col:
+                    working["__parsed_date"] = stamps
+                identity = _identity_columns(working)
+                if identity:
+                    series_groups = working.groupby(identity, dropna=False, sort=False)
+                else:
+                    series_groups = [("__scalar__", working)]
 
-                # point outliers on first differences (robust)
-                diffs = np.diff(values)
-                finite = diffs[np.isfinite(diffs)]
-                if finite.size >= 8:
-                    mz = _modified_z(diffs)
-                    hits = int((np.abs(mz) > MODIFIED_Z_THRESHOLD).sum())
-                    if hits:
-                        positions = np.flatnonzero(np.abs(mz) > MODIFIED_Z_THRESHOLD)[:10]
-                        self._record(report, code, "point_outliers", hits, positions)
+                for _, series in series_groups:
+                    if date_col:
+                        series = series.sort_values(
+                            ["__parsed_date", "__row_position"],
+                            kind="mergesort",
+                        )
+                    values = pd.to_numeric(series[value_col], errors="coerce").to_numpy(dtype=float)
+                    row_positions = series["__row_position"].to_numpy(dtype=int)
 
-                # gap runs
-                missing = ~np.isfinite(values)
-                runs = self._run_lengths(missing)
-                gap_hits = int(sum(1 for length in runs if length >= MIN_GAP_RUN))
-                if gap_hits:
-                    self._record(report, code, "gap_runs", gap_hits, [])
+                    # point outliers on first differences (robust)
+                    diffs = np.diff(values)
+                    finite = diffs[np.isfinite(diffs)]
+                    if finite.size >= 8:
+                        mz = _modified_z(diffs)
+                        hit_indices = np.flatnonzero(np.abs(mz) > MODIFIED_Z_THRESHOLD)
+                        if hit_indices.size:
+                            positions = row_positions[1:][hit_indices[:10]]
+                            self._record(
+                                report,
+                                code,
+                                "point_outliers",
+                                int(hit_indices.size),
+                                positions,
+                            )
 
-                # scale breaks: ratio of consecutive rolling medians
-                observed_values = values[np.isfinite(values)]
-                if observed_values.size >= 2 * SCALE_WINDOW:
-                    medians = np.array(
-                        [
-                            np.median(observed_values[i : i + SCALE_WINDOW])
-                            for i in range(0, observed_values.size - SCALE_WINDOW + 1, SCALE_WINDOW // 2)
-                        ]
-                    )
-                    positive = np.where(np.abs(medians) > 1e-12, medians, np.nan)
-                    with np.errstate(invalid="ignore", divide="ignore"):
-                        log_ratios = np.abs(np.log(np.abs(positive[1:] / positive[:-1])))
-                    breaks = int(np.nansum(log_ratios > SCALE_BREAK_LOG_RATIO))
-                    if breaks:
-                        positions = np.flatnonzero(log_ratios > SCALE_BREAK_LOG_RATIO)[:10]
-                        self._record(report, code, "scale_break", breaks, positions)
+                    # gap runs
+                    missing = ~np.isfinite(values)
+                    runs = self._run_lengths(missing)
+                    gap_hits = int(sum(1 for length in runs if length >= MIN_GAP_RUN))
+                    if gap_hits:
+                        self._record(report, code, "gap_runs", gap_hits, [])
 
-                # stale runs of identical values
-                runs_same = self._run_lengths_same(observed_values)
-                stale = int(sum(1 for length in runs_same if length >= MIN_STALE_RUN))
-                if stale:
-                    self._record(report, code, "stale_run", stale, [])
+                    # scale breaks: ratio of consecutive rolling medians
+                    observed_values = values[np.isfinite(values)]
+                    if observed_values.size >= 2 * SCALE_WINDOW:
+                        medians = np.array(
+                            [
+                                np.median(observed_values[i : i + SCALE_WINDOW])
+                                for i in range(
+                                    0,
+                                    observed_values.size - SCALE_WINDOW + 1,
+                                    SCALE_WINDOW // 2,
+                                )
+                            ]
+                        )
+                        positive = np.where(np.abs(medians) > 1e-12, medians, np.nan)
+                        with np.errstate(invalid="ignore", divide="ignore"):
+                            log_ratios = np.abs(np.log(np.abs(positive[1:] / positive[:-1])))
+                        break_indices = np.flatnonzero(log_ratios > SCALE_BREAK_LOG_RATIO)
+                        if break_indices.size:
+                            self._record(
+                                report,
+                                code,
+                                "scale_break",
+                                int(break_indices.size),
+                                break_indices[:10],
+                            )
+
+                    # stale runs of identical values
+                    runs_same = self._run_lengths_same(observed_values)
+                    stale = int(sum(1 for length in runs_same if length >= MIN_STALE_RUN))
+                    if stale:
+                        self._record(report, code, "stale_run", stale, [])
 
         # -- roll up -----------------------------------------------------------
         total_cells = sum(len(df) * len(df.columns) for df in data.values() if not df.empty)

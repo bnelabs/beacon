@@ -77,6 +77,19 @@ class TestDuplicateTimestamps:
         kinds = {entry["kind"]: entry for entry in report.anomalies}
         assert kinds["duplicate_timestamps"]["count"] == 1
 
+    def test_panel_value_checks_do_not_cross_entity_boundaries(self):
+        dates = list(pd.date_range("2026-08-01", periods=12, freq="D"))
+        frame = pd.DataFrame({
+            "Date": dates + dates,
+            "source_bank": ["A"] * 12 + ["B"] * 12,
+            "target_bank": ["B"] * 12 + ["A"] * 12,
+            # The old row-order detector saw 11 -> 100 as a spike at the
+            # panel seam. Each natural series is smooth on its own.
+            "Value": list(np.arange(12, dtype=float)) + list(100 + np.arange(12, dtype=float)),
+        })
+        report = _validate(frame)
+        assert report.anomalies == []
+
 
 class TestFutureTimestamps:
     def test_lookahead_at_ingest_is_flagged(self):
@@ -149,3 +162,17 @@ class TestRollup:
     def test_empty_datasets_still_warn(self):
         report = DataValidator("test-job").validate({"EMPTY": pd.DataFrame()})
         assert report.warnings and report.anomalies_count == 0
+
+
+def test_timeliness_uses_declared_cadence_when_available():
+    now = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
+    dates = pd.date_range(now - pd.DateOffset(months=2), periods=3, freq="MS")
+    frame = _frame([1.0, 1.1, 1.2], dates=dates)
+
+    report = DataValidator("test-job").validate(
+        {"SERIES": frame},
+        frequencies={"SERIES": "monthly"},
+    )
+
+    assert report.timeliness_score == pytest.approx(1.0)
+    assert report.timeliness_by_dataset["SERIES"]["max_staleness_days"] == 120.0
