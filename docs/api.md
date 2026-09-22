@@ -141,19 +141,28 @@ of all of this is `docs/deployment.md` §5.
 
 ## Data-quality score
 
-`GET /api/v1/data-quality/stats` reports a composite score built by
-`backend/modules/data/analyzer.py` from three weighted factors:
+The composite quality score is owned by the data-quality gate
+(`backend/modules/data/quality_gate.py`), never by a caller: the pipeline
+hands over raw sub-scores (completeness, consistency, timeliness, accuracy)
+and the gate applies the platform weights — completeness 0.25, consistency
+0.25, timeliness 0.20, accuracy 0.30 — renormalised over the components that
+were actually measured. Accuracy is not measurable from a raw collected
+payload, so it is usually absent (`None`) rather than zero-filled. The gate
+re-derives its own structural checks, rejects an empty payload independently
+of the composite, and records the verdict as an attestation bound to a
+content-addressed snapshot of the verified rows. The hand-rolled
+`0.4*validation + 0.3*completeness + 0.3*cleaning` blend this section used to
+describe was removed from `analyzer.py` — its cleaning term rewarded fixes
+the cleaner deliberately no longer makes.
 
-```
-quality_score = 0.4 * validation_score
-              + 0.3 * completeness            # 1 - null_count / total_count
-              + 0.3 * cleaning_score          # 1 / (1 + fixed_issues / total_rows)
-```
-
-`validation_score` is 1.0 when validation found no critical errors and 0.0 when
-it found any — it is a gate, not a graded measure. The three endpoints in this
-group are `stats` (aggregate), `sources` (per-source freshness and score), and
-`trends?days=N` (daily series, default 30).
+The three endpoints in this group are `stats` (aggregate), `sources`
+(per-source freshness and score) and `trends?days=N` (daily series, default
+30). They read the gate verdicts from **both** collection writers: the
+production job path (`POST /api/v1/jobs`, per-source sync, scheduler — scores
+in `Job.result`, the source link in `Job.parameters.data_source_id`) and the
+`/api/v1/pipeline` route (`DataJob` rows). "Low quality" means below the
+gate's certification floor (`QualityPolicy.min_quality_score`, default 70).
+Completeness is reported on the gate's 0–100 scale, verbatim.
 
 Freshness buckets are fixed: **fresh** ≤7 days, **stale** 7–30 days,
 **outdated** >30 days, **never_synced** for a source with no successful fetch.
