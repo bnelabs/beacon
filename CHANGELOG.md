@@ -165,6 +165,18 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   evaluate, the v3 sequence).
 
 ### Fixed
+- **Per-item collection retries are bounded by wall time, not only by
+  attempts (pipeline-review finding F8).** `_fetch_with_retry` stopped after
+  3 attempts — but each attempt rides on the HTTP layer's own retries
+  (`ResilientSession`: up to 4 urllib3 retries with backoff, timeouts up to
+  30s each), so one catalogue item could spend ~7 minutes against a
+  struggling provider while the beat tick enqueues every five and a
+  multi-item source serialises behind it. Retries now also stop at
+  `BEACON_FETCH_RETRY_BUDGET_SECONDS` (default 120, invalid values fall
+  back with a warning): tenacity evaluates stop conditions *between*
+  attempts, so a legitimately long single fetch (ECB paging) is never cut
+  off mid-flight — it is further retries, past the budget, that stop. Two
+  tests pin the budget and the malformed-override fallback.
 - **`as_of_join`'s production status is recorded, not left to rot
   (pipeline-review finding F7).** The point-in-time module's join primitive
   is implemented, exported and covered by `tests/test_pit.py`, but no

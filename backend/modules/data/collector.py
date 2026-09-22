@@ -25,6 +25,37 @@ from .country_utils import CountryMatcher
 
 logger = logging.getLogger(__name__)
 
+#: Per-item wall-clock budget for the retry loop, in seconds. Overridable
+#: with ``BEACON_FETCH_RETRY_BUDGET_SECONDS``.
+FETCH_RETRY_BUDGET_SECONDS = 120.0
+
+
+def _fetch_retry_budget_seconds() -> float:
+    """Resolve the per-item retry budget (env override, invalid values ignored).
+
+    Attempt counts alone do not bound wall time: tenacity's three attempts
+    compound with the HTTP layer's own retries (``ResilientSession``: up to
+    four urllib3 retries with backoff, timeouts up to 30s each), so one
+    catalogue item could otherwise spend minutes against a struggling
+    provider while the beat tick enqueues every five. The budget bounds the
+    *between-attempt* window only -- tenacity evaluates stop conditions
+    after an attempt completes, so a legitimately long single fetch (ECB
+    paging, for instance) is never cut off mid-flight; it is further
+    retries, past the budget, that stop.
+    """
+    raw = os.getenv("BEACON_FETCH_RETRY_BUDGET_SECONDS")
+    if raw is None or not str(raw).strip():
+        return FETCH_RETRY_BUDGET_SECONDS
+    try:
+        return max(float(raw), 0.0)
+    except ValueError:
+        logger.warning(
+            "BEACON_FETCH_RETRY_BUDGET_SECONDS=%r is not a number; using %.0fs",
+            raw,
+            FETCH_RETRY_BUDGET_SECONDS,
+        )
+        return FETCH_RETRY_BUDGET_SECONDS
+
 
 @dataclass
 class CollectionFailure:
@@ -212,12 +243,17 @@ class DataCollector:
     # retried with bounded exponential backoff; every other typed failure
     # (missing dataset, schema violation, restricted source) is a decision,
     # not a blip, and is raised on the first attempt. tenacity is a declared
-    # dependency that nothing used until the sixth round.
+    # dependency that nothing used until the sixth round. The retry loop is
+    # bounded twice: by attempts (3) and by wall clock
+    # (_fetch_retry_budget_seconds), because the HTTP layer beneath retries
+    # too and attempt counts alone do not bound the time one item can spend
+    # against a struggling provider (pipeline-review finding F8).
     def _fetch_with_retry(self, item, start_date, end_date):
         from tenacity import (
             retry,
             retry_if_exception_type,
             stop_after_attempt,
+            stop_after_delay,
             wait_exponential_jitter,
         )
 
@@ -225,7 +261,7 @@ class DataCollector:
 
         @retry(
             retry=retry_if_exception_type(DataSourceUnavailableError),
-            stop=stop_after_attempt(3),
+            stop=stop_after_attempt(3) | stop_after_delay(_fetch_retry_budget_seconds()),
             wait=wait_exponential_jitter(initial=1, max=8),
             reraise=True,
         )
