@@ -165,6 +165,19 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   evaluate, the v3 sequence).
 
 ### Fixed
+- **`POST /api/v1/pipeline` runs on the worker pool instead of inside the
+  API process (pipeline-review finding F3).** The route executed the whole
+  DATA → ENGINE → RESULTS run as a FastAPI BackgroundTask: no queue
+  visibility, no worker supervision, the entire run lost silently on an API
+  restart, and torch stages competing with request handling — while
+  `scheduling.py` could claim "exactly one collection path" only because
+  this second path was invisible to it. The dispatch is now the
+  `run_pipeline` Celery task (a thin transport wrapper; the stage logic
+  stays in `_execute_pipeline`, which `test_pipeline_integration` exercises
+  directly), and a dispatch that cannot reach the broker marks the
+  PipelineJob FAILED with the reason instead of leaving it pending forever —
+  a queued run that never queued must not read as health.
+  `backend/tests/test_pipeline_route_dispatch.py` pins both behaviours.
 - **The Data Quality page read a table the production path never writes
   (pipeline-review finding F2), and two of its own numbers were vacuous.**
   All three `/api/v1/data-quality/*` endpoints took quality scores from

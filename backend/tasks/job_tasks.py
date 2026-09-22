@@ -1642,3 +1642,39 @@ def run_backtest(self, job_id: int, parameters: dict):
         raise
     finally:
         db.close()
+
+
+@celery_app.task(name="run_pipeline")
+def run_pipeline(
+    pipeline_job_id: int,
+    catalogue_items: list,
+    start_date: str,
+    end_date: str,
+    config: dict,
+):
+    """Run the full DATA → ENGINE → RESULTS pipeline on a worker.
+
+    The route used to execute ``_execute_pipeline`` as a FastAPI
+    BackgroundTask inside the API process (pipeline-review finding F3): no
+    queue visibility, no worker supervision, the whole run lost silently on
+    an API restart, and the ENGINE stage (torch) competing with request
+    handling. The PipelineJob/DataJob/EngineJob/ResultJob rows remain the
+    status contract the route reports; ``_execute_pipeline`` keeps its own
+    failure handling (it marks the pipeline FAILED), so a worker crash
+    between dispatch and completion is visible as a pipeline stuck in
+    RUNNING -- the same contract every other Celery task here has.
+
+    This task is intentionally a thin transport wrapper: the stage logic
+    stays in one place (``api/routes/pipeline.py::_execute_pipeline``),
+    which ``test_pipeline_integration`` exercises directly.
+    """
+    from backend.api.routes.pipeline import _execute_pipeline
+
+    logger.info("Starting pipeline execution for pipeline job %s", pipeline_job_id)
+    _execute_pipeline(
+        pipeline_job_id,
+        catalogue_items or [],
+        start_date,
+        end_date,
+        config or {},
+    )
