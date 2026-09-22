@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict
@@ -67,7 +67,6 @@ class PipelineStatusResponse(BaseModel):
 @router.post("/", response_model=PipelineStatusResponse, status_code=status.HTTP_201_CREATED)
 async def start_pipeline(
     request: PipelineStartRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """
@@ -78,6 +77,8 @@ async def start_pipeline(
     2. Processes it through our AI models
     3. Generates comprehensive reports and recommendations
 
+    The run executes on the Celery worker pool -- the same pool every other
+    job uses -- so it has queue visibility and survives an API restart.
     You can monitor progress in real-time!
     """
     try:
@@ -111,15 +112,29 @@ async def start_pipeline(
         db.add(data_job)
         db.commit()
 
-        # Start pipeline in background
-        background_tasks.add_task(
-            _execute_pipeline,
-            pipeline_job.id,
-            request.catalogue_items,
-            request.start_date,
-            request.end_date,
-            request.config
-        )
+        # Dispatch the run to the Celery worker pool. This used to execute
+        # as a FastAPI BackgroundTask inside the API process: no queue
+        # visibility, no worker supervision, the whole run lost silently on
+        # an API restart, and the ENGINE stage (torch training/inference)
+        # competing with request handling. The PipelineJob row remains the
+        # status contract; _execute_pipeline's own failure handling marks it
+        # failed, and a dispatch that cannot reach the broker marks it failed
+        # here rather than leaving it pending forever.
+        from backend.tasks.job_tasks import run_pipeline
+
+        try:
+            run_pipeline.delay(
+                pipeline_job.id,
+                request.catalogue_items,
+                request.start_date,
+                request.end_date,
+                request.config,
+            )
+        except Exception as dispatch_exc:
+            pipeline_job.status = JobStatus.FAILED
+            pipeline_job.error_message = f"dispatch failed: {dispatch_exc}"
+            db.commit()
+            raise
 
         return PipelineStatusResponse(
             job_id=job_id,
