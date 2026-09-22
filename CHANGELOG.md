@@ -165,6 +165,34 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   evaluate, the v3 sequence).
 
 ### Fixed
+- **The Data Quality page read a table the production path never writes
+  (pipeline-review finding F2), and two of its own numbers were vacuous.**
+  All three `/api/v1/data-quality/*` endpoints took quality scores from
+  `DataJob ⋈ PipelineJob` — rows only `POST /api/v1/pipeline` creates, and a
+  route the frontend never calls. Every real collection (jobs API, manual
+  sync, scheduler) stores the gate's verdict in `Job.result` and its source
+  link in `Job.parameters.data_source_id`, so the page showed zeros on any
+  deployment collecting through the documented path while collections
+  succeeded. The endpoints now read **both** writers through one evidence
+  helper (JSON parsed Python-side for SQLite/PostgreSQL parity): `stats`
+  aggregates both, `sources` links production jobs to their source via the
+  parameter the scheduler has always written (its "jobs are not currently
+  linked" comment was stale), and `trends` buckets both by day and counts
+  failed collections from the production path too. Two adjacent honesty
+  defects fixed with it: the `low_quality` threshold was 0.5 against 0–100
+  scores — nothing was ever counted, ever (failure class "infrastructure
+  lie"); it is now the gate's certification floor, read from
+  `QualityPolicy.min_quality_score` instead of restated. And
+  `avg_completeness` was multiplied by 100 although both writers store the
+  gate's 0–100 percentage and the frontend renders the value verbatim — a
+  97% panel displayed as 9700%. Freshness maths now normalises SQLite's
+  naive timestamps (`_ensure_utc`, the precedent `pipeline.py` and
+  `scheduling` already set) instead of raising `TypeError` off PostgreSQL.
+  `docs/api.md`'s "Data-quality score" section described the removed
+  `0.4/0.3/0.3` analyzer blend (finding F6, class "mislead"); it now
+  documents the gate-owned composite, its weights and renormalisation, and
+  what the endpoints read. `backend/tests/test_data_quality_routes.py` pins
+  the contract (4 tests).
 - **`indicator_observations` has a production writer at last — the README
   claimed one since 2026-09-17 and none existed (pipeline-review finding
   F1, class "mislead").** `record_observations` and its vintage-log append
