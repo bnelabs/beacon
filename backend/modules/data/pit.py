@@ -53,6 +53,20 @@ the more recently issued number.
 
 Timestamps are normalised to timezone-naive UTC on construction so that a mix of
 aware and naive inputs cannot silently fail to compare.
+
+Production status (recorded so the gap is a decision, not a silence)
+--------------------------------------------------------------------
+
+``PITStore`` and ``Observation`` are wired: the bilateral-exposure store
+(``services/bilateral_exposure_store``) persists exposure vintages through them
+and serves ``load_as_of`` queries. :func:`as_of_join` currently has **no
+production caller** -- it is implemented, exported and covered by
+``tests/test_pit.py``, pre-positioned for the event-metrics path (attaching
+point-in-time features to labelled stress events in ``run_backtest``). The
+reachability census walks modules, not functions, so this note is where the
+function-level status lives; wiring it into a consumer, or deleting it, is a
+``decide`` disposition for the next census pass -- not something to discover
+by accident.
 """
 
 from __future__ import annotations

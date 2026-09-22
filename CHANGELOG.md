@@ -165,6 +165,17 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   evaluate, the v3 sequence).
 
 ### Fixed
+- **`as_of_join`'s production status is recorded, not left to rot
+  (pipeline-review finding F7).** The point-in-time module's join primitive
+  is implemented, exported and covered by `tests/test_pit.py`, but no
+  production path calls it: `PITStore`/`Observation` are wired through the
+  bilateral-exposure store, while `as_of_join` waits on the event-metrics
+  feature attach. The reachability census walks modules, not functions, so
+  the module-level "wired" verdict hid the function-level gap — the exact
+  silence the census exists to prevent, one granularity down. The module
+  docstring now carries the status and a `decide` disposition (wire it into
+  the backtest feature path, or delete it), and the census entry for
+  `backend.modules.data.pit` names it.
 - **The quality gate's KPSS scan now respects panel grain (pipeline-review
   finding F5).** #100 and #101 fixed entity grain in the validator and the
   formatter, but `_stationarity_checks` still ran KPSS over the raw value
