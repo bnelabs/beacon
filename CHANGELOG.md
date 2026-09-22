@@ -163,6 +163,29 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   `docs/prereg/early_warning_v4.md` + `configs/event_eval_v4.yaml`, to be
   tagged `prereg-early-warning-v4` before the single run (tag → fetch →
   evaluate, the v3 sequence).
+- **Plugin configuration is served by the registry, and a stored secret is now
+  masked on the way out** (#97, recorded in this block by the L-41 backfill).
+  `GET /api/v1/data-sources/plugins` returns each registered plugin's
+  `config_schema`, `registration_required` and `registration_url` from
+  `list_plugins()` (`backend/plugins/base.py`), so the Configure dialog is built
+  from the metadata the runtime actually uses instead of a hand-copied
+  TypeScript guess. That made stored configuration returnable, so
+  `CONFIG_SECRET_MASK = "********"` and `_redact_config_secrets` redact secret
+  fields in the data-source list and detail responses — the stored value stays
+  available to probes and collectors, only the response is masked — and the
+  registry note was rewritten to say so, because keys had been environment-only
+  precisely so that no configuration endpoint could return them. SEC stopped
+  rejecting a source merely because `SEC_API_KEY` is empty
+  (`api_key_required: False`) and now sends an identifying `User-Agent`
+  (`BEACON/4.0 …`, configurable) with a configurable timeout, which is what the
+  provider's fair-access terms ask for.
+- **Explicit partial collection runs** (#99, recorded in this block by the L-41
+  backfill). `Job.parameters.fail_on_any_error` — strict by default, and read as
+  `0/false/no/off` when a JSON payload sends a string — lets a collection record
+  provider failures and continue with the usable panel instead of failing the
+  whole run on one bad item. The mode and the `collection_report` are written
+  into the job result, so a partial panel is identifiable as partial after the
+  fact rather than being a quietly smaller success.
 
 ### Fixed
 - **`/api/v1/analytics/*` still read the table production never writes — finding
@@ -399,6 +422,45 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   nightly. One-line regeneration; the release checklist now carries the step,
   and the failure is recorded as ledger L-25 with the durable tooling guard
   deliberately deferred until the class recurs.
+- **ECB paging stopped being an unbounded request** (#98, recorded in this block
+  by the L-41 backfill). The daily exchange-rate series was fetched as one
+  open-ended call, which is the request that fails: it is now fetched in bounded
+  observation pages (`EXCHANGE_RATE_PAGE_SIZE = 1000`, `page_delay = 0.5`,
+  explicit `EXCHANGE_RATE_TIMEOUT = 10` / `INDICATOR_TIMEOUT = 30`) through
+  `retry_call`, with each page anchored to the last returned observation so
+  pages are disjoint and concatenate without repeating a row. Migration
+  `catalogue_provider_fixes_001` repairs the FRED/SEC/ECB catalogue rows whose
+  declared coverage the providers do not actually return. `test_ecb_plugin.py`,
+  `test_keyless_feeds.py`, `test_data_pipeline_stages.py`.
+- **Panel and filing grain, respected by the integrity checks at last** (#100,
+  recorded in this block by the L-41 backfill). Duplicate detection keyed on the
+  timestamp column alone, so an edge table — AI4Risk publishes one row per
+  bank-to-bank edge per quarter — read as a table full of duplicates, and
+  stationarity was demanded of declared event series whose value column is a
+  constant occurrence marker. `_duplicate_key_columns` now takes the frame's
+  natural observation key (`(date, source_bank, target_bank)`, `bank_id`,
+  `ticker`, `Asset`, `instrument`, else the date alone), and a constant-marker
+  event series reports "stationarity not applicable: … information is carried by
+  its event dates" as a warning-severity passing check, with
+  `event_series_codes` threaded from the orchestrator through the gate.
+  `test_validator_anomalies.py`, `test_stationarity.py`.
+- **Declared cadence drives freshness, and five catalogue rows were lying about
+  theirs** (#101, recorded in this block by the L-41 backfill). A daily label on
+  monthly or event observations makes staleness scoring misleading, so
+  `FREQUENCY_MAX_STALENESS_DAYS` and `timeliness_tolerance_days()` give each
+  cadence its own threshold (event and irregular at 120 days) and every
+  timeliness finding names the cadence it was judged against. Migration
+  `data_frequency_contract_001` re-labels five codes to what their providers
+  return — `IR_FED_FUNDS` daily→monthly, `BANK_US_RESERVES` and
+  `BANK_US_COMMERCIAL_LOANS` weekly→monthly, `IR_EURIBOR_1M` and
+  `IR_ECB_DEPOSIT` daily→event — collected history left intact. The validator's
+  difference and gap-run checks group by entity grain (`_identity_columns`)
+  instead of concatenating a panel, gap runs surface as `gap_runs` findings, and
+  the multi-scale trainer keeps entity histories separate so a window cannot jump
+  from one entity to another, skipping a series with no numeric values or too few
+  rows for the requested window and logging the reason.
+  `test_data_pipeline_stages.py`, `test_trainer_composition.py`,
+  `test_validator_anomalies.py`.
 
 ## [4.0.0] - 2026-09-17
 
