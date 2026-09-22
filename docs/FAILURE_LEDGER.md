@@ -231,6 +231,138 @@ orchestrator it never called; `bis_plugin` carried an unused `base_url`;
 `bank_analyzer` claimed a vectorisation it did not do. Mitigation: removed /
 docstring corrected. Status: **FIXED** — CHANGELOG (4.0.0).
 
+**L-28. `indicator_observations` had a documented writer and no production
+one.** The README's storage bullet named the hypertable, its continuous
+aggregate and `observations_as_of` re-derivability, and `record_observations`
+with its vintage log existed behind store tests — but every real collection
+wrote parquet plus job-result JSON, so the table stayed empty in production
+(class "mislead"). Detected by: the review tracing each documented writer to a
+call site. Mitigation: `persist_observations` (`tasks/job_tasks.py`) runs in
+`run_data_collection` after the gate certifies the package, upserting scalar
+indicator rows with plugin type, catalogue code, region, the gate's quality
+score and the ingest job id, appending a vintage per write; panel and asset
+rows are skipped and counted rather than silently collapsed on the (time,
+source, indicator, region) key, invalid rows and unmapped codes are skipped and
+counted, never zero-filled; a storage failure degrades to a warning like the
+other writers, and the counts travel in the job result. The README now names
+the writer. Status: **FIXED** — CHANGELOG (Unreleased), PR #102,
+`backend/tests/test_observation_writer.py`.
+
+**L-29. The Data Quality page aggregated a table the documented production
+path never writes.** All three `/api/v1/data-quality/*` endpoints took their
+scores from `DataJob ⋈ PipelineJob` — rows only `POST /api/v1/pipeline`
+creates, on a route the frontend never calls — while every real collection
+(jobs API, manual sync, scheduler) stores its verdict in `Job.result` and its
+source in `Job.parameters.data_source_id`: the page showed zeros on exactly the
+deployments the README documents. Two numbers in the same endpoints were
+vacuous by the same mechanism — `low_quality` counted against a 0.5 threshold
+on 0–100 scores, so nothing was ever counted, ever (class "infrastructure lie",
+cf. L-18), and `avg_completeness` was multiplied by 100 although both writers
+already store the gate's percentage, so a 97% panel read 9700%. `docs/api.md`
+described a removed `0.4/0.3/0.3` analyzer blend (class "mislead", cf. L-13).
+Detected by: the same review, one endpoint at a time. Mitigation: the endpoints
+read both writers through one shared `quality_evidence` helper (JSON parsed
+Python-side for SQLite/PostgreSQL parity), the threshold is read from
+`QualityPolicy.min_quality_score` instead of restated, freshness maths
+normalises SQLite's naive timestamps via `_ensure_utc`, and the API doc
+describes the gate-owned composite. Status: **FIXED** — CHANGELOG (Unreleased),
+PR #103, `backend/tests/test_data_quality_routes.py`.
+
+**L-30. `POST /api/v1/pipeline` ran the whole run inside the API process.**
+DATA → ENGINE → RESULTS executed as a FastAPI BackgroundTask: no queue
+visibility, no worker supervision, the entire run lost silently on an API
+restart, torch stages competing with request handling — and `scheduling.py`
+could claim "exactly one collection path" only because this second path was
+invisible to it. Mitigation: the route dispatches the `run_pipeline` Celery
+task through a thin transport wrapper, stage logic kept in `_execute_pipeline`
+(which `test_pipeline_integration` exercises directly); a dispatch that cannot
+reach the broker marks the PipelineJob FAILED with the reason instead of
+leaving it pending forever — a queued run that never queued must not read as
+health. Status: **FIXED** — CHANGELOG (Unreleased), PR #104,
+`backend/tests/test_pipeline_route_dispatch.py`.
+
+**L-31. The validator's integrity findings were advisory: the enforcement
+branch was dead code.** `ValidationReport.critical_errors` was declared and
+never incremented, so the orchestrator's "filter out datasets that failed
+critical validation" branch was unreachable, and its filter (`not v.empty`)
+dropped frames the collector already refuses rather than the offenders.
+Duplicate timestamps (ambiguous which value is right) and future timestamps
+(look-ahead at ingest) are integrity breaches by the validator's own contract,
+and they reached the engine unfiltered. Mitigation: the report names the
+offenders (`critical_datasets`, per-dataset `errors`), the orchestrator excludes
+exactly those, alerts the operator through the data-quality notification sink,
+and fails the run only when nothing remains — a reduced panel with an alert,
+never a silent one. Statistical findings (outliers, scale breaks, stale runs)
+stay warnings by design: they are evidence about a series, not ambiguous rows.
+Status: **FIXED** — CHANGELOG (Unreleased), PR #105,
+`backend/tests/test_validator_anomalies.py`.
+
+**L-32. The quality gate's stationarity scan tested an interleaved mixture
+instead of the panel grain.** After #100 and #101 put entity grain into the
+validator and the formatter, `_stationarity_checks` still ran KPSS over the raw
+value column: for a panel frame — interbank edge tables, per-bank features —
+that concatenates different entities into one series, the verdict is
+statistically meaningless. Harmless while stationarity is report-only; blocking
+on legitimate data the moment a deployment sets `require_stationarity=True`.
+Mitigation: the scan groups by the *same* identity registry the validator and
+formatter use (extracted to `validator.identity_columns`; the formatter's
+duplicate copy delegates), date-orders values within each entity, and assesses
+up to `KPSS_PANEL_SERIES_CAP = 25` entity series — a deterministic equispaced
+sample of the sorted keys when a panel is wider — with the check detail naming
+what it actually saw ("assessed 25 of 4,548 entity series…") and the offending
+edges. Per-entity degenerate series are counted, not failed; scalar frames
+report exactly as before. Status: **FIXED** — CHANGELOG (Unreleased), PR #106,
+`backend/tests/test_stationarity.py`.
+
+**L-33. Per-item collection retries were bounded by attempts while the cost
+was wall time.** `_fetch_with_retry` stopped after 3 attempts, but each attempt
+rides `ResilientSession`'s own retries (up to 4 urllib3 retries with backoff,
+timeouts up to 30 s each), so one catalogue item could spend ~7 minutes against
+a struggling provider while the beat tick enqueues every five, and a
+multi-item source serialises behind it. Mitigation: retries also stop at
+`BEACON_FETCH_RETRY_BUDGET_SECONDS` (default 120; an invalid override falls
+back with a warning). Tenacity evaluates stop conditions *between* attempts, so
+a legitimately long single fetch — ECB paging — is never cut off mid-flight; it
+is further retries past the budget that stop. Status: **FIXED** — CHANGELOG
+(Unreleased), PR #108, `backend/tests/test_data_pipeline_stages.py`.
+
+**L-34. A cache-served "success" cleared the backoff of a feed that was
+down.** The HTTP layer's stale-on-outage fallback is a sound availability
+trade, but it made a collection in which the provider was unreachable
+end-to-end indistinguishable, in telemetry, from a fresh fetch:
+`record_sync_success` cleared the failure streak — which *is* the scheduler's
+backoff — and stamped the source healthy while every row came from yesterday's
+cache. Mitigation: the fallback is witnessable at three levels —
+`ResilientSession.stale_fallback_hits` counts serves and the response carries
+`X-Beacon-Stale-Fallback: 1`; the collector reads the plugin's session after
+each fetch and records the item in `CollectionReport.degraded`, so it is still
+collected but flagged, and the flag travels in the job result;
+`record_sync_success(..., degraded=True)` stamps duration, rows and
+last-successful while keeping the failure streak and leaving a note beside the
+source. The next genuinely fresh success clears both. Status: **FIXED** —
+CHANGELOG (Unreleased), PR #109, `test_plugin_http_client.py`,
+`test_data_pipeline_stages.py`, `test_sync_scheduler.py`.
+
+**L-35. `/api/v1/analytics/*` read the same table production never writes, in
+three places — L-29's twin, one PR and one page later.** #103 moved the
+data-quality endpoints onto both writers and left the analytics routes on
+`DataJob ⋈ PipelineJob`: the overview card, the `quality` and `completeness`
+trend series, and the `quality_degradation` anomaly detector. On every
+deployment the README documents the "Data Quality Metrics" card reported 0 while
+collections succeeded and their gate verdicts sat unread in `Job.result`, and a
+90 → 40 slide could not be reported because the detector had nothing to compare
+— a guard that cannot fire is worse than no guard. No test requested
+`/api/v1/analytics/*` before this, and `test_frontend_contract.py` waives the
+analytics and data-quality shapes as untyped, which is how the gap survived
+every contract check. Mitigation: all three consumers read
+`data_quality.quality_evidence`, renamed public for exactly this reason — one
+evidence list, three consumers, #106's precedent — and
+`backend/tests/test_quality_unit_contract.py` seeds job-path collections and
+asserts the card, both series, and the anomaly firing; verified to fail three
+tests against the pre-fix readers. Status: **FIXED** — CHANGELOG (Unreleased),
+PR #111 (`36a85c4`, merged `fe70ddd`); dispatched deep runs green at the branch
+commit (backend-tests `35739396990`, frontend-e2e `35739400886`).
+
 ## D. Test and CI infrastructure that lied
 
 **L-16. The deep backend suite could not start at all.** The sharded rewrite
@@ -288,6 +420,115 @@ guarded by `test_api_docs_current.py`. Historic `task snapshot <uuid>` commits
 remain in published history (not rewritten); the gates prevent the class going
 forward. Status: **FIXED** (contained) — CHANGELOG (4.0.0).
 
+**L-36. A test module deleted parents without their children and reddened
+`main` two modules away.** The deep run on `main` at `e78f6ba` (2026-09-22)
+failed `test_sync_scheduler.py::test_enqueue_creates_the_same_job_a_human_does`
+with `assert [76, 87] == [87]` — 1 failed / 2124 passed — while all eight
+pipeline merges #102–#109 had passed every pre-merge gate and every targeted
+module run. Cause: the new `test_data_quality_routes.py` (#103) clears the
+writers its endpoints aggregate, correctly, because those endpoints aggregate
+globally — but it deleted `DataSource` rows an earlier module had seeded
+*without* the rows pointing at them, and SQLite hands freed parent ids to the
+next module's INSERT. The scheduler test's fresh source then selected catalogue
+items it never created, and failed as if the scheduler had chosen the wrong
+series. The same fixture deleted `PipelineJob` while leaving `EngineJob` and
+`ResultJob` behind: the identical defect, two lines apart. Mitigation: both
+wipes clear children before parents and every child of a parent they take
+(`DataCatalogueItem`, `Asset`, `EngineJob`, `ResultJob`); `test_sync_scheduler`
+states the precondition its id carries, so a future leak names itself instead of
+reading as a product bug; `conftest.py` now enforces the cleanup convention it
+already documents, sweeping every registered FK in `Base.metadata` at the end of
+each run and failing the suite with the offending table pair named. Reproduced
+locally as the exact CI triple (`test_api_smoke` + `test_data_quality_routes` +
+`test_sync_scheduler`, 3.5 s): red before the fix, green after — the record of
+why targeted runs cannot see this class at all, and why "targeted pytest: N
+passed" on a pipeline PR proves less than it appears to. Product code was left
+alone deliberately: hardening `scheduling.collection_parameters` would have
+masked the leak. Status: **FIXED** — CHANGELOG (Unreleased), PR #110
+(`9453f6b`, merged `41e5a96`); red run `35721165875` at `e78f6ba`, green
+dispatch `35726693642`.
+
+**L-37. `CONTRIBUTING.md` promised a safety net the workflows do not
+implement.** It said the deep suites run on merges to `main`. `backend-tests.yml`,
+`frontend-e2e.yml` and `bundle-budget.yml` trigger on `schedule` and
+`workflow_dispatch` only, so eight pipeline merges landed on `main` under nothing
+but the sub-minute gates — and a reviewer who believed that sentence had no
+reason to dispatch the deep run that found L-36. Detected by: L-36's red run
+read against the trigger headers in `.github/workflows/`. Mitigation: the text
+now states what the workflows do (nightly, on demand) and the rule the two-tier
+design actually requires — a pipeline-, model-, migration- or
+API-surface-touching change is proven *before* it merges, by
+`gh workflow run backend-tests.yml --ref <branch>` or by the local full suite —
+with "don't merge a vacuous green" stated next to the fact that a targeted run
+cannot see cross-module state leaks. Wiring Tier 2 into merge is a CI-budget
+decision, not a documentation fix, and the gap itself remains by design.
+Status: **FIXED** (text) — CHANGELOG (Unreleased), PR #110.
+
+**L-38. The reachability census walks modules, not functions, so a function
+rotted under a "wired" verdict.** `as_of_join` is implemented, exported and
+covered by `tests/test_pit.py`, but no production path calls it:
+`PITStore`/`Observation` are wired through the bilateral-exposure store
+(`load_as_of`), while the join waits on the event-metrics feature attach. The
+census's module-level verdict for `backend.modules.data.pit` hid the
+function-level gap — the exact silence the census exists to prevent, one
+granularity down (same class as L-14: infrastructure a document implies exists).
+Mitigation: the module docstring carries the status and an explicit `decide`
+disposition — wire it into the backtest feature path, or delete it — and the
+census entry for `backend.modules.data.pit` names the gap and the disposition,
+so the next pass inherits a decision to make instead of an ambiguity to
+rediscover. Status: **FIXED** (the blindness) — CHANGELOG (Unreleased), PR #107,
+`backend/tests/test_reachability.py`; the disposition itself is **OPEN** as an
+owner decision.
+
+**L-39. The quality unit was declared nowhere, and the only tests that could
+have seen it asserted labels, never a number.** The gate works in percentages —
+`QualityPolicy.min_quality_score = 70.0`, `min_completeness = 80.0`,
+`completeness = 100 * (1 - missing_ratio)` — `Job.result` stores those numbers
+and every endpoint returns them verbatim, while three frontend readers treated
+them as 0–1 fractions: `DataQuality.tsx` tested its bands against 0.7/0.5 and
+multiplied a second time (a real 85.6 rendered as `8560.0%`, coloured
+"excellent"), `Analytics.tsx` did the same to both scores, and `Jobs.tsx`
+guessed the unit per value (`numeric > 1 ? numeric : numeric * 100`), which made
+0.9 and 92 both print 90% and made the disagreement unprovable. The e2e mocks
+carried both scales at once — `avg_quality_score: 0.76` beside
+`avg_completeness: 92` in one `dataQualityStats` object — and `pages.spec.js`
+asserted headings and labels but no number, so a Tier-2 run was green because it
+measured nothing (same class as L-21 and L-18). Mitigation: mocks carry
+gate-scale values, the readers render them verbatim against the policy floors,
+`types/api.ts` and `docs/api.md` state the unit, and the specs assert
+`76.0%`/`92.0%`/`88.0%`/`82.0%`/`90.0%` plus "no percentage with a four-digit
+integer part anywhere on either page" — 7 Playwright tests pass with the fix, 2
+fail with the old readers restored; `test_quality_unit_contract.py` pins the
+scale at the boundary and both writers at each analytics reader. Recorded rather
+than silently reinterpreted: the only alert rule this repository's suite
+evaluates compares `quality_score` against `0.8`, so a data-quality floor
+written that way can never breach a gate-scale score; the suite pins both
+dispositions (`lt 0.8` reports "ok" on a 42.0 dataset, `lt 70` triggers on the
+same data). Re-basing any operator-written rule is an owner decision, not a
+migration in disguise. Status: **FIXED** — CHANGELOG (Unreleased), PR #111
+(merged `fe70ddd`); the `0.8` consequence is **OPEN** (owner action) regardless
+of the merge.
+
+**L-40. The frontend suite is deterministically red locally and green in CI on
+the same commit.** Three tests in `frontend/tests/results.spec.js` — "predictive
+validity report card on Results", "volatility baselines card on Results", "a
+refused prediction renders as absence, never as a number" — fail on a pristine
+local `main` with React's "Maximum update depth exceeded" at the Results page,
+while the `frontend-e2e` nightly on the same SHA passed (run `35706057051`,
+`9169be29`, job "Build and Playwright e2e (Node 24)"). Infrastructure that lied
+in both directions: a local red that blocks honest local verification, and a
+nightly green that has never measured this state. Re-checked on `fe70ddd`: the
+local tree still fails those three, the dispatched `frontend-e2e` on that SHA
+passed all 15 tests (run `35744391049`). Eliminated, each verified
+against the working tree: dependency drift (installed `@playwright/test` 1.56.1,
+`react` 18.3.1, `vite` 7.1.12 match `frontend/package-lock.json` exactly), stale
+Vite dep cache (cleared, identical failures), a leftover dev server on port 8173
+(none), and this change's own edits (a control run on a stashed tree fails
+identically). The remaining known difference is Node 22 locally against Node 24
+in CI, where `frontend/package.json` declares `engines.node >= 24` — asserted,
+not proven. Status: **OPEN** — `frontend/tests/results.spec.js`, runs
+`35706057051` (`9169be29`) and `35744391049` (`fe70ddd`).
+
 ## E. Release and process hygiene
 
 **L-23. The v3.3.0 release was stranded: cut, but never tagged.** The release
@@ -318,6 +559,23 @@ checklist now carries "regenerate `docs/api-endpoints.md` immediately after
 generated inventory disagrees with `VERSION`) is recorded as the durable fix
 if this class recurs. Status: **FIXED** (tooling guard: OPEN, deliberately
 deferred until a second occurrence justifies touching the release script).
+
+**L-41. Five merges landed after v4.0.0 with no changelog entry.** #97 (plugin
+configuration and provider hardening), #98 (ECB/FRED/SEC collection hardening,
+with a catalogue migration), #99 (explicit partial collection runs), #100 (panel
+and filing grains) and #101 (frequency and series boundaries) all touch
+`backend/`, and none of them touched `CHANGELOG.md`: `git log v4.0.0..HEAD --
+CHANGELOG.md` begins with #102's commit. The consequence is not cosmetic.
+`## [Unreleased]` is the pointer this ledger and the next release note read, so
+the two grain fixes appeared only as background inside L-32, and a release cut
+from this block would have omitted them — and no gate enforces "land work under
+`## [Unreleased]`", so nothing would have noticed a sixth. Mitigation: the five
+entries were written back into `## [Unreleased]` from their merge commits and
+diffs rather than from memory, and every entry in this batch carries its PR
+number from `git log`/`gh pr list` rather than from the changelog. The durable
+fix is the same one L-25 deferred — a release-time check that the changelog and
+the merge history agree — still unowned. Status: **FIXED** (backfill) —
+CHANGELOG (Unreleased); the gate for this class remains **OPEN**.
 
 ---
 
