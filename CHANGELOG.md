@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-09-22
+
 ### Added
 - **The v5 early-warning run executed — family verdict NO (2 of 11), and the
   line remains parked as its own protocol declared.** One clean run under tag
