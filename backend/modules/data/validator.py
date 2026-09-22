@@ -30,7 +30,12 @@ count and a sample of offending positions:
   stopped updating while pretending to publish.
 
 Nothing here imputes, repairs or deletes: the validator observes and reports.
-Cleaning and gating decisions live elsewhere and consume this report.
+Cleaning and gating decisions live elsewhere and consume this report. The one
+enforcement contract it feeds: duplicate and future timestamps are integrity
+breaches rather than noise, so the datasets carrying them are named in
+``critical_datasets`` (and ``critical_errors`` counts them) -- the orchestrator
+excludes exactly those datasets from the run and alerts, instead of certifying
+rows whose value or publication time is ambiguous.
 """
 
 from __future__ import annotations
@@ -74,6 +79,10 @@ FREQUENCY_MAX_STALENESS_DAYS = {
 
 @dataclass
 class ValidationReport:
+    #: Number of datasets carrying an integrity breach (duplicate or future
+    #: timestamps). The orchestrator excludes exactly these datasets from the
+    #: run -- the validator observes and reports, and this is the one finding
+    #: class its contract calls a breach rather than noise.
     critical_errors: int = 0
     warnings: list = None
     errors: list = None
@@ -85,12 +94,22 @@ class ValidationReport:
     anomalies: List[Dict[str, Any]] = field(default_factory=list)
     #: Per-dataset freshness evidence, including the cadence-specific threshold.
     timeliness_by_dataset: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    #: Codes of the datasets behind ``critical_errors``, so the orchestrator
+    #: excludes by identity instead of guessing from a count.
+    critical_datasets: List[str] = field(default_factory=list)
 
     def __post_init__(self):
         if self.warnings is None:
             self.warnings = []
         if self.errors is None:
             self.errors = []
+
+
+#: The finding kinds that are integrity breaches rather than statistical
+#: noise: a repeated observation time is ambiguous (which value is right?),
+#: and a timestamp after the job's as-of is look-ahead at ingest. Both are
+#: per-dataset critical; the other kinds are warnings by design.
+INTEGRITY_FINDING_KINDS = frozenset({"duplicate_timestamps", "future_timestamps"})
 
 
 def _modified_z(values: np.ndarray) -> np.ndarray:
@@ -359,6 +378,37 @@ class DataValidator:
             )
 
         report.anomalies_count = sum(entry["count"] for entry in report.anomalies)
+
+        # -- integrity breaches are the one critical class ----------------------
+        # Duplicate and future timestamps are breaches, not noise: a repeated
+        # observation time is ambiguous (which value is right?) and a timestamp
+        # after the job's as-of is look-ahead at ingest. The datasets carrying
+        # them are named here so the orchestrator excludes by identity -- the
+        # report itself still modifies nothing.
+        breached_codes: List[str] = []
+        for entry in report.anomalies:
+            if entry["kind"] in INTEGRITY_FINDING_KINDS and entry["code"] not in breached_codes:
+                breached_codes.append(entry["code"])
+        for code in breached_codes:
+            kinds = sorted(
+                {
+                    entry["kind"]
+                    for entry in report.anomalies
+                    if entry["code"] == code
+                    and entry["kind"] in INTEGRITY_FINDING_KINDS
+                }
+            )
+            report.critical_datasets.append(code)
+            report.errors.append(
+                {
+                    "code": code,
+                    "error": (
+                        f"integrity breach: {', '.join(kinds)}; dataset excluded "
+                        "from this run's certification"
+                    ),
+                }
+            )
+        report.critical_errors = len(report.critical_datasets)
         return report
 
     @staticmethod

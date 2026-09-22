@@ -165,6 +165,22 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   evaluate, the v3 sequence).
 
 ### Fixed
+- **The validator's integrity findings are enforced at last — the
+  orchestrator's `critical_errors` branch was dead code (pipeline-review
+  finding F4).** `ValidationReport.critical_errors` was declared and never
+  incremented by anything, so the orchestrator's "filter out datasets that
+  failed critical validation" branch was unreachable — and its filter
+  (`not v.empty`) dropped frames the collector already refuses rather than
+  the offenders. Duplicate timestamps (ambiguous: which value is right?) and
+  future timestamps (look-ahead at ingest) are integrity breaches by the
+  validator's own contract; the report now names the offending datasets
+  (`critical_datasets`, with per-dataset `errors` entries), and the
+  orchestrator excludes exactly those datasets, alerts the operator through
+  the data-quality notification sink, and fails the run only when nothing
+  remains — a reduced panel with an alert, never a silent one. Statistical
+  findings (outliers, scale breaks, stale runs) stay warnings by design:
+  they are evidence about a series, not ambiguous rows. Five tests pin the
+  contract in `test_validator_anomalies.py`.
 - **`POST /api/v1/pipeline` runs on the worker pool instead of inside the
   API process (pipeline-review finding F3).** The route executed the whole
   DATA → ENGINE → RESULTS run as a FastAPI BackgroundTask: no queue

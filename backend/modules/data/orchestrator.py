@@ -235,15 +235,43 @@ class DataOrchestrator:
             )
 
             if validation_report.critical_errors > 0:
-                logger.warning(f"[{self.job_id}] Validation found {validation_report.critical_errors} critical errors, continuing with valid data")
-                # Filter out datasets that failed critical validation
-                raw_data = {k: v for k, v in raw_data.items() if not v.empty}
+                # The integrity branch is real (it was dead code until the
+                # pipeline review's finding F4: nothing ever incremented
+                # critical_errors, and the filter below dropped *empty* frames
+                # the collector already refuses -- not the offenders). A
+                # duplicate observation time is ambiguous (which value is
+                # right?) and a future timestamp is look-ahead at ingest; the
+                # validator names the offending datasets, this excludes
+                # exactly those and tells the operator. Silently certifying
+                # ambiguous rows is worse than a reduced panel, and silently
+                # reducing a panel is worse than an alert.
+                dropped = set(validation_report.critical_datasets)
+                logger.error(
+                    "[%s] Validation found integrity breaches in %d dataset(s); "
+                    "excluding from this run: %s",
+                    self.job_id,
+                    len(dropped),
+                    ", ".join(sorted(dropped)),
+                )
+                for code in sorted(dropped):
+                    self._emit_data_quality_alert(
+                        code,
+                        "dataset excluded from certification: integrity breach "
+                        "(duplicate or future timestamps)",
+                        "high",
+                    )
+                raw_data = {k: v for k, v in raw_data.items() if k not in dropped}
                 if not raw_data:
                     self.status = DataStatus.FAILED
                     self.monitor.fail("All datasets failed validation")
                     raise DataQualityError(
-                        "Validation failed: no valid datasets available",
-                        context={"job_id": self.job_id, "critical_errors": validation_report.critical_errors},
+                        "Validation failed: every collected dataset breached integrity "
+                        "(duplicate or future timestamps); nothing is certifiable",
+                        context={
+                            "job_id": self.job_id,
+                            "critical_errors": validation_report.critical_errors,
+                            "critical_datasets": sorted(dropped),
+                        },
                     )
 
             self._update_progress(40.0, f"Validation complete: {len(validation_report.warnings)} warnings detected")

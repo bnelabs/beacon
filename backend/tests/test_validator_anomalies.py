@@ -150,6 +150,58 @@ class TestStaleRuns:
         assert kinds["stale_run"]["count"] >= 1
 
 
+class TestCriticalIntegrity:
+    """The one enforcement contract: breaches name datasets, not just counts.
+
+    Duplicate and future timestamps are integrity breaches rather than
+    statistical noise, so the report must let the orchestrator exclude
+    exactly the offending datasets (finding F4: the branch that consumed
+    ``critical_errors`` was dead code because nothing ever set it).
+    """
+
+    def test_duplicates_make_the_dataset_critical_by_identity(self):
+        dates = pd.date_range("2026-09-01", periods=40, freq="D").tolist()
+        dates[10] = dates[9]
+        report = _validate(_frame(_clean(40), dates=pd.DatetimeIndex(dates)))
+        assert report.critical_errors == 1
+        assert report.critical_datasets == ["SERIES"]
+        assert any("integrity breach" in entry["error"] for entry in report.errors)
+
+    def test_future_timestamps_make_the_dataset_critical(self):
+        future = pd.Timestamp.now(tz="UTC").tz_localize(None) + pd.Timedelta(days=3)
+        dates = pd.date_range("2026-09-01", periods=39, freq="D").tolist() + [future]
+        report = _validate(_frame(_clean(40), dates=pd.DatetimeIndex(dates)))
+        assert report.critical_datasets == ["SERIES"]
+        assert report.critical_errors == 1
+
+    def test_clean_data_raises_nothing_to_critical(self):
+        report = _validate(_frame(_clean()))
+        assert report.critical_errors == 0
+        assert report.critical_datasets == []
+        assert report.errors == []
+
+    def test_statistical_findings_are_warnings_not_breaches(self):
+        # a scale break is a serious finding, but it is evidence about the
+        # series, not an ambiguous row: it must not exclude the dataset
+        values = _clean(120)
+        values[60:] *= 1000
+        report = _validate(_frame(values))
+        assert report.anomalies_count > 0
+        assert report.critical_errors == 0
+        assert report.critical_datasets == []
+
+    def test_only_the_breaching_dataset_is_named(self):
+        dates = pd.date_range("2026-09-01", periods=40, freq="D").tolist()
+        dates[10] = dates[9]
+        breaching = _frame(_clean(40), dates=pd.DatetimeIndex(dates))
+        clean = _frame(_clean(40, seed=9))
+        report = DataValidator("test-job").validate(
+            {"BREACH": breaching, "CLEAN": clean}
+        )
+        assert report.critical_errors == 1
+        assert report.critical_datasets == ["BREACH"]
+
+
 class TestRollup:
     def test_anomalies_count_is_the_sum_of_findings(self):
         values = _clean(100)
