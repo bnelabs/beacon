@@ -339,8 +339,19 @@ class EngineOrchestrator:
             self.sources = list(sources)
             self.source_to_id = {src: idx for idx, src in enumerate(self.sources)}
             self.source_stats = checkpoint.get('source_stats', {}) or {}
+            # Which grain the checkpoint's statistics are keyed at. Checkpoints
+            # written before this was recorded standardized a panel feed as one
+            # series, so their statistics are feed-keyed and must not be read as
+            # per-entity statistics -- that mismatch is reported at scoring time
+            # instead of silently applied.
+            self.stats_grain = str(checkpoint.get('stats_grain', 'feed'))
+            self.checkpoint_series = list(checkpoint.get('series_ids', []) or [])
+            self._feed_grain_mismatch_warned = False
             self.model_name = config.get('model', self.model_name)
-            logger.info(f"[{self.job_id}] Model loaded successfully")
+            logger.info(
+                f"[{self.job_id}] Model loaded successfully "
+                f"(statistics grain: {self.stats_grain})"
+            )
             return model
 
         if not _untrained_fallback_allowed():
@@ -466,13 +477,37 @@ class EngineOrchestrator:
                 )
                 continue
 
-            checkpoint_stats = (self.source_stats or {}).get(source)
+            # Statistics lookup at the grain the checkpoint says it was fitted
+            # at, which must be the grain this frame is grouped at. A panel
+            # frame scored with a feed-grain map applies one feed-wide scale to
+            # entities that live in different scales -- the defect that made a
+            # 10^2 entity get a 10^6 prediction -- so that combination is named
+            # in the provenance and in the log rather than passed through.
+            grain = str(getattr(self, 'stats_grain', 'feed'))
+            panel_frame = group_col == 'series_id' and series != source
+            stats_key = series if grain == 'series' else source
+            checkpoint_stats = (self.source_stats or {}).get(stats_key)
             if checkpoint_stats:
-                stats_provenance[source] = "checkpoint"
+                if grain != 'series' and panel_frame:
+                    stats_provenance[series] = "checkpoint_feed_grain"
+                    if not getattr(self, '_feed_grain_mismatch_warned', False):
+                        self._feed_grain_mismatch_warned = True
+                        logger.warning(
+                            "[%s] Checkpoint standardizes at feed-grain but this "
+                            "frame is scored per series: series '%s' inside feed "
+                            "'%s' is being normalized with the whole feed's "
+                            "mean/std, which is a grain mismatch and not a scale "
+                            "of the same thing. Retrain with the current trainer "
+                            "(series-grain statistics) or send per-window "
+                            "statistics in the request.",
+                            self.job_id, series, source,
+                        )
+                else:
+                    stats_provenance[series] = "checkpoint"
                 mean = float(checkpoint_stats.get('mean', 0.0))
                 std = float(checkpoint_stats.get('std', 1.0))
             else:
-                stats_provenance[source] = "payload"
+                stats_provenance[series] = "payload"
                 mean = float(finite.mean())
                 std = float(finite.std())
             if not np.isfinite(std) or std == 0.0:

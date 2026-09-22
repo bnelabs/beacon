@@ -33,6 +33,11 @@ class MultiScaleTrainingMetrics:
     model_path: str
     predictions_path: str
     baseline_comparison: Optional[Dict[str, Any]] = None
+    # Per-series metrics alongside the per-feed ones. A feed-level MAE over a
+    # panel averages quantities that live in different original scales, so it
+    # is dominated by whichever entity is largest; these name each entity.
+    per_series_metrics: Optional[Dict[str, Dict]] = None
+    stats_grain: Optional[str] = None
 
 
 class MultiSourceDataset(Dataset):
@@ -40,9 +45,13 @@ class MultiSourceDataset(Dataset):
     Dataset that handles multiple data sources with different scales.
 
     Key features:
-    - Per-source normalization (not global)
-    - Preserves source identity
-    - Creates sequences per source
+    - Normalization at the grain the windows are cut at: per series when the
+      frame carries ``series_id`` (panel feeds such as AI4Risk's edges), per
+      source for frames that do not
+    - Preserves the feed identity for the model's per-source embedding and the
+      series identity for the statistics and for reversing a prediction to raw
+      units
+    - Creates sequences per series
     """
 
     def __init__(self, data: pd.DataFrame, sequence_length: int = 30, source_to_id: dict = None,
@@ -52,14 +61,18 @@ class MultiSourceDataset(Dataset):
             data: DataFrame with columns: Date, Value, source_code
             sequence_length: Number of time steps
             source_to_id: Optional pre-defined source to ID mapping (for test/val sets)
-            source_stats: Optional pre-computed per-source normalization stats
-                ``{source: {'mean': float, 'std': float}}`` from the TRAINING
-                split. Val/test datasets must be built with the training stats:
-                the model was trained in the training split's standardized
-                space, so normalizing an evaluation split with its own stats
-                both leaks that split into the reported metric and evaluates
-                the model in a space it never saw. When omitted (training
-                split), stats are computed per source from observed values.
+            source_stats: Optional pre-computed normalization stats
+                ``{series: {'mean': float, 'std': float}}`` from the TRAINING
+                split, keyed at the grain this dataset groups at -- ``series_id``
+                for a panel frame, ``source_code`` otherwise. Val/test datasets
+                must be built with the training stats: the model was trained in
+                the training split's standardized space, so normalizing an
+                evaluation split with its own stats both leaks that split into
+                the reported metric and evaluates the model in a space it never
+                saw. A series with no entry here is skipped rather than
+                standardized with another series' statistics. When omitted
+                (training split), stats are computed per series from observed
+                values.
         """
         self.sequence_length = sequence_length
         self.data = data.copy()
@@ -71,6 +84,14 @@ class MultiSourceDataset(Dataset):
         # DATA formatter for those panels; legacy frames without it retain the
         # original source grouping.
         self.series_column = 'series_id' if 'series_id' in self.data.columns else 'source_code'
+        # The grain the windows are cut at, and therefore the grain the
+        # normalization statistics must be keyed at. Standardizing a panel
+        # entity with its feed's statistics collapses it: with entities at 1e2
+        # and 1e6 in one feed, the smaller one's whole history becomes a
+        # constant in the model's space, its targets stop carrying information
+        # and its predictions come back denormalized through the other
+        # entity's scale.
+        self.stats_grain = 'series' if self.series_column == 'series_id' else 'feed'
         if 'source_code' in self.data.columns:
             self.sources = self.data['source_code'].dropna().astype(str).unique()
         else:
@@ -82,9 +103,11 @@ class MultiSourceDataset(Dataset):
         else:
             self.source_to_id = {str(src): i for i, src in enumerate(self.sources)}
 
-        # Per-source normalization stats. `external_stats` marks a dataset that
-        # must not invent its own: a source with no training-split stats was
-        # never trained on and is skipped rather than standardized ad hoc.
+        # Normalization stats, keyed at ``self.stats_grain``. `external_stats`
+        # marks a dataset that must not invent its own: a series with no
+        # training-split statistics was never trained on and is skipped rather
+        # than standardized ad hoc -- including by a *different* series'
+        # statistics, which is what used to happen inside a panel feed.
         self.external_stats = source_stats is not None
         if self.external_stats:
             self.source_stats = {
@@ -94,10 +117,13 @@ class MultiSourceDataset(Dataset):
         else:
             self.source_stats = {}
 
-        # Store sequences per source
+        # Store sequences per series
         self.sequences = []
         self.targets = []
         self.source_ids = []
+        self.series_ids = []
+        self.series_labels: List[str] = []
+        self.series_to_id: Dict[str, int] = {}
 
         if self.series_column == 'source_code':
             series_groups = self.data.groupby('source_code', sort=False, dropna=False)
@@ -111,6 +137,7 @@ class MultiSourceDataset(Dataset):
                 if 'source_code' in source_data.columns
                 else str(source_data[self.series_column].iloc[0])
             )
+            series = str(source_data[self.series_column].iloc[0])
             source_data = source_data.sort_values('Date')
 
             # Extract values - use 'Close' column from timeseries data. Gaps are
@@ -123,48 +150,54 @@ class MultiSourceDataset(Dataset):
                 .to_numpy(dtype=float)
             )
             if len(values) < 2:
-                logger.warning("Skipping source '%s' – not enough points (%d)", source, len(values))
+                logger.warning("Skipping series '%s' – not enough points (%d)", series, len(values))
                 continue
 
             observed = np.isfinite(values)
             observed_values = values[observed]
             if observed_values.size == 0:
-                logger.warning("Skipping source '%s' – no observed values", source)
+                logger.warning("Skipping series '%s' – no observed values", series)
                 continue
 
             # Normalization stats: from the training split when provided, else
-            # computed PER SOURCE from observed values only.
+            # computed PER SERIES from observed values only.
             if self.external_stats:
-                if source not in self.source_stats:
+                if series not in self.source_stats:
                     logger.warning(
-                        "Skipping source '%s' – no training-split statistics for it; "
-                        "refusing to standardize an evaluation split with its own stats",
-                        source,
+                        "Skipping series '%s' – no training-split statistics for it; "
+                        "refusing to standardize an evaluation split with its own stats "
+                        "or with another series' stats",
+                        series,
                     )
                     continue
-                mean = self.source_stats[source]['mean']
-                std = self.source_stats[source]['std']
+                mean = self.source_stats[series]['mean']
+                std = self.source_stats[series]['std']
                 if not np.isfinite(std) or std <= 0.0:
                     std = 1.0
             else:
                 mean = float(observed_values.mean())
                 std = float(observed_values.std() + 1e-8)
-                self.source_stats[source] = {'mean': mean, 'std': std}
+                self.source_stats[series] = {'mean': mean, 'std': std}
 
             # Normalize, then impute unobserved entries at the standardised mean.
             normalized = (values - mean) / std
             normalized = np.where(np.isfinite(normalized), normalized, 0.0)
 
-            # Create sequences for this source
+            # Create sequences for this series
             # Skip sources not in the mapping (can happen in test/val sets)
             if source not in self.source_to_id:
-                logger.warning(f"Skipping source '{source}' - not in training set")
+                logger.warning(f"Skipping series '{series}' - source '{source}' not in training set")
                 continue
+
+            if series not in self.series_to_id:
+                self.series_to_id[series] = len(self.series_labels)
+                self.series_labels.append(series)
+            series_index = self.series_to_id[series]
 
             # Allow shorter sequences by shrinking the window and padding
             window = min(sequence_length, len(normalized) - 1)
             if window < 1:
-                logger.warning("Skipping source '%s' – unable to form sequences", source)
+                logger.warning("Skipping series '%s' – unable to form sequences", series)
                 continue
 
             for i in range(len(normalized) - window):
@@ -185,14 +218,20 @@ class MultiSourceDataset(Dataset):
                 self.sequences.append(seq)
                 self.targets.append(normalized[i + window])
                 self.source_ids.append(self.source_to_id[source])
+                self.series_ids.append(series_index)
 
         self.sequences = np.array(self.sequences)
         self.targets = np.array(self.targets)
         self.source_ids = np.array(self.source_ids)
+        self.series_ids = np.array(self.series_ids, dtype=int)
 
-        logger.info(f"Created multi-source dataset: {len(self.sequences)} sequences from {len(self.sources)} sources")
-        for source, stats in self.source_stats.items():
-            logger.info(f"  {source}: mean={stats['mean']:.2f}, std={stats['std']:.2f}")
+        logger.info(
+            f"Created multi-source dataset: {len(self.sequences)} sequences from "
+            f"{len(self.sources)} sources / {len(self.series_labels)} series "
+            f"(statistics grain: {self.stats_grain})"
+        )
+        for series, stats in self.source_stats.items():
+            logger.info(f"  {series}: mean={stats['mean']:.2f}, std={stats['std']:.2f}")
 
     def __len__(self):
         return len(self.sequences)
@@ -201,12 +240,41 @@ class MultiSourceDataset(Dataset):
         return (
             torch.FloatTensor(self.sequences[idx]),
             torch.FloatTensor([self.targets[idx]]),
-            torch.LongTensor([self.source_ids[idx]])
+            torch.LongTensor([self.source_ids[idx]]),
+            torch.LongTensor([self.series_ids[idx]])
         )
 
-    def denormalize(self, values, source_ids):
-        """Denormalize predictions back to original scale per source."""
-        # Create reverse mapping from id to source name
+    def denormalize(self, values, source_ids=None, series_ids=None):
+        """Denormalize predictions back to original scale.
+
+        ``series_ids`` is the grain a panel needs: the model's source id names a
+        feed, and a feed with several entities has several scales, so reversing
+        a prediction through the feed collapses every entity but one onto the
+        winner's scale. Pass the per-sample series ids (which the dataset
+        carries alongside the source ids, so a shuffled loader cannot mislabel
+        them) and each prediction is reversed through its own series' mean and
+        standard deviation.
+
+        ``source_ids`` alone is the feed-grain path, which is the only path a
+        frame without ``series_id`` has; it is not a fallback for panels.
+        """
+        if series_ids is not None:
+            denormalized = []
+            for val, series_index in zip(values, series_ids):
+                index = int(series_index)
+                if index < 0 or index >= len(self.series_labels):
+                    raise ValueError(
+                        f"series id {index} is not a series this dataset standardized"
+                    )
+                stats = self.source_stats[self.series_labels[index]]
+                denormalized.append(val * stats['std'] + stats['mean'])
+            return np.array(denormalized)
+
+        if source_ids is None:
+            raise ValueError("denormalize needs series_ids or source_ids")
+
+        # Feed-grain reversal: valid only where the dataset itself grouped by
+        # feed, which is where the statistics are keyed at the same grain.
         id_to_source = {v: k for k, v in self.source_to_id.items()}
 
         denormalized = []
@@ -487,7 +555,14 @@ class MultiScaleTrainer:
                     'config': self.config,
                     'model_type': self.model_type,
                     'source_stats': train_dataset.source_stats,
-                    'sources': train_dataset.sources.tolist()
+                    'sources': train_dataset.sources.tolist(),
+                    # The grain the statistics above are keyed at, and the
+                    # series they were fitted on. A reader that groups at a
+                    # different grain has to be able to see that before it
+                    # applies the numbers -- which is what the old manifest
+                    # could not say.
+                    'stats_grain': train_dataset.stats_grain,
+                    'series_ids': list(train_dataset.series_labels),
                 }, model_path)
 
             # Log progress
@@ -508,8 +583,11 @@ class MultiScaleTrainer:
         predictions_path = Path(output_dir) / 'predictions.csv'
         test_metrics['predictions_df'].to_csv(predictions_path, index=False)
 
-        # Per-source metrics
+        # Per-source (feed) and per-series metrics. For a panel feed the
+        # feed-level aggregate mixes quantities in different original scales,
+        # so it is kept but never stands in for the per-series numbers.
         per_source_metrics = self._compute_per_source_metrics(test_metrics['predictions_df'])
+        per_series_metrics = self._compute_per_series_metrics(test_metrics['predictions_df'])
 
         logger.info(f"Test Results - Loss: {test_metrics['test_loss']:.6f}, "
                    f"MAE: {test_metrics['mae']:.4f}, RMSE: {test_metrics['rmse']:.4f}, "
@@ -517,6 +595,13 @@ class MultiScaleTrainer:
 
         for source, metrics in per_source_metrics.items():
             logger.info(f"  {source}: MAE={metrics['mae']:.2f}, RMSE={metrics['rmse']:.2f}, R²={metrics['r2']:.4f}")
+
+        if per_series_metrics and set(per_series_metrics) != set(per_source_metrics):
+            for series, metrics in per_series_metrics.items():
+                logger.info(
+                    f"  series {series}: MAE={metrics['mae']:.2f}, "
+                    f"RMSE={metrics['rmse']:.2f}, R²={metrics['r2']:.4f}"
+                )
 
         baseline_comparison = None
         try:
@@ -532,7 +617,10 @@ class MultiScaleTrainer:
                 'val_loss': val_losses,
                 'best_epoch': best_epoch,
                 'config': self.config,
-                'per_source_metrics': per_source_metrics
+                'per_source_metrics': per_source_metrics,
+                'per_series_metrics': per_series_metrics,
+                'stats_grain': train_dataset.stats_grain,
+                'series_ids': list(train_dataset.series_labels),
             }, f, indent=2)
 
         return MultiScaleTrainingMetrics(
@@ -543,6 +631,8 @@ class MultiScaleTrainer:
             test_rmse=test_metrics['rmse'],
             test_r2=test_metrics['r2'],
             per_source_metrics=per_source_metrics,
+            per_series_metrics=per_series_metrics,
+            stats_grain=train_dataset.stats_grain,
             best_epoch=best_epoch,
             total_epochs=epochs,
             model_path=str(model_path),
@@ -638,7 +728,7 @@ class MultiScaleTrainer:
         self.model.train()
         total_loss = 0.0
 
-        for sequences, targets, source_ids in dataloader:
+        for sequences, targets, source_ids, _series_ids in dataloader:
             sequences = sequences.to(self.device)
             targets = targets.to(self.device)
             source_ids = source_ids.to(self.device)
@@ -679,7 +769,7 @@ class MultiScaleTrainer:
         total_loss = 0.0
 
         with torch.no_grad():
-            for sequences, targets, source_ids in dataloader:
+            for sequences, targets, source_ids, _series_ids in dataloader:
                 sequences = sequences.to(self.device)
                 targets = targets.to(self.device)
                 source_ids = source_ids.to(self.device)
@@ -707,9 +797,10 @@ class MultiScaleTrainer:
         all_predictions = []
         all_targets = []
         all_source_ids = []
+        all_series_ids = []
 
         with torch.no_grad():
-            for sequences, targets, source_ids in dataloader:
+            for sequences, targets, source_ids, series_ids in dataloader:
                 sequences = sequences.to(self.device)
                 source_ids = source_ids.to(self.device)
 
@@ -718,14 +809,19 @@ class MultiScaleTrainer:
                 all_predictions.extend(outputs.cpu().numpy().flatten())
                 all_targets.extend(targets.numpy().flatten())
                 all_source_ids.extend(source_ids.cpu().numpy().flatten())
+                all_series_ids.extend(series_ids.cpu().numpy().flatten())
 
         all_predictions = np.array(all_predictions)
         all_targets = np.array(all_targets)
         all_source_ids = np.array(all_source_ids)
+        all_series_ids = np.array(all_series_ids, dtype=int)
 
-        # Denormalize per source
-        predictions_denorm = dataset.denormalize(all_predictions, all_source_ids)
-        targets_denorm = dataset.denormalize(all_targets, all_source_ids)
+        # Denormalize per series: the grain the windows were cut at. Reversing a
+        # panel prediction through the feed's single entry reported a 10^6-scale
+        # prediction for a 10^2-scale entity, and the feed's error metrics
+        # became the story of the wrong entity.
+        predictions_denorm = dataset.denormalize(all_predictions, series_ids=all_series_ids)
+        targets_denorm = dataset.denormalize(all_targets, series_ids=all_series_ids)
 
         # Compute metrics
         mse = np.mean((predictions_denorm - targets_denorm) ** 2)
@@ -740,10 +836,18 @@ class MultiScaleTrainer:
         # Get source names - map from numeric id to source name
         id_to_source = {v: k for k, v in dataset.source_to_id.items()}
         source_names = [id_to_source.get(sid, dataset.sources[0]) for sid in all_source_ids]
+        # Which entity each row belongs to. Without this a panel's predictions
+        # are indistinguishable from each other in the CSV a reviewer audits.
+        series_names = [
+            dataset.series_labels[sid] if 0 <= int(sid) < len(dataset.series_labels)
+            else source
+            for sid, source in zip(all_series_ids, source_names)
+        ]
 
         # Create predictions dataframe
         predictions_df = pd.DataFrame({
             'source': source_names,
+            'series': series_names,
             'actual': targets_denorm,
             'predicted': predictions_denorm,
             'error': targets_denorm - predictions_denorm,
@@ -760,28 +864,41 @@ class MultiScaleTrainer:
         }
 
     def _compute_per_source_metrics(self, predictions_df: pd.DataFrame) -> Dict[str, Dict]:
-        """Compute metrics per data source."""
-        if predictions_df.empty or 'source' not in predictions_df.columns:
+        """Compute metrics per data source (feed)."""
+        return self._compute_grouped_metrics(predictions_df, 'source')
+
+    def _compute_per_series_metrics(self, predictions_df: pd.DataFrame) -> Dict[str, Dict]:
+        """Compute metrics per series -- per entity for a panel feed.
+
+        A feed-level MAE over a panel sums errors made in different original
+        scales, so it reports the largest entity and hides the rest. These are
+        the numbers that describe each entity in its own scale.
+        """
+        return self._compute_grouped_metrics(predictions_df, 'series')
+
+    @staticmethod
+    def _compute_grouped_metrics(predictions_df: pd.DataFrame, column: str) -> Dict[str, Dict]:
+        if predictions_df.empty or column not in predictions_df.columns:
             return {}
 
-        per_source = {}
+        grouped = {}
 
-        for source in predictions_df['source'].unique():
-            source_df = predictions_df[predictions_df['source'] == source]
+        for name in predictions_df[column].unique():
+            group_df = predictions_df[predictions_df[column] == name]
 
-            mse = np.mean(source_df['error'] ** 2)
-            mae = np.mean(source_df['abs_error'])
+            mse = np.mean(group_df['error'] ** 2)
+            mae = np.mean(group_df['abs_error'])
             rmse = np.sqrt(mse)
 
-            ss_res = np.sum(source_df['error'] ** 2)
-            ss_tot = np.sum((source_df['actual'] - source_df['actual'].mean()) ** 2)
+            ss_res = np.sum(group_df['error'] ** 2)
+            ss_tot = np.sum((group_df['actual'] - group_df['actual'].mean()) ** 2)
             r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
 
-            per_source[source] = {
+            grouped[name] = {
                 'mae': float(mae),
                 'rmse': float(rmse),
                 'r2': float(r2),
-                'num_samples': len(source_df)
+                'num_samples': len(group_df)
             }
 
-        return per_source
+        return grouped

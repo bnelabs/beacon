@@ -860,9 +860,15 @@ def run_training(self, job_id: int, parameters: dict):
         result["reproducibility"] = manifest.to_dict()
         logger.info("[%s] Model provenance: %s", job_id, manifest.describe())
 
-        # Add per-source metrics if available
+        # Add per-source metrics if available. Per-series metrics accompany them
+        # for panel feeds, where a feed-level MAE averages quantities in
+        # different original scales and describes only the largest entity.
         if hasattr(training_metrics, 'per_source_metrics'):
             result["per_source_metrics"] = training_metrics.per_source_metrics
+        if getattr(training_metrics, 'per_series_metrics', None):
+            result["per_series_metrics"] = training_metrics.per_series_metrics
+        if getattr(training_metrics, 'stats_grain', None):
+            result["stats_grain"] = training_metrics.stats_grain
 
         service.update_job_status(
             job_id,

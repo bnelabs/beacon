@@ -197,6 +197,43 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   fact rather than being a quietly smaller success.
 
 ### Fixed
+- **Panel windows were cut per entity but standardized per feed, so a 10²-scale
+  entity was scored at 10⁶** (L-42). #101 gave the multi-scale trainer the panel
+  grouping a bank-to-bank edge table needs — windows grouped by `series_id` when the
+  frame carries one — but the normalization statistics stayed keyed by `source_code`,
+  and a sample carried only its feed id. Every entity inside a panel feed was
+  standardized by one map, whichever group had written it at the feed label, and
+  denormalized back through that same map. On a two-entity fixture (levels 100 and
+  1 000 000 in one feed) the smaller entity's whole history collapses to a
+  near-constant in the model's space, its standardized targets sit near −20 rather than
+  O(1), and its predictions return in the larger entity's scale: the red baseline's
+  `predictions.csv` reported `actual 96.375, predicted 1004496.90, error
+  -1004400.500, pct_error 1.042180e+06` beside a plausible `actual 983953.100,
+  predicted 1014015.94`, so the feed-level MAE, RMSE and `pct_error` in `Job.result`
+  described the wrong entity. The rule now enforced: **the grain of the normalization
+  statistics must match the grain of the grouping, and where they cannot agree the run
+  says so instead of inventing a number.** `MultiSourceDataset` records `stats_grain`
+  and keys its statistics at it; each sample carries its series id beside its feed id,
+  so a shuffled loader cannot mislabel a prediction; `denormalize(values,
+  series_ids=...)` reverses through the sample's own series and refuses an id it never
+  standardized (the feed-keyed path remains for frames without `series_id`, where the
+  grains agree); an evaluation series with no training-split statistics is skipped
+  rather than standardized with another series' map. `best_model.pt` states
+  `stats_grain` and `series_ids` — a manifest that cannot say which grain it fitted is
+  what let this survive a release. `predictions.csv` gained a `series` column, and
+  `per_series_metrics` is reported beside `per_source_metrics` in
+  `training_history.json`, `MultiScaleTrainingMetrics` and `Job.result`, with
+  `stats_grain` stated alongside; the cross-scale feed aggregate is kept, but never as
+  a stand-in for a per-entity measurement. `EngineOrchestrator` reads the grain from
+  the checkpoint, looks its statistics up at that grain, keys `stats_provenance` by
+  series label, and marks a pre-fix feed-grain manifest serving entity windows
+  `"checkpoint_feed_grain"` with a warning naming both grains — a changed manifest
+  contract, and one of the two drivers of 5.0.0. `RealPredictionEngine` records the
+  grain too: a series-grain checkpoint consulted per feed now normalizes the window
+  from its own observations and warns once instead of borrowing an entity's scale; its
+  grouping is unchanged, which is L-43. `backend/tests/test_panel_normalization.py`
+  (16 tests, written red first: 12 of 13 failed against `main` at `0122bea`). PR #113.
+
 - **`/api/v1/analytics/*` still read the table production never writes — finding
   F2's twin, in three places.** #103 moved `/api/v1/data-quality/*` onto both
   collection writers and left the analytics routes on `DataJob ⋈ PipelineJob`:

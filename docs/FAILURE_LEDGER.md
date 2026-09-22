@@ -363,6 +363,55 @@ tests against the pre-fix readers. Status: **FIXED** — CHANGELOG (Unreleased),
 PR #111 (`36a85c4`, merged `fe70ddd`); dispatched deep runs green at the branch
 commit (backend-tests `35739396990`, frontend-e2e `35739400886`).
 
+**L-42. Panel windows were grouped per entity but standardized per feed, so a
+10² entity was scored at 10⁶.** #101 gave the trainer the panel grouping the data
+needed (`series_column = 'series_id'` when the frame carries one) and left the
+statistics keyed by `source_code`; a sample carried only its feed id. Inside a panel
+feed one map — whichever group wrote last at the feed label — standardized every entity
+and reversed every prediction back out. Two consequences, both measured on a
+two-entity fixture (levels 100 and 1 000 000 in one feed): the smaller entity's history
+collapses to a near-constant in the model's space (spread 0.16 in standardized units,
+target mean ≈ −19.9, far outside the O(1) space the other series occupy), and its
+predictions and errors are reversed through the larger entity's scale. The red
+baseline's `predictions.csv`: `actual 96.375, predicted 1004496.90, error
+-1004400.500, pct_error 1.042180e+06` beside `actual 983953.100, predicted
+1014015.94` — and `Job.result`'s feed-level MAE/RMSE were the story of the wrong
+entity. Detected by: `backend/tests/test_panel_normalization.py`, written red first;
+12 of 13 failed on `main` at `0122bea`, each on a missing contract (`stats_grain`,
+series-keyed statistics on a series-grouped dataset, per-sample series identity, the
+`series` column, `per_series_metrics`, the manifest grain, the orchestrator's grain).
+Mitigation, one invariant: **the grain of the normalization statistics must match the
+grain of the grouping, and where they cannot agree the run says so instead of inventing
+a number.** `stats_grain` is recorded on the dataset and in `best_model.pt` (with
+`series_ids`); each sample carries its series id beside its feed id so a shuffled
+loader cannot mislabel a prediction; `denormalize(values, series_ids=...)` reverses
+through the sample's own series and refuses an id it never standardized, keeping the
+feed-keyed path only where the grains agree; an evaluation series with no
+training-split statistics is skipped rather than standardized with another series' map;
+`per_series_metrics` is reported beside `per_source_metrics` in
+`training_history.json`, `MultiScaleTrainingMetrics` and `Job.result`.
+`EngineOrchestrator` looks up at the checkpoint's declared grain, keys
+`stats_provenance` by series label, and labels a feed-grain manifest serving entity
+windows `"checkpoint_feed_grain"` with one warning per load. Status: **FIXED** —
+CHANGELOG (Unreleased), PR #113, `backend/tests/test_panel_normalization.py`.
+
+**L-43. `predict_risk_series` collapses a panel feed into one fabricated series, and
+its consumers read those labels as feed codes.** L-42 fixed the statistics grain on the
+training path and in the orchestrator's scoring loop, which groups by `series_id`.
+`RealPredictionEngine` has no series concept: `predict_risk_series` groups
+`working.groupby('source_code', sort=True)`, so a panel payload is scored as a single
+series whose window interleaves entities, and `_predict_single` reports one row per
+source. The grouping was deliberately **not** changed in #113 because the blast radius
+is a contract change rather than a bug fix: `RiskSeriesResult.sources`/`n_sources`, the
+walk-forward segment labels, `by_source` event metrics, risk-score persistence, and
+`job_tasks.py`'s joins of `frame["source"]` to `test_data['source_code']` all treat
+those labels as feed codes. What #113 did instead: the engine records `stats_grain`, and
+a series-grain checkpoint consulted by feed label no longer borrows an entity's scale
+— it normalizes the window from its own observations and warns once that the grains
+disagree (`test_panel_normalization.py::TestPredictionPathReportsItsGrain`). Status:
+**OPEN** — the grouping decision belongs to a change that updates the consumers in the
+same breath; found while fixing L-42 and left out of that PR's scope on purpose.
+
 ## D. Test and CI infrastructure that lied
 
 **L-16. The deep backend suite could not start at all.** The sharded rewrite
