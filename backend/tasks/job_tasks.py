@@ -436,11 +436,25 @@ def run_data_collection(self, job_id: int, parameters: dict):
         if source_id:
             from backend.services.scheduling import record_sync_success
 
+            # A success served (in part) from stale cache is degraded: the
+            # data arrived, but it is not evidence the provider is reachable,
+            # so the failure streak -- which is the backoff -- stays
+            # (pipeline-review finding F9).
+            collection_report = (data_package.metadata or {}).get("collection_report") or {}
+            degraded_codes = collection_report.get("degraded") or []
+            if degraded_codes:
+                logger.warning(
+                    "Collection for source %s was served (in part) from stale "
+                    "cache; recording a DEGRADED success: %s",
+                    source_id,
+                    ", ".join(str(code) for code in degraded_codes),
+                )
             record_sync_success(
                 db,
                 int(source_id),
                 started_at,
                 rows=int(data_package.num_observations or 0),
+                degraded=bool(degraded_codes),
             )
 
         logger.info(f"Data collection completed for job {job_id}")

@@ -39,7 +39,10 @@ Design notes
 The stale-fallback is deliberately opt-in via ``cache_ttl > 0`` and only ever
 returns a response that was previously a success (``status_code < 400``), so it
 can never resurrect an error page. It is a *fallback*, not a lie: callers still
-see a normal ``requests.Response`` and the event is logged at WARNING.
+see a normal ``requests.Response``, the event is logged at WARNING, the response
+carries ``X-Beacon-Stale-Fallback: 1``, and the session's public
+``stale_fallback_hits`` counter lets the collector mark the item degraded --
+so a cache-served "success" never clears a source's failure backoff unseen.
 """
 
 from __future__ import annotations
@@ -215,6 +218,13 @@ class ResilientSession:
         self._cache = _TTLCache(max_entries=cache_max_entries, ttl=cache_ttl)
         self._limiter = _RateLimiter(min_interval)
         self._session = session or requests.Session()
+        #: How many times this session served a STALE cached response because
+        #: the live request ultimately failed. A stale-served fetch delivered
+        #: data but is not evidence the provider is reachable, so the counter
+        #: is public: the collector reads it to mark the item degraded, and
+        #: source telemetry keeps the failure streak (and its backoff) alive
+        #: across a degraded "success" (pipeline-review finding F9).
+        self.stale_fallback_hits = 0
 
         retry = self._build_retry(retries, backoff_factor, status_forcelist)
         adapter = HTTPAdapter(max_retries=retry, pool_connections=8, pool_maxsize=8)
@@ -294,11 +304,7 @@ class ResilientSession:
             if cacheable:
                 stale = self._cache.get_any(key)  # type: ignore[arg-type]
                 if stale is not None:
-                    logger.warning(
-                        "resilient-http %s %s failed (%s); serving STALE cached response",
-                        method, url, exc,
-                    )
-                    return stale
+                    return self._serve_stale(method, url, stale, f"failed ({exc})")
             raise
 
         # A persistent server error (retries exhausted) can still surface as a
@@ -306,15 +312,34 @@ class ResilientSession:
         if response.status_code >= 400 and cacheable:
             stale = self._cache.get_any(key)  # type: ignore[arg-type]
             if stale is not None and stale is not response:
-                logger.warning(
-                    "resilient-http %s %s returned HTTP %d; serving STALE cached response",
-                    method, url, response.status_code,
+                return self._serve_stale(
+                    method, url, stale, f"returned HTTP {response.status_code}"
                 )
-                return stale
 
         if cacheable and response.status_code < 400:
             self._cache.set(key, response)  # type: ignore[arg-type]
         return response
+
+    def _serve_stale(
+        self, method: str, url: str, stale: requests.Response, reason: str
+    ) -> requests.Response:
+        """Count, tag, log and return a stale cached response.
+
+        The tag travels on the response itself (``X-Beacon-Stale-Fallback``)
+        so any consumer can tell a degraded fetch from a fresh one; the
+        counter is what the collector reads (it never sees the response --
+        plugins hand back DataFrames).
+        """
+        self.stale_fallback_hits += 1
+        try:
+            stale.headers["X-Beacon-Stale-Fallback"] = "1"
+        except Exception:  # noqa: BLE001 - tagging must never void the fallback
+            pass
+        logger.warning(
+            "resilient-http %s %s %s; serving STALE cached response",
+            method, url, reason,
+        )
+        return stale
 
     def get(self, url: str, **kwargs: Any) -> requests.Response:
         return self.request("GET", url, **kwargs)

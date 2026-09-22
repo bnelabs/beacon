@@ -165,6 +165,24 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   evaluate, the v3 sequence).
 
 ### Fixed
+- **A cache-served "success" no longer silently clears a down feed's backoff
+  (pipeline-review finding F9).** The HTTP layer's stale-on-outage fallback
+  is a sound availability trade — but it made a collection where the
+  provider was unreachable end-to-end indistinguishable, in telemetry, from
+  a fresh fetch: `record_sync_success` cleared the failure streak (which
+  *is* the scheduler's backoff) and stamped the source healthy while every
+  row actually came from yesterday's cache. The fallback is now witnessable
+  at three levels: `ResilientSession.stale_fallback_hits` counts serves (and
+  the response carries `X-Beacon-Stale-Fallback: 1`); the collector reads
+  the plugin's session after each fetch and records the item in
+  `CollectionReport.degraded` — still *collected* (the data reached the
+  pipeline), but flagged, and the flag travels in the job result; and
+  `record_sync_success(..., degraded=True)` stamps
+  duration/rows/last-successful but **keeps the failure streak and leaves a
+  note beside the source** — a degraded success is not evidence of provider
+  health. The next genuinely fresh success clears both. Five tests pin the
+  chain (counter + header on transport error and on persistent 5xx,
+  collector flag, report wiring, scheduler streak semantics).
 - **Per-item collection retries are bounded by wall time, not only by
   attempts (pipeline-review finding F8).** `_fetch_with_retry` stopped after
   3 attempts — but each attempt rides on the HTTP layer's own retries
