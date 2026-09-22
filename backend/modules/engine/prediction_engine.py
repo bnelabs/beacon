@@ -431,6 +431,13 @@ class RealPredictionEngine:
         self.source_stats = checkpoint.get('source_stats', {}) or {}
         self.sources = checkpoint.get('sources', []) or []
         self.source_to_id = {src: idx for idx, src in enumerate(self.sources)}
+        # The grain the checkpoint's statistics are keyed at. This engine groups
+        # its payload by feed, so a checkpoint that standardizes per series has
+        # no entry for a feed label: the sequence is then normalized from its own
+        # observed values, and that mismatch is reported rather than passed
+        # through as if the two grains were the same thing.
+        self.stats_grain = str(checkpoint.get('stats_grain', 'feed'))
+        self._stats_grain_mismatch_warned = False
 
         return self._build_model_from_checkpoint(checkpoint)
 
@@ -1152,6 +1159,20 @@ UNCERTAINTY DECOMPOSITION:
         """
         values = np.asarray(values, dtype=np.float32)
         stats = self.source_stats.get(source_code, {})
+        if (
+            not stats
+            and self.source_stats
+            and str(getattr(self, 'stats_grain', 'feed')) == 'series'
+            and not getattr(self, '_stats_grain_mismatch_warned', False)
+        ):
+            self._stats_grain_mismatch_warned = True
+            logger.warning(
+                "Checkpoint standardizes at series-grain but this payload is "
+                "scored per feed ('%s'): no series' statistics describe a whole "
+                "feed, so the window is normalized from its own observed values. "
+                "Score panel feeds per series to use the checkpoint's statistics.",
+                source_code,
+            )
 
         finite = values[np.isfinite(values)]
         default_mean = float(finite.mean()) if finite.size else 0.0
