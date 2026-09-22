@@ -162,6 +162,37 @@ class TestCollectorRetry:
             collector._fetch_with_retry(object(), "2024-01-01", "2024-02-01")
         assert flaky.calls == 1  # a decision, not a blip
 
+    def test_retry_budget_stops_further_attempts(self, monkeypatch):
+        """An exhausted budget stops retries even with attempts left (F8).
+
+        The HTTP layer beneath retries too, so attempt counts alone did not
+        bound the wall time one catalogue item could spend against a
+        struggling provider. The budget bounds the between-attempt window;
+        a legitimately long single fetch is never cut off mid-flight.
+        """
+        monkeypatch.setenv("BEACON_FETCH_RETRY_BUDGET_SECONDS", "0")
+        flaky = _Flaky(99, DataSourceUnavailableError)
+        collector = _collector_with(flaky)
+        with pytest.raises(DataSourceUnavailableError):
+            collector._fetch_with_retry(object(), "2024-01-01", "2024-02-01")
+        assert flaky.calls == 1  # budget 0: the first attempt is the last
+
+    def test_invalid_retry_budget_falls_back_to_the_default(self, monkeypatch):
+        """A malformed override is ignored with a warning, not crashed on."""
+        from backend.modules.data.collector import (
+            FETCH_RETRY_BUDGET_SECONDS,
+            _fetch_retry_budget_seconds,
+        )
+
+        monkeypatch.setenv("BEACON_FETCH_RETRY_BUDGET_SECONDS", "soon")
+        assert _fetch_retry_budget_seconds() == FETCH_RETRY_BUDGET_SECONDS
+
+        flaky = _Flaky(99, DataSourceUnavailableError)
+        collector = _collector_with(flaky)
+        with pytest.raises(DataSourceUnavailableError):
+            collector._fetch_with_retry(object(), "2024-01-01", "2024-02-01")
+        assert flaky.calls == 3  # the default budget is not smaller than the attempts
+
 
 def test_indicator_provider_is_not_routed_through_asset_transport(monkeypatch):
     import backend.modules.data.collector as collector_module
