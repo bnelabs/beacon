@@ -90,7 +90,7 @@ REQUIRED_REACHABLE: Dict[str, str] = {
     "backend.modules.data.fractional": "ADF/KPSS and fractional differencing",
     "backend.modules.engine.hidden_markov": "the Student-t regime nowcast in prediction_engine._regime_label, which is the live regime label the mixture-of-experts disposition was waiting on",
     "backend.modules.data.quality_gate": "the data certification gate",
-    "backend.modules.data.pit": "point-in-time exposure vintages behind the network graph (load_as_of)",
+    "backend.modules.data.pit": "point-in-time exposure vintages behind the network graph (load_as_of); function-level note: as_of_join has no production caller yet -- pre-positioned for the event-metrics feature attach, disposition 'decide', recorded in the module docstring",
     "backend.modules.data.event_labeller": "declared stress-event labels feeding event_metrics in run_backtest",
     "backend.modules.engine.event_metrics": "event precision/lead-time scoring of the risk series in run_backtest",
     "backend.modules.risk.clearing": "Eisenberg-Noe clearing",
