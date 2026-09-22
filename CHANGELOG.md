@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-09-22
+
 ### Added
 - **The v5 early-warning run executed — family verdict NO (2 of 11), and the
   line remains parked as its own protocol declared.** One clean run under tag
@@ -195,6 +197,51 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   whole run on one bad item. The mode and the `collection_report` are written
   into the job result, so a partial panel is identifiable as partial after the
   fact rather than being a quietly smaller success.
+
+### Changed
+- **Two aggregate populations changed, and both are the honest ones.**
+  `/api/v1/data-quality/*` (since #103) and `/api/v1/analytics/*` (since #111)
+  now count *both* collection writers through one evidence list
+  (`data_quality.quality_evidence`), so the overview card, the trend series and the
+  `quality_degradation` detector report the collections a deployment actually runs.
+  On any deployment that collects through `POST /api/v1/jobs`, the per-source sync
+  or the scheduler, numbers that read 0 now read what was collected (L-29, L-35).
+- **The quality unit is declared at the gate scale (0–100) across the platform, and
+  the guards built on it stopped being vacuous.** `QualityPolicy.min_quality_score =
+  70.0` and `min_completeness = 80.0` are the unit `Job.result` stores and every
+  endpoint returns; three frontend readers that treated those numbers as 0–1
+  fractions — double-multiplying a real 85.6 into `8560.0%` coloured "excellent", or
+  guessing the unit per value so 0.9 and 92 both printed 90% — now render them
+  verbatim, and `types/api.ts` and `docs/api.md` state the unit. `low_quality_jobs`
+  and the degradation detector are no longer empty by construction (L-39). Recorded,
+  not quietly reinterpreted: an operator alert rule written as `lt 0.8` can never
+  breach a gate-scale score, and re-basing such a rule is an owner act — that
+  consequence stays **OPEN** in the ledger rather than being migrated in disguise.
+- **A checkpoint manifest must now say which grain it standardized, and inference
+  says so when the grains disagree** (L-42). `best_model.pt` records `stats_grain`
+  and `series_ids`; `stats_provenance` is keyed by series label rather than feed, so
+  a panel scores one entry per entity; a manifest written before this change, which
+  carries feed-keyed statistics and no grain, is labelled `checkpoint_feed_grain` on
+  a panel payload and named in the log instead of being applied silently. On the
+  training side a series with no training-split statistics is skipped rather than
+  standardized with another series' map, so a panel job's per-series sample counts
+  can be smaller than they used to be — they are now the series that model actually
+  saw. **Upgrade note:** retrain panel models to get entity-scale statistics and the
+  new `per_series_metrics`; nothing in 5.0.0 makes a pre-5.0 panel checkpoint correct.
+- **Integrity and freshness verdicts changed for the same data** (#100, #101).
+  Duplicate detection keys on a frame's natural observation key — `(date,
+  source_bank, target_bank)` for an edge table, `bank_id`, `ticker`, `Asset`,
+  `instrument`, else the date — so a panel stops reading as a table full of
+  duplicates; a constant-marker event series reports stationarity as not applicable
+  instead of failing; and every cadence has its own staleness threshold
+  (`FREQUENCY_MAX_STALENESS_DAYS`, event/irregular at 120 days) with each timeliness
+  finding naming the cadence it was judged against. Migrations
+  `data_frequency_contract_001` and `catalogue_provider_fixes_001` re-label five
+  catalogue codes and repair declared coverage, collected history intact, and are
+  upgradable rather than a re-create.
+- **`POST /api/v1/pipeline` reports what actually happened when no broker is
+  reachable**: the job fails with `dispatch failed: …` in its result instead of
+  appearing accepted. The response shape is unchanged.
 
 ### Fixed
 - **Panel windows were cut per entity but standardized per feed, so a 10²-scale
