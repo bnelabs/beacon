@@ -607,7 +607,12 @@ checklist now carries "regenerate `docs/api-endpoints.md` immediately after
 `release.py`" as a numbered step; a release-tooling guard (fail when the
 generated inventory disagrees with `VERSION`) is recorded as the durable fix
 if this class recurs. Status: **FIXED** (tooling guard: OPEN, deliberately
-deferred until a second occurrence justifies touching the release script).
+deferred until a second occurrence justifies touching the release script). The
+checklist step was exercised at the 5.0.0 cut: `release: v5.0.0` (`85cb051`)
+regenerates `docs/api-endpoints.md` in the same commit as the `VERSION` bump, so the
+generated inventory reads v5.0.0 and `generate_api_docs.py --check` is green at the
+release commit. No second occurrence, so the guard stays deferred — but bumping and
+regenerating are now a documented two-step rather than an act of memory.
 
 **L-41. Five merges landed after v4.0.0 with no changelog entry.** #97 (plugin
 configuration and provider hardening), #98 (ECB/FRED/SEC collection hardening,
@@ -624,7 +629,31 @@ diffs rather than from memory, and every entry in this batch carries its PR
 number from `git log`/`gh pr list` rather than from the changelog. The durable
 fix is the same one L-25 deferred — a release-time check that the changelog and
 the merge history agree — still unowned. Status: **FIXED** (backfill) —
-CHANGELOG (Unreleased); the gate for this class remains **OPEN**.
+CHANGELOG (Unreleased); the gate for this class remains **OPEN**. The 5.0.0 cycle is
+the first release that needed no backfill: `git log v4.0.0..HEAD --no-merges --
+CHANGELOG.md` carries an entry commit for every merge from #102 to #113, and those
+entries moved into `## [5.0.0]` verbatim.
+
+**L-44. 4.1.0 looked like the obvious bump, and the scan meant to confirm it found
+three live defects instead.** The post-4.0.0 work read as a MINOR: four additive
+capabilities, no removed route, upgradable migrations. Before cutting it, a consumer
+scan asked what a reader of `avg_completeness`, `Job.result` and a saved checkpoint
+would see differently — and the answer was that the release was not additive. Three
+defects surfaced in the scan itself, none of them reported by a failing job: the
+quality unit was declared nowhere and three readers mixed 0–1 with 0–100 in one view
+(L-39); the analytics aggregate population omitted one of two writers, so a card, a
+trend point and a detector reported 0 for data that existed (L-29's F2 at its
+analytics twin, L-35); and panel windows grouped per entity were normalized per feed,
+so a 10² entity was scored and reported at 10⁶ (L-42). Each changes what a consumer
+reads from the same deployment, which `docs/VERSIONING.md` places under MAJOR, and the
+checkpoint-manifest change (`stats_grain`, `series_ids`, series-keyed `source_stats`,
+`checkpoint_feed_grain` provenance) removes any remaining doubt. Bumped **5.0.0**,
+tagged at the release commit `85cb051` (PR #114) rather than at the merge commit, as
+`v4.0.0` was. Durable practice, recorded because it is the reusable part: **decide a
+bump by enumerating what a consumer reads differently on unchanged data, not by
+counting added endpoints.** L-11 applied that rule to 4.0.0 after the fact; here it
+was applied before the cut, which is what turned a planned minor into a fix batch.
+Status: **RECORDED** — CHANGELOG (5.0.0, Changed), `v5.0.0`, `docs/VERSIONING.md`.
 
 ---
 
