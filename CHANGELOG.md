@@ -163,6 +163,15 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   `docs/prereg/early_warning_v4.md` + `configs/event_eval_v4.yaml`, to be
   tagged `prereg-early-warning-v4` before the single run (tag → fetch →
   evaluate, the v3 sequence).
+- **The failure ledger now carries the post-4.0.0 findings, L-28 through L-41.**
+  Fourteen entries — eight API and engine honesty bugs, five test/CI claims that
+  did not hold, and this file's own gap above — each with its PR, commit or run
+  id as the pointer, and each open item left open on the page rather than closed
+  by the merge that documented it: the credential rotation (L-10), the
+  alert-rule thresholds written as fractions against gate-scale scores (L-39),
+  `as_of_join`'s decide disposition (L-38), the locally-red/CI-green frontend
+  suite (L-40), and the release-time check that would have caught L-41
+  automatically.
 - **Plugin configuration is served by the registry, and a stored secret is now
   masked on the way out** (#97, recorded in this block by the L-41 backfill).
   `GET /api/v1/data-sources/plugins` returns each registered plugin's
