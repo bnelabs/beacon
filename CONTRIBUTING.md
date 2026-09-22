@@ -118,9 +118,19 @@ when its mitigation is merged and verified.
   breaking contract change, stated explicitly in the notes.
 - Keep `docs/README.md` (the index) current: a new document that isn't
   registered is a document that will go stale unnoticed (ledger L-24).
-- Every PR runs Backend CI, Frontend CI and the versioning gate; deep suites
-  run on merges to `main`. Don't merge red, and don't merge a vacuous green
-  (see "Infrastructure lie" above).
+- Every PR runs Backend CI, Frontend CI and the versioning gate; the deep
+  suites do **not** run on a merge — `backend-tests.yml`, `frontend-e2e.yml` and
+  `bundle-budget.yml` trigger nightly and on demand (see
+  `.github/workflows/README.md`). So a pipeline-, model-, migration- or
+  API-surface-touching change is proven before it merges, by hand:
+  `gh workflow run backend-tests.yml --ref <branch>`, or the local full suite
+  (~7 min on 2 CPUs). Eight pipeline merges landed on `main` under nothing but
+  the sub-minute gates because this line used to claim the deep suites ran on
+  merge; a red deep run found it two modules away from its cause.
+- Don't merge red, and don't merge a vacuous green (see "Infrastructure lie"
+  above). "Targeted pytest: N passed" on a pipeline PR is not proof: the shared
+  test database makes cross-module state leaks invisible to any run that does
+  not include the whole suite.
 
 ## Release checklist (maintainers)
 

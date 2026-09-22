@@ -6,6 +6,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _ensure_repo_root_on_path() -> None:
     """Guarantee the repository root is available on ``sys.path``."""
@@ -80,6 +82,61 @@ def _start_every_session_on_a_cold_database() -> None:
 
     for suffix in ("", "-wal", "-shm"):
         Path(f"beacon.db{suffix}").unlink(missing_ok=True)
+
+
+def _orphaned_child_rows() -> list:
+    """Child rows whose parent no longer exists, read off the FK graph itself.
+
+    Derived from ``Base.metadata`` rather than a hand-written list, so a table
+    added next month is covered the day it is registered.
+    """
+
+    from sqlalchemy import func, select
+
+    from backend.database import Base, SessionLocal
+
+    db = SessionLocal()
+    try:
+        problems = []
+        for table in Base.metadata.tables.values():
+            for fk in table.foreign_keys:
+                column = fk.parent
+                parent = fk.column.table
+                count = db.scalar(
+                    select(func.count())
+                    .select_from(table)
+                    .where(column.isnot(None))
+                    .where(column.not_in(select(parent.c.id)))
+                )
+                if count:
+                    problems.append(
+                        f"{table.name}.{column.name} -> {parent.name}.id: {count} orphan row(s)"
+                    )
+        return problems
+    finally:
+        db.close()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _no_module_leaves_an_orphan_behind():
+    """Enforce the cleanup conftest documents, at the end of every run.
+
+    The shared SQLite file makes a parent-only delete a cross-module defect:
+    the child rows survive, the freed parent ids are handed to the next
+    module's INSERT (SQLite reuses rowids), and a later test reads state it
+    never created. That is how ``test_sync_scheduler`` failed on main with
+    ``[76, 87] == [87]`` while the module that caused it stayed green.
+
+    Checking it as a census -- every registered FK, once per run -- is what
+    stops the class going forward: the failure names the table pair instead of
+    surfacing as an unexplainable assertion somewhere downstream.
+    """
+    yield
+    problems = _orphaned_child_rows()
+    assert not problems, (
+        "a test module deleted a parent row without the rows pointing at it:\n  "
+        + "\n  ".join(problems)
+    )
 
 
 _ensure_repo_root_on_path()

@@ -165,6 +165,40 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   evaluate, the v3 sequence).
 
 ### Fixed
+- **A test module's parent-only delete reddened the deep suite two modules
+  away.** The deep run on `main` (`e78f6ba`, 2026-09-22) failed
+  `test_sync_scheduler.py::test_enqueue_creates_the_same_job_a_human_does` with
+  `assert [76, 87] == [87]` — 1 failed / 2124 passed — while all eight pipeline
+  merges (#102–#109) had passed every pre-merge gate and every targeted module
+  run. Cause: the new `test_data_quality_routes.py` (#103) clears the writers
+  its endpoints aggregate, correctly, because those endpoints aggregate globally
+  — but it deleted `DataSource` rows an earlier module had seeded **without the
+  rows pointing at them**, and SQLite hands freed parent ids to the next
+  module's INSERT. `test_sync_scheduler`'s fresh source then selected catalogue
+  items it never created, and failed as if the scheduler had chosen the wrong
+  series. The same fixture deleted `PipelineJob` while leaving `EngineJob` and
+  `ResultJob` behind — the identical defect, two lines apart. Mitigation: both
+  wipes clear children before parents, and every child of a parent they take
+  (`DataCatalogueItem`, `Asset`, `EngineJob`, `ResultJob`); `test_sync_scheduler`
+  now states its precondition — the source id it was handed is fresh — so a
+  future leak names itself instead of reading as a product bug; and
+  `conftest.py` enforces the cleanup convention it already documents, sweeping
+  every registered FK in `Base.metadata` at the end of each run and failing the
+  suite with the offending table pair named. One new test pins the invariant at
+  the module that broke it. Reproduced locally in 3.5 s as the exact CI triple
+  (`test_api_smoke` + `test_data_quality_routes` + `test_sync_scheduler`): red
+  before the fix, green after — which is also the record of why targeted runs
+  cannot see this class at all, and why "targeted pytest: N passed" on a
+  pipeline PR proves less than it appears to.
+- **CONTRIBUTING claimed a safety net that is not wired.** It said "deep suites
+  run on merges to `main`"; `backend-tests.yml`, `frontend-e2e.yml` and
+  `bundle-budget.yml` trigger on `schedule` and `workflow_dispatch` only, so
+  eight pipeline merges landed on `main` under nothing but the sub-minute gates
+  — and a reviewer who believed that sentence had no reason to dispatch the deep
+  run. The text now says what the workflows do, and states the rule the
+  two-tier design actually requires: a pipeline-touching change is proven by
+  hand (`gh workflow run backend-tests.yml --ref <branch>`) or by the local full
+  suite before it merges.
 - **A cache-served "success" no longer silently clears a down feed's backoff
   (pipeline-review finding F9).** The HTTP layer's stale-on-outage fallback
   is a sound availability trade — but it made a collection where the

@@ -30,13 +30,47 @@ from fastapi.testclient import TestClient
 
 from backend.api.main import app
 from backend.database import SessionLocal, init_db
+from backend.models.asset import Asset
+from backend.models.data_catalogue import DataCatalogueItem, DataCategory, DataRegion
 from backend.models.data_source import DataSource
 from backend.models.job import Job
-from backend.models.pipeline_job import DataJob, JobStatus, PipelineJob, PipelineStage
+from backend.models.pipeline_job import (
+    DataJob,
+    EngineJob,
+    JobStatus,
+    PipelineJob,
+    PipelineStage,
+    ResultJob,
+)
 
 client = TestClient(app)
 
 START = "/api/v1/data-quality"
+
+
+def _wipe_writers(db) -> None:
+    """Children before parents, and every child of a parent this wipe takes.
+
+    Deleting DataSource without the rows that point at it was a live failure on
+    main: this module cleared sources seeded by an earlier module, left their
+    ``DataCatalogueItem`` rows behind, and SQLite handed the freed ids to the
+    next module's INSERT. ``test_sync_scheduler``'s "enqueue-feed" source then
+    selected catalogue items it never created and failed as if the scheduler had
+    picked the wrong series. A parent-only delete is not a cleanup, it is a
+    state injection.
+
+    ``PipelineJob`` had the same shape: ``DataJob`` was cleared, ``EngineJob``
+    and ``ResultJob`` were not -- the same class, two lines apart.
+    """
+    db.query(DataJob).delete()
+    db.query(EngineJob).delete()
+    db.query(ResultJob).delete()
+    db.query(PipelineJob).delete()
+    db.query(Job).delete()
+    db.query(DataCatalogueItem).delete()
+    db.query(Asset).delete()
+    db.query(DataSource).delete()
+    db.commit()
 
 
 @pytest.fixture(autouse=True)
@@ -48,21 +82,14 @@ def _clean_tables():
     per test, not just per module; and the rows this module seeds would
     silently inflate every later module that counts sources or jobs.
     conftest documents the convention: modules keep their own within-run
-    cleanup.
+    cleanup -- and pins that no module leaves an orphan behind.
     """
     init_db()
     db = SessionLocal()
 
-    def _wipe() -> None:
-        db.query(DataJob).delete()
-        db.query(PipelineJob).delete()
-        db.query(Job).delete()
-        db.query(DataSource).delete()
-        db.commit()
-
-    _wipe()
+    _wipe_writers(db)
     yield
-    _wipe()
+    _wipe_writers(db)
     db.close()
 
 
@@ -202,3 +229,60 @@ def test_trends_buckets_both_writers_and_counts_failures(db):
     assert bucket["avg_quality_score"] == pytest.approx(85.6, abs=1e-4)
     assert bucket["error_count"] == 1  # the failed collection, from the production path
     assert payload["summary"]["total_jobs"] == 2
+
+
+def test_the_wipe_takes_every_row_that_points_at_what_it_deletes(db):
+    """The leak that reddened main, pinned where it was caused.
+
+    A parent-only delete is invisible to the module that performs it and lands
+    two modules away, indistinguishable from a product bug. Seed the whole
+    family this wipe touches -- a catalogue item and an asset on a source, and
+    the two pipeline children this module used to leave behind -- wipe, and
+    assert nothing survives pointing at a row that no longer exists.
+    """
+    source = _source(db, name="dq-orphan")
+    db.add_all(
+        [
+            DataCatalogueItem(
+                code="DQ_ORPHAN_SERIES",
+                name="Catalogue row attached to a source this wipe deletes",
+                category=DataCategory.ECONOMIC_INDICATORS,
+                region=DataRegion.GLOBAL,
+                data_source_id=source.id,
+                enabled=True,
+            ),
+            Asset(
+                symbol="DQORPHAN",
+                name="Asset row attached to the same source",
+                asset_type="index",
+                data_source_id=source.id,
+            ),
+        ]
+    )
+    db.commit()
+
+    data_job = _pipeline_data_job(db, quality_score=70.0, completeness=80.0)
+    db.add_all(
+        [
+            EngineJob(pipeline_job_id=data_job.pipeline_job_id, status=JobStatus.COMPLETED),
+            ResultJob(pipeline_job_id=data_job.pipeline_job_id, status=JobStatus.COMPLETED),
+        ]
+    )
+    db.commit()
+
+    _wipe_writers(db)
+
+    for model in (
+        DataJob,
+        EngineJob,
+        ResultJob,
+        PipelineJob,
+        Job,
+        DataCatalogueItem,
+        Asset,
+        DataSource,
+    ):
+        assert db.query(model).count() == 0, (
+            f"{model.__tablename__} survived the wipe: a row left behind here "
+            "outlives its parent and is read as state the next module never created"
+        )
