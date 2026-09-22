@@ -43,7 +43,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -62,6 +62,20 @@ SCALE_BREAK_LOG_RATIO = np.log(10.0)
 MIN_STALE_RUN = 10
 #: Days since the newest observation beyond which a dated dataset is stale.
 TIMELINESS_MAX_DAYS = 40.0
+
+#: Ordered registry of panel/edge identities: the first tuple whose columns
+#: are all present defines the frame's entity dimensions. Shared by the
+#: validator, the formatter and the quality gate -- the grain definition
+#: lives in exactly one place.
+IDENTITY_COLUMN_SETS: Tuple[Tuple[str, ...], ...] = (
+    ("source_bank", "target_bank"),
+    ("bank_id", "feature"),
+    ("bank_id",),
+    ("ticker",),
+    ("Asset",),
+    ("asset",),
+    ("instrument",),
+)
 # A single 40-day rule is only a safe fallback.  It labels perfectly healthy
 # quarterly and annual feeds as stale, while it gives daily feeds too much
 # slack.  These are deliberately warning thresholds rather than hard rejects:
@@ -142,6 +156,21 @@ def _value_column(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
+def identity_columns(df: pd.DataFrame) -> List[str]:
+    """Return the entity dimensions that define independent value series.
+
+    The grain definition lives here, in exactly one place, and is shared by
+    the validator (duplicate keys, per-entity checks), the formatter
+    (``series_id``) and the quality gate (per-entity KPSS). Pipeline-review
+    finding F5 landed because a grain fix had reached two of those three
+    consumers but not the gate.
+    """
+    for identity in IDENTITY_COLUMN_SETS:
+        if all(column in df.columns for column in identity):
+            return list(identity)
+    return []
+
+
 def _duplicate_key_columns(df: pd.DataFrame, date_col: str) -> List[str]:
     """Return the natural observation key for duplicate detection.
 
@@ -150,34 +179,7 @@ def _duplicate_key_columns(df: pd.DataFrame, date_col: str) -> List[str]:
     row per bank-to-bank edge for each quarter, so repeated dates are expected
     and only a repeated ``(date, source, target)`` edge is a duplicate.
     """
-    for identity in (
-        ("source_bank", "target_bank"),
-        ("bank_id", "feature"),
-        ("bank_id",),
-        ("ticker",),
-        ("Asset",),
-        ("asset",),
-        ("instrument",),
-    ):
-        if all(column in df.columns for column in identity):
-            return [date_col, *identity]
-    return [date_col]
-
-
-def _identity_columns(df: pd.DataFrame) -> List[str]:
-    """Return the entity dimensions that define independent value series."""
-    for identity in (
-        ("source_bank", "target_bank"),
-        ("bank_id", "feature"),
-        ("bank_id",),
-        ("ticker",),
-        ("Asset",),
-        ("asset",),
-        ("instrument",),
-    ):
-        if all(column in df.columns for column in identity):
-            return list(identity)
-    return []
+    return [date_col, *identity_columns(df)]
 
 
 def timeliness_tolerance_days(frequency: Optional[str]) -> float:
@@ -288,7 +290,7 @@ class DataValidator:
                 working["__row_position"] = np.arange(len(working))
                 if date_col:
                     working["__parsed_date"] = stamps
-                identity = _identity_columns(working)
+                identity = identity_columns(working)
                 if identity:
                     series_groups = working.groupby(identity, dropna=False, sort=False)
                 else:

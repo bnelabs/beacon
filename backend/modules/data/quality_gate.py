@@ -25,9 +25,14 @@ Stationarity: reported, not certified away
 The gate also runs the KPSS stationarity test (see
 :mod:`backend.modules.data.fractional`) on each non-empty value column, because
 a prediction engine that regresses non-stationary levels on one another can
-produce a spurious fit no accuracy score will reveal. The deliberate decision is
-to **report non-stationarity as a finding rather than fail certification by
-default**, and to make failing an explicit opt-in (``require_stationarity``).
+produce a spurious fit no accuracy score will reveal. Panel frames are assessed
+**per entity series** -- the same identity columns the validator and formatter
+use -- because KPSS on a column that interleaves many entities tests a mixture
+and means nothing; when a panel is wider than ``KPSS_PANEL_SERIES_CAP`` the
+scan assesses a deterministic equispaced sample and the check detail says so.
+The deliberate decision is to **report non-stationarity as a finding rather
+than fail certification by default**, and to make failing an explicit opt-in
+(``require_stationarity``).
 
 The reasoning is that this gate certifies *raw collected* data, and raw
 financial levels are non-stationary by construction: prices, exchange rates and
@@ -81,8 +86,16 @@ from backend.exceptions import (
     SchemaValidationError,
 )
 from .fractional import KPSS_CRITICAL_VALUES, KPSS_MIN_OBSERVATIONS, kpss_test
+from .validator import identity_columns
 
 logger = logging.getLogger(__name__)
+
+#: Entity series a panel dataset contributes to the KPSS scan, at most.
+#: Panels (interbank edge tables, per-bank features) can carry tens of
+#: thousands of entity series; the scan assesses a deterministic equispaced
+#: sample and says so in the check detail. An honest verdict names what it
+#: actually saw; the cap bounds the cost.
+KPSS_PANEL_SERIES_CAP = 25
 
 # Sink signature: (source_name, issue_description, severity)
 AlertSink = Callable[[str, str, str], None]
@@ -772,42 +785,25 @@ class DataQualityGate:
                 )
                 continue
 
-            results: Dict[str, Optional[Any]] = {}
-            fragments: List[str] = []
-            for regression in ("level", "trend"):
-                try:
-                    result = kpss_test(
-                        series,
-                        regression=regression,
-                        significance=policy.stationarity_significance,
+            # Panels carry many entity series interleaved in one column; KPSS
+            # on the raw mixture is statistically meaningless (finding F5 --
+            # the validator and formatter got grain fixes in #100/#101, this
+            # scan had not). Assess per entity, on a deterministic sample
+            # when the panel is wider than the cap.
+            identity = identity_columns(df)
+            if identity:
+                checks.append(
+                    self._panel_stationarity_check(
+                        name=name,
+                        df=df,
+                        column=column,
+                        identity=identity,
+                        policy=policy,
                     )
-                except ValueError as exc:
-                    results[regression] = None
-                    fragments.append(f"{regression}: not assessable ({exc})")
-                else:
-                    results[regression] = result
-                    fragments.append(
-                        f"{regression}: {result.statistic:.3f} "
-                        f"({result.verdict} at {result.significance})"
-                    )
+                )
+                continue
 
-            rejected = [
-                regression
-                for regression, result in results.items()
-                if result is not None and not result.stationary
-            ]
-            accepted = [
-                regression
-                for regression, result in results.items()
-                if result is not None and result.stationary
-            ]
-            if accepted:
-                verdict = "stationary"
-            elif len(rejected) == 2:
-                verdict = "non-stationary"
-            else:
-                verdict = "unassessable"
-
+            verdict, fragments = self._classify_series(series, policy)
             summary = "; ".join(fragments)
             if verdict == "stationary":
                 checks.append(
@@ -840,6 +836,162 @@ class DataQualityGate:
                 )
             )
         return checks
+
+    def _classify_series(self, series: np.ndarray, policy: QualityPolicy):
+        """Run both KPSS variants on one series and classify the verdict.
+
+        Returns ``(verdict, fragments)`` where verdict is ``"stationary"``
+        (either null survives), ``"non-stationary"`` (both reject -- the
+        level-only rejection signature of trend stationarity is deliberately
+        *not* a failure) or ``"unassessable"`` (a variant that cannot be
+        computed proves nothing either way). Shared by the scalar path and
+        the per-entity panel path so the two can never drift apart.
+        """
+        results: Dict[str, Optional[Any]] = {}
+        fragments: List[str] = []
+        for regression in ("level", "trend"):
+            try:
+                result = kpss_test(
+                    series,
+                    regression=regression,
+                    significance=policy.stationarity_significance,
+                )
+            except ValueError as exc:
+                results[regression] = None
+                fragments.append(f"{regression}: not assessable ({exc})")
+            else:
+                results[regression] = result
+                fragments.append(
+                    f"{regression}: {result.statistic:.3f} "
+                    f"({result.verdict} at {result.significance})"
+                )
+
+        rejected = [
+            regression
+            for regression, result in results.items()
+            if result is not None and not result.stationary
+        ]
+        accepted = [
+            regression
+            for regression, result in results.items()
+            if result is not None and result.stationary
+        ]
+        if accepted:
+            verdict = "stationary"
+        elif len(rejected) == 2:
+            verdict = "non-stationary"
+        else:
+            verdict = "unassessable"
+        return verdict, fragments
+
+    def _panel_stationarity_check(
+        self,
+        *,
+        name: str,
+        df: pd.DataFrame,
+        column: str,
+        identity: List[str],
+        policy: QualityPolicy,
+    ) -> QualityCheck:
+        """KPSS at panel grain, on a deterministic sample of entity series.
+
+        Entities are the same identity columns the validator and formatter
+        use; values are date-ordered within each entity before testing (the
+        provider's row order is not a time order). When the panel is wider
+        than :data:`KPSS_PANEL_SERIES_CAP`, an equispaced sample of the
+        sorted entity keys is assessed and the detail says so -- the verdict
+        names what it actually saw.
+
+        Per-entity degenerate series (constant, or no finite values) are
+        counted, not failed: one frozen edge does not make the payload
+        information-free -- the whole-column pre-checks in
+        :meth:`_stationarity_checks` already fail that case, and the
+        declared-event exemption applies there too.
+        """
+        working = df.copy()
+        working["__row_position"] = np.arange(len(working))
+        date_col = next(
+            (candidate for candidate in ("Date", "date", "timestamp", "time") if candidate in df.columns),
+            None,
+        )
+        if date_col is not None:
+            working["__parsed_date"] = pd.to_datetime(working[date_col], errors="coerce")
+
+        index_by_key: Dict[str, Any] = {
+            str(key): index
+            for key, index in working.groupby(identity, dropna=False, sort=False).groups.items()
+        }
+        keys = sorted(index_by_key)
+        total = len(keys)
+
+        cap = KPSS_PANEL_SERIES_CAP
+        if total > cap:
+            positions = np.unique(np.linspace(0, total - 1, cap).round().astype(int))
+            selected = [keys[position] for position in positions]
+        else:
+            selected = keys
+
+        counts = {"stationary": 0, "non-stationary": 0, "unassessable": 0, "degenerate": 0}
+        offending: List[str] = []
+        for key in selected:
+            sub = working.loc[index_by_key[key]]
+            if date_col is not None:
+                sub = sub.sort_values(["__parsed_date", "__row_position"], kind="mergesort")
+            values = pd.to_numeric(sub[column], errors="coerce").to_numpy(dtype=float)
+            values = values[np.isfinite(values)]
+            if values.size == 0 or float(np.ptp(values)) == 0.0:
+                counts["degenerate"] += 1
+                continue
+            if values.size < KPSS_MIN_OBSERVATIONS:
+                counts["unassessable"] += 1
+                continue
+            verdict, _fragments = self._classify_series(values, policy)
+            counts[verdict] += 1
+            if verdict == "non-stationary" and len(offending) < 3:
+                offending.append(key)
+
+        detail = (
+            f"panel on ({', '.join(identity)}): assessed {len(selected)} of {total} "
+            f"entity series"
+            + (f" (deterministic equispaced sample, cap {cap})" if total > cap else "")
+            + f": {counts['stationary']} stationary, {counts['non-stationary']} "
+            f"non-stationary under both level and trend, {counts['unassessable']} not "
+            f"assessable, {counts['degenerate']} degenerate"
+            + (f"; e.g. {', '.join(offending)}" if offending else "")
+        )
+
+        if counts["non-stationary"] > 0:
+            verdict = "non-stationary"
+        elif counts["stationary"] > 0:
+            verdict = "stationary"
+        else:
+            verdict = "unassessable"
+
+        if verdict == "stationary":
+            return QualityCheck(
+                name=name,
+                passed=True,
+                severity="critical",
+                detail=f"KPSS stationarity not rejected; {detail}",
+            )
+
+        blocking = bool(policy.require_stationarity)
+        suffix = "" if blocking else "; reported, not blocking"
+        if verdict == "non-stationary":
+            text = (
+                f"KPSS rejects stationarity in {counts['non-stationary']} entity "
+                f"series; {detail}{suffix}"
+            )
+        else:
+            text = f"KPSS could not assess any entity series; {detail}{suffix}"
+        if not blocking:
+            logger.warning("Data-quality finding for %s: %s", name, text)
+        return QualityCheck(
+            name=name,
+            passed=not blocking,
+            severity="critical" if blocking else "warning",
+            detail=text,
+        )
 
     def _emit_alert(self, job_id: str, attestation: QualityAttestation) -> None:
         logger.error(attestation.summary())

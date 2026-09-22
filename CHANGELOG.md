@@ -165,6 +165,27 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   evaluate, the v3 sequence).
 
 ### Fixed
+- **The quality gate's KPSS scan now respects panel grain (pipeline-review
+  finding F5).** #100 and #101 fixed entity grain in the validator and the
+  formatter, but `_stationarity_checks` still ran KPSS over the raw value
+  column: for a panel frame (interbank edge tables, per-bank features) that
+  tests an interleaved mixture of entity series — a statistically
+  meaningless verdict, harmless while stationarity is report-only and
+  blocking-legitimate data the moment a deployment sets
+  `require_stationarity=True`. The scan now groups by the *same* identity
+  registry the validator and formatter use (extracted to
+  `validator.identity_columns`; the formatter's duplicate copy delegates),
+  date-orders values within each entity, and assesses up to
+  `KPSS_PANEL_SERIES_CAP = 25` entity series — a deterministic equispaced
+  sample of the sorted keys when a panel is wider, with the check detail
+  naming what it actually saw ("assessed 25 of 4,548 entity series…") and
+  the offending edges. Per-entity degenerate series (one frozen edge) are
+  counted, not failed — the whole-column degeneracy check and the
+  declared-event exemption already cover a payload where nothing moves.
+  Scalar frames report exactly as before. Six tests in
+  `test_stationarity.py` pin the contract (per-entity detection, row-order
+  insensitivity, deterministic sampling, blocking policy per entity, frozen
+  edge counted, scalar detail unchanged).
 - **The validator's integrity findings are enforced at last — the
   orchestrator's `critical_errors` branch was dead code (pipeline-review
   finding F4).** `ValidationReport.critical_errors` was declared and never

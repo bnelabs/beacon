@@ -13,19 +13,17 @@ class DataFormatter:
 
     @staticmethod
     def _identity_columns(df: pd.DataFrame):
-        """Return panel dimensions that identify an independent series."""
-        for identity in (
-            ("source_bank", "target_bank"),
-            ("bank_id", "feature"),
-            ("bank_id",),
-            ("ticker",),
-            ("Asset",),
-            ("asset",),
-            ("instrument",),
-        ):
-            if all(column in df.columns for column in identity):
-                return list(identity)
-        return []
+        """Return panel dimensions that identify an independent series.
+
+        Delegates to the validator's registry: the grain definition lives in
+        exactly one place, shared by duplicate-key detection, per-entity
+        validation, ``series_id`` here, and the quality gate's per-entity
+        KPSS (pipeline-review finding F5 -- a grain fix had reached the
+        validator and this file but not the gate).
+        """
+        from backend.modules.data.validator import identity_columns
+
+        return identity_columns(df)
 
     def format(
         self,

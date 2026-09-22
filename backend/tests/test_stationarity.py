@@ -363,3 +363,156 @@ def test_gate_still_rejects_an_empty_payload() -> None:
         gate.enforce({"A": pd.DataFrame()}, job_id="job-empty")
 
     assert excinfo.value.code == "EMPTY_DATASET"
+
+
+# ---------------------------------------------------------------------------
+# Panel grain: KPSS must assess entity series, not their interleaved mixture
+# (pipeline-review finding F5 -- the validator and formatter got grain fixes
+# in #100/#101; these pin the gate's scan to the same identity registry)
+# ---------------------------------------------------------------------------
+
+
+def _panel_frame(specs, n_obs: int) -> pd.DataFrame:
+    """One edge table: ``specs`` is a list of (source, target, values)."""
+    dates = pd.date_range("2023-01-01", periods=n_obs, freq="D")
+    return pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "Date": dates,
+                    "source_bank": source,
+                    "target_bank": target,
+                    "Value": values,
+                }
+            )
+            for source, target, values in specs
+        ],
+        ignore_index=True,
+    )
+
+
+def _stationarity_check(attestation) -> "QualityCheck":  # noqa: F821
+    checks = [c for c in attestation.checks if c.name.startswith("stationarity[")]
+    assert checks, "the gate never ran KPSS on the payload"
+    assert len(checks) == 1
+    return checks[0]
+
+
+def test_panel_scan_assesses_entities_not_the_mixture() -> None:
+    """One random-walk edge among stationary edges is named, per entity."""
+    rng = np.random.default_rng(20260920)
+    panel = _panel_frame(
+        [
+            ("A", "B", rng.normal(size=400)),
+            ("A", "C", rng.normal(size=400)),
+            ("B", "C", np.cumsum(rng.normal(size=400))),  # unit root
+        ],
+        n_obs=400,
+    )
+    gate = DataQualityGate(QualityPolicy(min_total_rows=5))
+
+    check = _stationarity_check(gate.evaluate({"EDGES": panel}, job_id="job-panel"))
+
+    assert check.name == "stationarity[EDGES.Value]"
+    assert "panel on (source_bank, target_bank)" in check.detail
+    assert "assessed 3 of 3 entity series" in check.detail
+    assert "1 non-stationary under both level and trend" in check.detail
+    assert "2 stationary" in check.detail
+    assert "('B', 'C')" in check.detail  # the offending edge is named
+    # report-only by default, exactly like the scalar path
+    assert check.passed is True and check.severity == "warning"
+
+
+def test_panel_verdict_is_order_insensitive_within_entities() -> None:
+    """Provider row order is not a time order; the scan must sort per entity."""
+    rng = np.random.default_rng(20260921)
+    panel = _panel_frame(
+        [
+            ("A", "B", rng.normal(size=300)),
+            ("B", "C", np.cumsum(rng.normal(size=300))),
+        ],
+        n_obs=300,
+    )
+    shuffled = panel.sample(frac=1.0, random_state=7).reset_index(drop=True)
+    gate = DataQualityGate(QualityPolicy(min_total_rows=5))
+
+    check = _stationarity_check(gate.evaluate({"EDGES": shuffled}, job_id="job-shuffled"))
+
+    assert "1 non-stationary under both level and trend" in check.detail
+    assert "1 stationary" in check.detail
+
+
+def test_wide_panels_are_sampled_deterministically_and_say_so() -> None:
+    """60 entities, cap 25: the verdict must name what it actually saw."""
+    rng = np.random.default_rng(20260922)
+    specs = [
+        (f"B{i:03d}", "HUB", rng.normal(size=12)) for i in range(60)
+    ]
+    panel = _panel_frame(specs, n_obs=12)
+    gate = DataQualityGate(QualityPolicy(min_total_rows=5))
+
+    first = _stationarity_check(gate.evaluate({"EDGES": panel}, job_id="job-cap-1"))
+    second = _stationarity_check(gate.evaluate({"EDGES": panel}, job_id="job-cap-2"))
+
+    assert "assessed 25 of 60 entity series" in first.detail
+    assert "deterministic equispaced sample, cap 25" in first.detail
+    assert first.detail == second.detail  # the sample is a function of the keys
+
+
+def test_require_stationarity_blocks_on_a_nonstationary_entity() -> None:
+    """The opt-in blocking policy applies per entity, same as the scalar path."""
+    rng = np.random.default_rng(20260923)
+    panel = _panel_frame(
+        [
+            ("A", "B", rng.normal(size=300)),
+            ("B", "C", np.cumsum(rng.normal(size=300))),
+        ],
+        n_obs=300,
+    )
+    gate = DataQualityGate(QualityPolicy(min_total_rows=5, require_stationarity=True))
+
+    attestation = gate.evaluate({"EDGES": panel}, job_id="job-panel-strict")
+    assert attestation.verified is False
+    check = _stationarity_check(attestation)
+    assert check.passed is False and check.severity == "critical"
+
+    with pytest.raises(DataQualityError) as excinfo:
+        gate.enforce({"EDGES": panel}, job_id="job-panel-strict-2")
+    assert excinfo.value.code == "DATA_QUALITY_FAILED"
+
+
+def test_one_frozen_edge_is_counted_not_failed() -> None:
+    """A constant entity inside a live panel is a count, not a rejection.
+
+    The whole-column degeneracy failure (and the declared-event exemption)
+    already cover a payload where *nothing* moves; one frozen edge among
+    live ones must not void an otherwise healthy panel.
+    """
+    rng = np.random.default_rng(20260924)
+    panel = _panel_frame(
+        [
+            ("A", "B", rng.normal(size=100)),
+            ("F", "G", np.full(100, 3.14)),  # frozen edge
+        ],
+        n_obs=100,
+    )
+    gate = DataQualityGate(QualityPolicy(min_total_rows=5, require_stationarity=True))
+
+    check = _stationarity_check(gate.evaluate({"EDGES": panel}, job_id="job-frozen-edge"))
+
+    assert "1 degenerate" in check.detail
+    assert "1 stationary" in check.detail
+    assert check.passed is True  # strict policy: the live entity is stationary
+
+
+def test_scalar_frames_keep_the_scalar_detail() -> None:
+    """The panel branch must not change what a plain series reports."""
+    rng = np.random.default_rng(20260925)
+    gate = DataQualityGate(QualityPolicy(min_total_rows=5))
+
+    check = _stationarity_check(
+        gate.evaluate({"MACRO": _frame(rng.normal(size=200))}, job_id="job-scalar")
+    )
+
+    assert "panel on" not in check.detail
+    assert "level:" in check.detail and "trend:" in check.detail
