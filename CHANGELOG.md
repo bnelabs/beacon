@@ -165,6 +165,25 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   evaluate, the v3 sequence).
 
 ### Fixed
+- **`indicator_observations` has a production writer at last — the README
+  claimed one since 2026-09-17 and none existed (pipeline-review finding
+  F1, class "mislead").** `record_observations` and its vintage-log append
+  were exercised only by store tests while every real collection wrote
+  parquet + job-result JSON and nothing else; the hypertable, its continuous
+  aggregate and `observations_as_of` re-derivability were dead in
+  production. `persist_observations` (in `tasks/job_tasks.py`, beside the
+  other two persistence helpers) now runs in `run_data_collection` after the
+  quality gate certifies the package: scalar indicator rows are upserted
+  with publisher plugin type, catalogue code, region, the gate's quality
+  score and the ingest job id, and every write appends its vintage. Panel
+  and asset rows are skipped and counted — the (time, source, indicator,
+  region) key would silently collapse them, and the exposure store owns
+  network-shaped data; invalid rows and unmapped codes are skipped and
+  counted, never zero-filled or invented; duplicate keys inside one payload
+  collapse last-wins (one ON CONFLICT statement may not touch a row twice).
+  Storage failure degrades to a warning like the other writers; the counts
+  travel in the job result. README's storage bullet now names the writer.
+  `backend/tests/test_observation_writer.py` pins the contract (6 tests).
 - **Two pre-metric executor defects in the v4 runner, found and fixed before
   any result existed (diffs recorded in the v4 execution log).** (1) The BIS
   licence-line extraction recorded JSON-LD page furniture instead of the

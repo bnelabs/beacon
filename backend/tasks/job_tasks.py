@@ -99,6 +99,142 @@ def persist_model_metrics(db, job_id: int, metrics: dict, model_version: str) ->
     return TimeSeriesStore(db).record_model_metrics(rows)
 
 
+#: Observation rows per upsert transaction. A five-year daily panel across
+#: every catalogue source is tens of thousands of rows; they should not ride
+#: in one statement (and one vintage-log commit) per run.
+OBSERVATION_PERSIST_CHUNK = 5000
+
+
+def persist_observations(db, job_id: int, data_package, catalogue_items) -> dict:
+    """Write the certified scalar indicator rows to the observations store.
+
+    ``indicator_observations`` and its append-only vintage log existed since
+    the TimescaleDB migration with no production writer -- the pipeline review
+    (finding F1) named the gap and the stale README claim beside it. This is
+    the writer, placed where the other two persistence helpers live and
+    called from ``run_data_collection`` *after* the quality gate certified the
+    package, so only rows the gate verified reach the store and every row
+    carries its ingest job for provenance (the job result carries the gate's
+    attestation and snapshot id).
+
+    Semantics, stated so they are not guessed at later:
+
+    * Only **scalar indicator series** are persisted -- rows whose formatter
+      ``series_id`` equals the catalogue code. Panel and asset rows carry an
+      entity identity inside ``series_id``; they are not scalar indicators,
+      and the store's (time, source, indicator, region) key would silently
+      collapse them, so they are skipped and counted. The bilateral-exposure
+      store owns the network-shaped data.
+    * Rows without a parseable date or a finite value are skipped and
+      counted: ``value`` is NOT NULL, and writing a NaN as a zero is exactly
+      the fabrication this pipeline refuses.
+    * ``source_code`` is the *plugin type* of the data source behind the
+      catalogue item (a stable machine identity); ``indicator_code`` is the
+      catalogue code. A code that maps to no configured source is skipped
+      rather than written under an invented publisher.
+    * Duplicate keys within the payload are collapsed (last wins) before the
+      upsert, because one ON CONFLICT statement may not touch the same row
+      twice; the collapse is counted, never silent.
+    """
+    import pandas as pd
+
+    from backend.models.data_catalogue import DataCatalogueItem
+    from backend.modules.results.timeseries_store import TimeSeriesStore
+
+    counts = {
+        "persisted": 0,
+        "skipped_panel": 0,
+        "skipped_invalid": 0,
+        "skipped_unmapped": 0,
+        "collapsed_duplicates": 0,
+    }
+
+    frame = pd.read_parquet(data_package.timeseries_path)
+    if frame.empty:
+        return counts
+
+    for column in ("Date", "value", "source_code", "series_id"):
+        if column not in frame.columns:
+            logger.warning(
+                "Observation persistence skipped for job %s: formatted payload has no %r column",
+                job_id,
+                column,
+            )
+            return counts
+
+    # The catalogue contract: code -> (publisher plugin type, region value).
+    items = (
+        db.query(DataCatalogueItem)
+        .filter(DataCatalogueItem.id.in_(list(catalogue_items or [])))
+        .all()
+    )
+    publishers: dict = {}
+    for item in items:
+        source = item.data_source
+        plugin_type = getattr(source, "plugin_type", None) if source else None
+        region = getattr(getattr(item, "region", None), "value", None) or "global"
+        publishers[item.code] = (plugin_type, str(region))
+
+    scalar = frame[frame["series_id"].astype(str) == frame["source_code"].astype(str)]
+    counts["skipped_panel"] = int(len(frame) - len(scalar))
+
+    # Naive-by-convention provider dates are read as UTC, the convention the
+    # validator and the PIT store already state; the column is timestamptz.
+    times = pd.to_datetime(scalar["Date"], errors="coerce", utc=True)
+    values = pd.to_numeric(scalar["value"], errors="coerce").to_numpy(dtype=float)
+    codes = scalar["source_code"].astype(str).to_numpy()
+    units = (
+        scalar["unit"].to_numpy() if "unit" in scalar.columns else np.full(len(scalar), None, dtype=object)
+    )
+
+    quality_report = getattr(data_package, "quality_report", None)
+    raw_score = getattr(quality_report, "quality_score", None)
+    quality_score = float(raw_score) if raw_score is not None else None
+
+    def _clean_unit(unit) -> str | None:
+        if unit is None or pd.isna(unit):
+            return None
+        text = str(unit).strip()
+        if not text or text in {"None", "nan", "<NA>"}:
+            return None
+        return text[:50]
+
+    deduped: dict = {}
+    for position in range(len(scalar)):
+        stamp = times.iat[position]
+        value = values[position]
+        if pd.isna(stamp) or not np.isfinite(value):
+            counts["skipped_invalid"] += 1
+            continue
+        code = codes[position]
+        publisher = publishers.get(code)
+        if publisher is None or not publisher[0]:
+            counts["skipped_unmapped"] += 1
+            continue
+        plugin_type, region = publisher
+        key = (stamp, plugin_type, code, region)
+        if key in deduped:
+            counts["collapsed_duplicates"] += 1
+        deduped[key] = {
+            "time": stamp.to_pydatetime(),
+            "source_code": str(plugin_type)[:100],
+            "indicator_code": code[:100],
+            "region": region[:50],
+            "country": None,
+            "value": float(value),
+            "unit": _clean_unit(units[position]),
+            "quality_score": quality_score,
+            "ingest_job_id": f"job_{job_id}",
+        }
+
+    rows = list(deduped.values())
+    store = TimeSeriesStore(db)
+    for start in range(0, len(rows), OBSERVATION_PERSIST_CHUNK):
+        chunk = rows[start : start + OBSERVATION_PERSIST_CHUNK]
+        counts["persisted"] += store.record_observations(chunk)
+    return counts
+
+
 def error_details_to_json(error_details) -> str:
     """Convert ErrorDetails (dict or dataclass) to JSON string for database storage."""
     try:
@@ -239,6 +375,21 @@ def run_data_collection(self, job_id: int, parameters: dict):
             fail_on_any_error=fail_on_any_error,
         )
 
+        # Persist the certified scalar observations to the timeseries store
+        # (and its vintage log). Wrapped like the other two persistence
+        # helpers: a storage outage must not void a certified collection,
+        # but it is logged and the counts travel in the job result either way.
+        observation_counts = {"persisted": 0}
+        try:
+            observation_counts = persist_observations(db, job_id, data_package, catalogue_items)
+            logger.info(
+                "Persisted %d observation row(s) for job %s",
+                observation_counts.get("persisted", 0),
+                job_id,
+            )
+        except Exception as persist_exc:  # noqa: BLE001 - storage outage must not void the collection
+            logger.warning("Observation persistence skipped for job %s: %s", job_id, persist_exc)
+
         self.update_progress(job_id, 95.0)
 
         # Calculate memory usage
@@ -261,6 +412,7 @@ def run_data_collection(self, job_id: int, parameters: dict):
             "countries": selected_countries,
             "collection_report": (data_package.metadata or {}).get("collection_report"),
             "fail_on_any_error": fail_on_any_error,
+            "observations_persisted": observation_counts,
         })
 
         service.update_job_status(
