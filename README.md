@@ -77,8 +77,10 @@ Storage (TimescaleDB + Redis)
   └── Point-in-time store for bilateral exposure vintages (as-of queries)
   └── Redis: Celery broker, result backend, WebSocket relay
   └── The schema covers indicator observations, risk scores and model
-      metrics, and all three now have writers: observations via the DATA
-      pipeline, risk scores via `persist_risk_scores` on prediction jobs
+      metrics, and all three now have writers: observations via
+      `persist_observations` on collection jobs (certified rows only;
+      panel/asset rows are skipped and counted, never collapsed into the
+      scalar key), risk scores via `persist_risk_scores` on prediction jobs
       (null-scored/refused rows are skipped), model metrics via
       `persist_model_metrics` on backtest jobs
 
