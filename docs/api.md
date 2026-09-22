@@ -164,6 +164,23 @@ in `Job.result`, the source link in `Job.parameters.data_source_id`) and the
 gate's certification floor (`QualityPolicy.min_quality_score`, default 70).
 Completeness is reported on the gate's 0–100 scale, verbatim.
 
+**Both scores, everywhere, are 0–100 percentages.** `quality_score`,
+`completeness`, `avg_quality_score` and `avg_completeness` are on the gate's own
+scale — the scale `QualityPolicy` is written in (`min_quality_score = 70`,
+`min_completeness = 80`, `completeness = 100 × (1 − missing_ratio)`) — and
+nothing rescales them on the way out. That is true of `/api/v1/analytics/overview`,
+`/api/v1/analytics/trends/time-series?metric=quality|completeness`,
+`/api/v1/analytics/insights/anomalies` and the per-job report
+`/api/v1/results/{job_id}/data-quality` exactly as much as of this group.
+Until now only completeness was stated here, and the analytics endpoints were
+documented by neither this file nor any test: three UI readers still treated
+the scores as 0–1 fractions (a real 85.6 rendered as 8560.0% and was coloured
+"excellent"), and one guessed the unit per value
+(`value > 1 ? value : value * 100`). `backend/tests/test_quality_unit_contract.py`
+pins the scale at the boundary, the analytics readers are pinned to both
+writers, and the end-to-end specs assert the rendered percentages rather than
+only the labels around them.
+
 Freshness buckets are fixed: **fresh** ≤7 days, **stale** 7–30 days,
 **outdated** >30 days, **never_synced** for a source with no successful fetch.
 

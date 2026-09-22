@@ -165,6 +165,41 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   evaluate, the v3 sequence).
 
 ### Fixed
+- **`/api/v1/analytics/*` still read the table production never writes — finding
+  F2's twin, in three places.** #103 moved `/api/v1/data-quality/*` onto both
+  collection writers and left the analytics routes on `DataJob ⋈ PipelineJob`:
+  the overview card, the `quality` and `completeness` trend series, and the
+  `quality_degradation` anomaly detector. On any deployment collecting through
+  `POST /api/v1/jobs`, the per-source sync, or the scheduler — that is, every
+  deployment the README documents — the "Data Quality Metrics" card reported 0
+  while collections succeeded and their gate verdicts sat unread in `Job.result`,
+  and a 90 → 40 quality slide could not be reported because the detector had
+  nothing to compare. All three now read `data_quality.quality_evidence`, renamed
+  public for exactly this reason (one evidence list, three consumers). No test hit
+  `/api/v1/analytics/*` before this; `test_quality_unit_contract.py` seeds
+  job-path collections and asserts the card, both series, and the anomaly, and
+  was verified to fail against the pre-fix readers.
+- **Quality scores were 0–100 at the API and 0–1 in three readers, and no green
+  run could see it.** The gate works in percentages (`min_quality_score = 70`,
+  `min_completeness = 80`, `completeness = 100 × (1 − missing_ratio)`) and every
+  endpoint returns them verbatim, but `DataQuality.tsx` tested its thresholds
+  against 0.7/0.5 and multiplied the score by 100 a second time — a real 85.6
+  displayed as `8560.0%` and coloured "excellent" — `Analytics.tsx` did the same
+  to both scores, and `Jobs.tsx` guessed the unit per value
+  (`value > 1 ? value : value * 100`), which made 0.9 and 92 both print 90% and
+  made the disagreement unprovable. The e2e mocks encoded 0–1 for
+  `avg_quality_score` and 0–100 for `avg_completeness` **in the same object**, and
+  `pages.spec.js` asserted headings and labels but never a number: a Tier-2 that
+  was green because it measured nothing. Mocks now carry gate-scale values, the
+  readers render them verbatim against the policy floors, `types/api.ts` and
+  `docs/api.md` state the unit, and the specs assert `76.0%`, `92.0%`, `88.0%`,
+  `82.0%` and `90.0%` plus "no percentage with a four-digit integer part anywhere
+  on either page" — verified to fail against the old readers. Same root cause,
+  recorded rather than silently reinterpreted: the only alert rule this suite
+  evaluates compares `quality_score` against `0.8`, so a data-quality floor
+  written that way can never breach a gate-scale score. Both dispositions are
+  pinned in `test_quality_unit_contract.py`; re-basing any existing operator rule
+  is an owner decision, not a migration in disguise.
 - **A test module's parent-only delete reddened the deep suite two modules
   away.** The deep run on `main` (`e78f6ba`, 2026-09-22) failed
   `test_sync_scheduler.py::test_enqueue_creates_the_same_job_a_human_does` with

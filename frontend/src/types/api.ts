@@ -9,6 +9,17 @@
  * the failure mode that motivated the TypeScript migration in
  * docs/LANGUAGE_STRATEGY.md — becomes a compile error instead of an
  * `undefined%` in production.
+ *
+ * **Units.** `quality_score`, `completeness`, `avg_quality_score` and
+ * `avg_completeness` are 0-100 percentages on the quality gate's own scale --
+ * the scale `QualityPolicy` is written in (`min_quality_score = 70`,
+ * `min_completeness = 80`) and the scale `Job.result` stores. They are not 0-1
+ * fractions, and no consumer multiplies them by 100. Nothing said so until
+ * now: three readers treated them as fractions (a real 85.6 rendered as
+ * 8560.0%), one guessed per value (`value > 1 ? value : value * 100`), and the
+ * e2e mocks carried both units in the same object, so a green end-to-end run
+ * could not see the disagreement. `backend/tests/test_quality_unit_contract.py`
+ * pins the scale at the boundary; `pages.spec.js` asserts the rendered numbers.
  */
 
 /** A backend primary key: tolerate string or number across endpoints. */
@@ -136,7 +147,8 @@ export interface EventDefinitionInput {
   min_duration: number
 }
 
-/** `GET /v1/results/{jobId}/data-quality` for a collection job. */
+/** `GET /v1/results/{jobId}/data-quality` for a collection job.
+ * `quality_score` and `completeness` are 0-100 gate percentages. */
 export interface JobDataQualityReport {
   quality_score?: number | null
   completeness?: number | null
@@ -666,6 +678,7 @@ export interface DataQualityFreshness {
   freshness_percentage: number
 }
 
+/** 0-100 gate percentages (see the Units note at the top of this file). */
 export interface DataQualityScores {
   avg_quality_score: number
   avg_completeness?: number | null
@@ -696,11 +709,12 @@ export interface SourceQualityRow {
   enabled?: boolean | null
   freshness_status: string
   days_since_update: number | null
+  /** 0-100 gate percentage, or null when the source has no verdict yet. */
   avg_quality_score: number | null
   last_fetch?: string | null
 }
 
-/** One point of `GET /v1/data-quality/trends`. */
+/** One point of `GET /v1/data-quality/trends`. 0-100 gate percentage. */
 export interface QualityTrendPoint {
   date: string
   avg_quality_score: number
@@ -730,6 +744,7 @@ export interface AnalyticsModelStats {
   total?: number | null
 }
 
+/** The same 0-100 gate percentages `/v1/data-quality/*` publishes. */
 export interface AnalyticsDataQualityStats {
   avg_quality_score?: number | null
   avg_completeness?: number | null

@@ -107,8 +107,13 @@ def _pipeline_job_evidence(db: Session, since: datetime) -> List[Dict[str, Any]]
     ]
 
 
-def _quality_evidence(db: Session, since: datetime) -> List[Dict[str, Any]]:
-    """Both writers, one list."""
+def quality_evidence(db: Session, since: datetime) -> List[Dict[str, Any]]:
+    """Both writers, one list.
+
+    Shared on purpose: `/api/v1/analytics/*` reports the same two figures on
+    the same scale, and the last time two readers each built their own list,
+    one of them (finding F2) quietly read a table production never writes.
+    """
     return _collection_job_evidence(db, since) + _pipeline_job_evidence(db, since)
 
 
@@ -164,7 +169,7 @@ async def get_data_quality_stats(
 
         # Quality evidence from BOTH collection writers: the production job
         # path (Job.result JSON) and the pipeline route (DataJob rows).
-        evidence = _quality_evidence(db, now - timedelta(days=30))
+        evidence = quality_evidence(db, now - timedelta(days=30))
 
         quality_scores = [item["quality_score"] for item in evidence]
         completeness_scores = [
@@ -352,7 +357,7 @@ async def get_quality_trends(
 
         # Daily buckets from BOTH writers, keyed by completion date.
         evidence = [
-            item for item in _quality_evidence(db, start_date) if item.get("created_at")
+            item for item in quality_evidence(db, start_date) if item.get("created_at")
         ]
 
         daily_metrics = {}

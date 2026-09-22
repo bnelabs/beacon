@@ -268,12 +268,16 @@ function JobDetails({ jobId, onOpenModel, onOpenResults, onCreateTraining, onRet
     jobResult?.model?.id ??
     (isTrainingJob ? job.id : undefined)
   const qualityData = qualityQuery.data
+  // `quality_score` and `completeness` are gate-scale: 0-100 percentages
+  // (`QualityPolicy.min_quality_score = 70`, `min_completeness = 80`). This
+  // used to guess the unit per value — `numeric > 1 ? numeric : numeric * 100`
+  // — so both 0.9 and 92 printed as 90% and neither could be called wrong.
+  // A unit that has to be inferred is a unit that will be inferred wrong.
   const formatPercent = (value?: number | null) => {
     if (value === null || value === undefined) return '—'
     const numeric = Number(value)
     if (!Number.isFinite(numeric)) return '—'
-    const scaled = numeric > 1 ? numeric : numeric * 100
-    return `${Math.round(scaled)}%`
+    return `${numeric.toFixed(1)}%`
   }
 
   const trainingHighlights = isTrainingJob ? [

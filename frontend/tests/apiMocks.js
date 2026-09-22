@@ -164,10 +164,15 @@ const jobsList = [
 // GET /api/v1/jobs/{id} answers the same JobResponse shape as the list.
 const jobDetailsMap = Object.fromEntries(jobsList.map(job => [job.id, job]))
 
+// Quality and completeness values below are gate-scale: 0-100 percentages, the
+// units `QualityPolicy.min_quality_score = 70` / `min_completeness = 80` are
+// written in, and the units every quality endpoint returns. They used to be
+// 0-1 fractions here, which is how the pages stayed green while rendering
+// every real percentage a hundred times too large.
 const jobQualityMap = {
   101: {
-    quality_score: 0.82,
-    completeness: 0.9,
+    quality_score: 82,
+    completeness: 90,
     anomalies_detected: 2,
     anomalies_fixed: 2,
     fit_for_engine: true,
@@ -175,8 +180,8 @@ const jobQualityMap = {
     errors: []
   },
   103: {
-    quality_score: 0.42,
-    completeness: 0.55,
+    quality_score: 42,
+    completeness: 55,
     anomalies_detected: 5,
     anomalies_fixed: 2,
     fit_for_engine: false,
@@ -671,8 +676,8 @@ const analyticsOverview = {
     health_percentage: 88
   },
   data_quality: {
-    avg_quality_score: 0.82,
-    avg_completeness: 0.9,
+    avg_quality_score: 82,
+    avg_completeness: 90,
     jobs_analyzed: 42
   }
 }
@@ -717,7 +722,7 @@ const dataQualityStats = {
     freshness_percentage: 75
   },
   quality: {
-    avg_quality_score: 0.76,
+    avg_quality_score: 76,
     avg_completeness: 92,
     jobs_analyzed: 26
   },
@@ -738,7 +743,7 @@ const dataQualitySources = [
     enabled: true,
     freshness_status: 'fresh',
     days_since_update: 2,
-    avg_quality_score: 0.88,
+    avg_quality_score: 88,
     last_fetch: '2024-02-14T17:30:00Z'
   },
   {
@@ -749,7 +754,7 @@ const dataQualitySources = [
     enabled: true,
     freshness_status: 'stale',
     days_since_update: 9,
-    avg_quality_score: 0.71,
+    avg_quality_score: 71,
     last_fetch: '2024-02-07T13:00:00Z'
   },
   {
@@ -767,7 +772,7 @@ const dataQualitySources = [
 
 const dataQualityTrends = Array.from({ length: 14 }).map((_, index) => ({
   date: new Date(Date.UTC(2024, 1, index + 1)).toISOString().split('T')[0],
-  avg_quality_score: 0.6 + index * 0.015
+  avg_quality_score: 68 + index * 1.5
 }))
 
 const bankCatalogue = catalogueItems.map(item => ({

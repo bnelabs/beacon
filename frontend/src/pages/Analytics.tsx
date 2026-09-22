@@ -451,24 +451,28 @@ export default function Analytics() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
+              {/* Both figures arrive from `/v1/analytics/overview` on the gate's
+                  0-100 scale, exactly as `/v1/data-quality/*` publishes them.
+                  They were treated as 0-1 fractions here: a real 92.33 panel
+                  rendered as 9233.0%, and the bar was clamped full. */}
               <div className="p-4 bg-bne-paper rounded-lg">
                 <div className="text-sm text-bne-muted mb-1">Average Quality Score</div>
-                <div className="font-display text-3xl font-semibold tnum text-bne-ink">{data_quality?.avg_quality_score?.toFixed(4) || 'N/A'}</div>
+                <div className="font-display text-3xl font-semibold tnum text-bne-ink">{data_quality?.avg_quality_score == null ? 'N/A' : `${data_quality.avg_quality_score.toFixed(1)}%`}</div>
                 <div className="mt-2 w-full h-2 bg-bne-paper-dim rounded-full overflow-hidden">
                   <div
                     className="h-full bg-bne-moss rounded-full"
-                    style={{ width: `${(data_quality?.avg_quality_score || 0) * 100}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, data_quality?.avg_quality_score || 0))}%` }}
                   />
                 </div>
               </div>
 
               <div className="p-4 bg-bne-paper rounded-lg">
                 <div className="text-sm text-bne-muted mb-1">Average Completeness</div>
-                <div className="font-display text-3xl font-semibold tnum text-bne-ink">{((data_quality?.avg_completeness || 0) * 100).toFixed(1)}%</div>
+                <div className="font-display text-3xl font-semibold tnum text-bne-ink">{data_quality?.avg_completeness == null ? 'N/A' : `${data_quality.avg_completeness.toFixed(1)}%`}</div>
                 <div className="mt-2 w-full h-2 bg-bne-paper-dim rounded-full overflow-hidden">
                   <div
                     className="h-full bg-bne-pine-600 rounded-full"
-                    style={{ width: `${(data_quality?.avg_completeness || 0) * 100}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, data_quality?.avg_completeness || 0))}%` }}
                   />
                 </div>
               </div>
