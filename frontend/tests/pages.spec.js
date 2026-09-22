@@ -142,6 +142,18 @@ test('data quality monitoring', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Refresh Cadence' })).toBeVisible()
   await expect(page.getByText('backing off ×4')).toBeVisible()
   await expect(page.getByRole('table').getByText('FDIC Call Reports')).toBeVisible()
+
+  // The unit, actually measured. The gate writes 0-100 percentages and every
+  // quality endpoint returns them unscaled, but this page multiplied
+  // avg_quality_score by 100 a second time -- 76 printed as 7600.0% and every
+  // assertion above still passed. A spec that only checks labels cannot see a
+  // wrong scale, so it checks the numbers the mock is known to produce
+  // (avg_quality_score 76, avg_completeness 92, FDIC row 88) and refuses any
+  // percentage whose integer part has four or more digits.
+  await expect(page.getByText('76.0%', { exact: true })).toBeVisible()
+  await expect(page.getByText('92.0%', { exact: true })).toBeVisible()
+  await expect(page.getByText('88.0%', { exact: true })).toBeVisible()
+  await expect(page.getByText(/\d{4,}\.\d%/)).toHaveCount(0)
 })
 
 test('analytics dashboard', async ({ page }) => {
@@ -149,6 +161,14 @@ test('analytics dashboard', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Analytics' }).click()
   await expect(page.getByRole('heading', { name: 'Advanced Analytics' })).toBeVisible()
+
+  // Same contract on the other consumer of the gate's scores:
+  // /v1/analytics/overview publishes avg_quality_score 82 and
+  // avg_completeness 90 on the same 0-100 scale, and this card rendered both
+  // as a 0-1 fraction (0.8200, then 9000.0%).
+  await expect(page.getByText('82.0%', { exact: true })).toBeVisible()
+  await expect(page.getByText('90.0%', { exact: true })).toBeVisible()
+  await expect(page.getByText(/\d{4,}\.\d%/)).toHaveCount(0)
   
   await page.getByRole('button', { name: '14d' }).click()
   const trendsCard = page

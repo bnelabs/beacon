@@ -2,14 +2,14 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, desc, case
+from sqlalchemy import func, and_, case
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 from backend.database import get_db
+from backend.api.routes.data_quality import quality_evidence
 from backend.models.job import Job
-from backend.models.pipeline_job import PipelineJob, DataJob, JobStatus
 from backend.services.error_logger import ErrorLogger
 
 router = APIRouter()
@@ -51,20 +51,25 @@ async def get_analytics_overview(
             and_(Job.job_type == 'training', Job.status == 'completed')
         ).count()
 
-        # Data quality trend
-        from backend.models.pipeline_job import DataJob
-        recent_quality_jobs = db.query(DataJob).join(PipelineJob).filter(
-            and_(
-                PipelineJob.created_at >= start_date,
-                DataJob.quality_score.isnot(None)
-            )
-        ).all()
+        # Data quality: both writers, through the one evidence list
+        # `api/routes/data_quality.py` already builds (#103). This endpoint was
+        # left reading `DataJob ⋈ PipelineJob` -- rows only POST /api/v1/pipeline
+        # writes -- so the Analytics "Data Quality Metrics" card reported 0 on
+        # every deployment collecting through the documented job path. Same
+        # defect as finding F2, second page, one PR later.
+        #
+        # `avg_quality_score` and `avg_completeness` are gate-scale: 0-100
+        # percentages, the scale `QualityPolicy` writes and checks
+        # (`min_quality_score = 70`, `min_completeness = 80`). They are not
+        # 0-1 fractions and are not rescaled here.
+        evidence = quality_evidence(db, start_date)
 
-        quality_scores = [job.quality_score for job in recent_quality_jobs if job.quality_score]
+        quality_scores = [item["quality_score"] for item in evidence
+                          if item["quality_score"] is not None]
         avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
 
-        # Completeness trend
-        completeness_scores = [job.completeness for job in recent_quality_jobs if job.completeness]
+        completeness_scores = [item["completeness"] for item in evidence
+                               if item["completeness"] is not None]
         avg_completeness = sum(completeness_scores) / len(completeness_scores) if completeness_scores else 0
 
         # Job type distribution
@@ -129,23 +134,16 @@ async def get_time_series_trends(
         start_date = now - timedelta(days=days)
 
         if metric == "quality":
-            # Quality score trends
-            from backend.models.pipeline_job import DataJob
-            data_jobs = db.query(DataJob, PipelineJob).join(
-                PipelineJob, DataJob.pipeline_job_id == PipelineJob.id
-            ).filter(
-                and_(
-                    PipelineJob.created_at >= start_date,
-                    DataJob.quality_score.isnot(None)
-                )
-            ).order_by(PipelineJob.created_at).all()
-
+            # Quality score trends, from both writers on the gate's 0-100 scale.
             daily_data = defaultdict(lambda: {"values": [], "date": None})
 
-            for data_job, pipeline_job in data_jobs:
-                day_key = pipeline_job.created_at.date().isoformat()
+            for item in quality_evidence(db, start_date):
+                created_at = item.get("created_at")
+                if created_at is None or item.get("quality_score") is None:
+                    continue
+                day_key = created_at.date().isoformat()
                 daily_data[day_key]["date"] = day_key
-                daily_data[day_key]["values"].append(data_job.quality_score)
+                daily_data[day_key]["values"].append(item["quality_score"])
 
             series = []
             for day_key in sorted(daily_data.keys()):
@@ -166,23 +164,18 @@ async def get_time_series_trends(
             }
 
         elif metric == "completeness":
-            # Completeness trends
-            from backend.models.pipeline_job import DataJob
-            data_jobs = db.query(DataJob, PipelineJob).join(
-                PipelineJob, DataJob.pipeline_job_id == PipelineJob.id
-            ).filter(
-                and_(
-                    PipelineJob.created_at >= start_date,
-                    DataJob.completeness.isnot(None)
-                )
-            ).order_by(PipelineJob.created_at).all()
-
+            # Completeness trends: same evidence list, same 0-100 scale. The
+            # SQL filter that used to drop NULL completeness is now a Python
+            # filter over the shared list.
             daily_data = defaultdict(lambda: {"values": [], "date": None})
 
-            for data_job, pipeline_job in data_jobs:
-                day_key = pipeline_job.created_at.date().isoformat()
+            for item in quality_evidence(db, start_date):
+                created_at = item.get("created_at")
+                if created_at is None or item.get("completeness") is None:
+                    continue
+                day_key = created_at.date().isoformat()
                 daily_data[day_key]["date"] = day_key
-                daily_data[day_key]["values"].append(data_job.completeness)
+                daily_data[day_key]["values"].append(item["completeness"])
 
             series = []
             for day_key in sorted(daily_data.keys()):
@@ -318,18 +311,20 @@ async def get_anomaly_insights(
                     "detected_at": now.isoformat()
                 })
 
-        # Check for data quality drops
-        from backend.models.pipeline_job import DataJob
-        recent_quality = db.query(DataJob).join(PipelineJob).filter(
-            and_(
-                PipelineJob.created_at >= start_date,
-                DataJob.quality_score.isnot(None)
-            )
-        ).order_by(desc(PipelineJob.created_at)).limit(20).all()
+        # Check for data quality drops -- newest first, from both writers.
+        # This was the third reader of the pipeline-only table, and it inherited
+        # the same blind spot as finding F2: on a deployment that collects
+        # through jobs, `quality_degradation` had nothing to compare, so a
+        # severity-"high" anomaly could never fire.
+        recent_scores_all = [
+            item["quality_score"]
+            for item in quality_evidence(db, start_date)[:20]
+            if item.get("quality_score") is not None
+        ]
 
-        if len(recent_quality) > 5:
-            recent_scores = [job.quality_score for job in recent_quality[:5]]
-            older_scores = [job.quality_score for job in recent_quality[5:]]
+        if len(recent_scores_all) > 5:
+            recent_scores = recent_scores_all[:5]
+            older_scores = recent_scores_all[5:]
 
             if recent_scores and older_scores:
                 recent_avg = sum(recent_scores) / len(recent_scores)

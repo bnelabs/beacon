@@ -11,6 +11,20 @@ import type {
   SourceQualityRow
 } from '../types/api'
 
+/**
+ * Quality and completeness arrive on the gate's own scale: 0-100 percentages
+ * (`QualityPolicy.min_quality_score = 70`, `min_completeness = 80`, and
+ * `completeness = 100 * (1 - missing_ratio)`). They are rendered verbatim as
+ * percentages here — never multiplied by 100 a second time.
+ *
+ * The bands are those floors, not decoration: 70 is the score under which the
+ * data-quality gate refuses a dataset outright, 90 is the band this page's
+ * completeness card already used. They were 0.7/0.5 for as long as this page
+ * existed, which read a real 85.6 as 8560% and coloured it "excellent".
+ */
+const QUALITY_EXCELLENT = 90
+const QUALITY_GOOD = 70
+
 interface MetricCardProps {
   title: string
   value: ReactNode
@@ -136,13 +150,14 @@ function QualityTrendChart({ trends }: { trends: QualityTrendPoint[] }) {
       <div className="h-48 flex items-end gap-1">
         {chartData.map((day) => {
           const height = ((day.avg_quality_score || 0) / maxValue) * 100
-          const color = day.avg_quality_score >= 0.7 ? 'bg-bne-moss' : day.avg_quality_score >= 0.5 ? 'bg-bne-ochre' : 'bg-bne-clay'
+          const color =
+            day.avg_quality_score >= QUALITY_GOOD ? 'bg-bne-moss' : day.avg_quality_score >= 50 ? 'bg-bne-ochre' : 'bg-bne-clay'
 
           return (
             <div
               key={day.date}
               className="flex-1 flex flex-col items-center gap-1 group cursor-pointer"
-              title={`${day.date}: ${(day.avg_quality_score * 100).toFixed(1)}% quality`}
+              title={`${day.date}: ${(day.avg_quality_score ?? 0).toFixed(1)}% quality`}
             >
               <div className="w-full relative flex items-end" style={{ height: '160px' }}>
                 <div
@@ -237,10 +252,10 @@ function SourceQualityTable({ sources }: { sources: SourceQualityRow[] }) {
               <td className="py-3 px-4 text-right">
                 {source.avg_quality_score !== null ? (
                   <span className={`font-mono font-medium ${
-                    source.avg_quality_score >= 0.7 ? 'text-bne-moss' :
-                    source.avg_quality_score >= 0.5 ? 'text-bne-ochre' : 'text-bne-clay'
+                    source.avg_quality_score >= QUALITY_GOOD ? 'text-bne-moss' :
+                    source.avg_quality_score >= 50 ? 'text-bne-ochre' : 'text-bne-clay'
                   }`}>
-                    {(source.avg_quality_score * 100).toFixed(1)}%
+                    {source.avg_quality_score.toFixed(1)}%
                   </span>
                 ) : (
                   <span className="text-bne-muted text-sm">N/A</span>
@@ -421,20 +436,20 @@ export default function DataQuality() {
         />
         <MetricCard
           title="Avg Quality Score"
-          value={`${(quality.avg_quality_score * 100).toFixed(1)}%`}
+          value={`${quality.avg_quality_score.toFixed(1)}%`}
           subtitle={`Based on ${quality.jobs_analyzed} jobs`}
-          status={quality.avg_quality_score >= 0.7 ? 'excellent' : quality.avg_quality_score >= 0.5 ? 'good' : 'warning'}
+          status={quality.avg_quality_score >= QUALITY_EXCELLENT ? 'excellent' : quality.avg_quality_score >= QUALITY_GOOD ? 'good' : 'warning'}
         />
         <MetricCard
           title="Data Completeness"
-          value={quality.avg_completeness == null ? '—' : `${quality.avg_completeness}%`}
+          value={quality.avg_completeness == null ? '—' : `${quality.avg_completeness.toFixed(1)}%`}
           subtitle="Average across all sources"
           status={
             quality.avg_completeness == null
               ? 'warning'
-              : quality.avg_completeness >= 90
+              : quality.avg_completeness >= QUALITY_EXCELLENT
                 ? 'excellent'
-                : quality.avg_completeness >= 70
+                : quality.avg_completeness >= QUALITY_GOOD
                   ? 'good'
                   : 'warning'
           }
