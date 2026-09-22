@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 
 from backend.api.main import app
 from backend.database import SessionLocal, init_db
-from backend.models.pipeline_job import DataJob, JobStatus, PipelineJob
+from backend.models.pipeline_job import DataJob, EngineJob, JobStatus, PipelineJob, ResultJob
 from backend.tasks.job_tasks import run_pipeline
 
 client = TestClient(app)
@@ -43,7 +43,12 @@ def _clean():
     db = SessionLocal()
 
     def _wipe() -> None:
+        # Children first, and all of them: clearing PipelineJob while leaving
+        # EngineJob/ResultJob behind is the same state-injection class that
+        # reddened main through test_data_quality_routes (see conftest).
         db.query(DataJob).delete()
+        db.query(EngineJob).delete()
+        db.query(ResultJob).delete()
         db.query(PipelineJob).delete()
         db.commit()
 

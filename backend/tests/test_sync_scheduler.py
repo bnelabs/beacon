@@ -179,6 +179,23 @@ def test_failure_grows_the_streak(db):
 
 def test_enqueue_creates_the_same_job_a_human_does(db):
     source = _source(db, "enqueue-feed", sync_interval_minutes=15)
+
+    # Stated, not assumed: every assertion below holds only if the source id
+    # this test was just handed is fresh. A module that deletes DataSource rows
+    # without the rows pointing at them frees ids for reuse, and this test then
+    # fails as if the scheduler had selected the wrong series. Name the state
+    # problem here, where a reader can see it, instead of letting it read as a
+    # product bug two modules from its cause.
+    stale_items = (
+        db.query(DataCatalogueItem.id)
+        .filter(DataCatalogueItem.data_source_id == source.id)
+        .all()
+    )
+    assert stale_items == [], (
+        f"source id {source.id} is not fresh: catalogue items {stale_items} point "
+        "at a source an earlier module deleted without them"
+    )
+
     item = DataCatalogueItem(
         code="ENQ-1",
         name="Enqueue series",
