@@ -164,18 +164,37 @@ def record_sync_success(
     source_id: int,
     started_at: datetime,
     rows: Optional[int] = None,
+    degraded: bool = False,
 ) -> None:
-    """Clear the failure streak and stamp duration/rows on success."""
+    """Stamp duration/rows on success; clear the failure streak unless degraded.
+
+    A *degraded* success (the HTTP layer served the fetch from stale cache
+    because the provider was unreachable) still records
+    ``last_successful_fetch``, duration and rows -- the data reached the
+    pipeline, and the run genuinely completed. But it does **not** clear the
+    failure streak and leaves a note beside the source: the streak is the
+    backoff, the backoff exists because the provider was unreachable, and a
+    cache-served success is not evidence of reachability. Clearing it
+    silently would pin a down feed to its healthy cadence while every "green"
+    sync actually read yesterday's cache (pipeline-review finding F9). The
+    next genuinely fresh success clears the streak and the note.
+    """
     source = db.get(DataSource, source_id)
     if source is None:
         return
     now = datetime.now(timezone.utc)
-    source.consecutive_failures = 0
     source.last_successful_fetch = now
     source.last_sync_duration_ms = int((now - _as_utc(started_at)).total_seconds() * 1000)
     source.last_sync_rows = rows
     source.status = "active"
-    source.error_message = None
+    if degraded:
+        source.error_message = (
+            "last sync was served (in part) from stale cache: provider "
+            "unreachable; failure backoff kept"
+        )
+    else:
+        source.consecutive_failures = 0
+        source.error_message = None
     db.commit()
 
 

@@ -134,6 +134,34 @@ def test_success_clears_the_backoff(db):
     assert scheduling.backoff_factor(source.consecutive_failures) == 1
 
 
+def test_degraded_success_delivers_data_but_keeps_the_backoff(db):
+    """A cache-served success is not evidence of provider health (F9).
+
+    The data reached the pipeline, so duration/rows/last_successful_fetch are
+    stamped and the source stays active -- but the failure streak *is* the
+    backoff, and the stale fallback exists precisely because the provider
+    was unreachable, so the streak (and a note beside the source) must
+    survive until a genuinely fresh success.
+    """
+    source = _source(db, "degraded-feed", sync_interval_minutes=60, consecutive_failures=3)
+    scheduling.record_sync_success(
+        db, source.id, NOW - timedelta(minutes=2), rows=17, degraded=True
+    )
+    db.refresh(source)
+    assert source.last_successful_fetch is not None
+    assert source.last_sync_rows == 17
+    assert source.status == "active"
+    assert source.consecutive_failures == 3  # the backoff stays
+    assert "stale cache" in source.error_message
+
+    # a fresh success clears both the streak and the note
+    scheduling.record_sync_success(db, source.id, NOW - timedelta(minutes=1), rows=20)
+    db.refresh(source)
+    assert source.consecutive_failures == 0
+    assert source.error_message is None
+    assert source.last_sync_rows == 20
+
+
 def test_failure_grows_the_streak(db):
     source = _source(db, "streak-feed", sync_interval_minutes=60)
     scheduling.record_sync_failure(db, source.id, "connection reset")

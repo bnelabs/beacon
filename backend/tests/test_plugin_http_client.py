@@ -255,6 +255,57 @@ def test_session_stale_fallback_on_persistent_5xx() -> None:
     assert out.json() == {"v": "good"}
 
 
+def test_stale_fallback_is_counted_and_tagged() -> None:
+    """A degraded fetch must be witnessable (pipeline-review finding F9).
+
+    The counter is what the collector reads (plugins hand back DataFrames,
+    never responses); the header is what any other consumer can see. A
+    fresh fetch carries neither.
+    """
+    state = {"fail": False}
+
+    def responder(m, u, k):
+        if state["fail"]:
+            raise requests.exceptions.ConnectionError("upstream down")
+        return _make_response(200, {"v": "good"})
+
+    fake = FakeSession(responder)
+    sess = ResilientSession(session=fake, cache_ttl=0.01)
+    first = sess.get("https://example.test/data")
+    assert sess.stale_fallback_hits == 0
+    assert "X-Beacon-Stale-Fallback" not in first.headers
+
+    time.sleep(0.02)  # let it go stale
+    state["fail"] = True
+    fallback = sess.get("https://example.test/data")
+    assert fallback.json() == {"v": "good"}
+    assert sess.stale_fallback_hits == 1
+    assert fallback.headers["X-Beacon-Stale-Fallback"] == "1"
+
+    # a second degraded fetch keeps counting
+    sess.get("https://example.test/data")
+    assert sess.stale_fallback_hits == 2
+
+
+def test_stale_fallback_on_5xx_is_counted_too() -> None:
+    state = {"fail": False}
+
+    def responder(m, u, k):
+        if state["fail"]:
+            return _make_response(503, {"error": "unavailable"})
+        return _make_response(200, {"v": "good"})
+
+    fake = FakeSession(responder)
+    sess = ResilientSession(session=fake, cache_ttl=0.01)
+    sess.get("https://example.test/data")
+    time.sleep(0.02)
+    state["fail"] = True
+    out = sess.get("https://example.test/data")
+    assert out.status_code == 200
+    assert sess.stale_fallback_hits == 1
+    assert out.headers["X-Beacon-Stale-Fallback"] == "1"
+
+
 def test_session_does_not_cache_errors() -> None:
     fake = FakeSession(lambda m, u, k: _make_response(404, {"e": 1}))
     sess = ResilientSession(session=fake, cache_ttl=60)

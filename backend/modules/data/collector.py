@@ -79,6 +79,11 @@ class CollectionReport:
     collected: List[str] = field(default_factory=list)
     skipped: List[str] = field(default_factory=list)
     failures: List[CollectionFailure] = field(default_factory=list)
+    #: Codes whose fetch was served (in whole or part) from the HTTP layer's
+    #: stale cache because the provider was unreachable at that moment. The
+    #: data arrived, so the item counts as collected -- but the run was
+    #: degraded, and telemetry must not read it as proof of provider health.
+    degraded: List[str] = field(default_factory=list)
 
     @property
     def failed(self) -> List[str]:
@@ -97,6 +102,7 @@ class CollectionReport:
             "collected": list(self.collected),
             "skipped": list(self.skipped),
             "failed": self.failed,
+            "degraded": list(self.degraded),
             "success_ratio": self.success_ratio,
             "failures": [failure.to_dict() for failure in self.failures],
         }
@@ -110,6 +116,12 @@ class DataCollector:
         self.job_id = job_id
         self.output_dir = output_dir
         self.last_report: Optional[CollectionReport] = None
+        # Set by _fetch_item_data on every attempt: True when the plugin's
+        # resilient HTTP session served this fetch (in whole or part) from
+        # stale cache because the provider was unreachable. Read by collect()
+        # after a successful fetch -- plugins hand back DataFrames, so the
+        # session counter is the only place the degradation is visible.
+        self._last_fetch_degraded = False
 
     def collect(
         self,
@@ -170,6 +182,15 @@ class DataCollector:
                     )
                 collected[item.code] = df
                 report.collected.append(item.code)
+                if self._last_fetch_degraded:
+                    report.degraded.append(item.code)
+                    logger.warning(
+                        "[%s] Collected %s from STALE cache: the provider was "
+                        "unreachable during this run; the success is degraded, "
+                        "not fresh",
+                        self.job_id,
+                        item.code,
+                    )
                 logger.info("Collected %d records for %s", len(df), item.code)
             except BeaconError as exc:
                 report.failures.append(
@@ -272,6 +293,7 @@ class DataCollector:
 
     def _fetch_item_data(self, item: DataCatalogueItem, start_date: str, end_date: str) -> pd.DataFrame:
         """Fetch data for a single catalogue item using the plugin system."""
+        self._last_fetch_degraded = False
         data_source = item.data_source
         if not data_source:
             raise DataIngestionError(
@@ -322,6 +344,15 @@ class DataCollector:
             df = plugin.fetch_asset_data([endpoint], start_dt, end_dt)
         else:
             df = plugin.fetch_indicator_data(endpoint, start_dt, end_dt)
+
+        # Degradation detection: a plugin's resilient session counts the
+        # responses it served from stale cache because the provider was
+        # unreachable (the collector never sees response objects -- plugins
+        # hand back DataFrames, so the counter is the only witness). Plugins
+        # on raw requests or third-party SDKs have no such session and are
+        # never marked degraded: absence of evidence stays absence.
+        session = getattr(plugin, "_resilient_session", None)
+        self._last_fetch_degraded = bool(getattr(session, "stale_fallback_hits", 0))
 
         if df is None:
             raise EmptyDatasetError(

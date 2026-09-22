@@ -256,3 +256,101 @@ def test_collector_clips_provider_padding_to_the_requested_window(monkeypatch):
 
     frame = collector._fetch_item_data(item, "2020-01-01", "2020-01-31")
     assert frame["Date"].tolist() == [pd.Timestamp("2020-01-01"), pd.Timestamp("2020-01-31")]
+
+
+# ---------------------------------------------------------------------------
+# Degraded fetches: a stale-cache success is collected AND witnessed (F9)
+# ---------------------------------------------------------------------------
+
+
+def _stale_aware_plugin(hits: int):
+    """A plugin whose resilient session reports ``hits`` stale-cache serves."""
+
+    class _Plugin:
+        def __init__(self, config):
+            self.config = config
+            self._resilient_session = None
+
+        def fetch_indicator_data(self, indicator_id, start_date, end_date):
+            # the real base.http property builds this lazily; the counter is
+            # what the collector reads after the fetch
+            self._resilient_session = SimpleNamespace(stale_fallback_hits=hits)
+            return pd.DataFrame({"Date": [pd.Timestamp("2024-01-15")], "Value": [1.0]})
+
+    return _Plugin
+
+
+def _stale_item():
+    return SimpleNamespace(
+        code="STALE_ITEM",
+        category="economic_indicators",
+        endpoint="STALE_ITEM",
+        parameters={},
+        region=None,
+        data_source=SimpleNamespace(plugin_type="fake_stale", config={}),
+    )
+
+
+def test_stale_cache_fetch_marks_the_item_degraded(monkeypatch):
+    import backend.modules.data.collector as collector_module
+
+    monkeypatch.setattr(collector_module, "get_plugin", lambda t: _stale_aware_plugin(1))
+    monkeypatch.setattr(collector_module, "config_with_env_keys", lambda t, c: c)
+
+    collector = DataCollector.__new__(DataCollector)
+    collector.job_id = "job"
+    frame = collector._fetch_item_data(_stale_item(), "2024-01-01", "2024-02-01")
+
+    assert len(frame) == 1  # the data arrived...
+    assert collector._last_fetch_degraded is True  # ...and the degradation is witnessed
+
+
+def test_fresh_fetch_is_not_degraded(monkeypatch):
+    import backend.modules.data.collector as collector_module
+
+    monkeypatch.setattr(collector_module, "get_plugin", lambda t: _stale_aware_plugin(0))
+    monkeypatch.setattr(collector_module, "config_with_env_keys", lambda t, c: c)
+
+    collector = DataCollector.__new__(DataCollector)
+    collector.job_id = "job"
+    collector._fetch_item_data(_stale_item(), "2024-01-01", "2024-02-01")
+
+    assert collector._last_fetch_degraded is False
+
+
+def test_collect_records_degraded_codes_in_the_report(monkeypatch):
+    """The report separates collected from collected-degraded.
+
+    A degraded item still counts as collected (the data reached the
+    pipeline), but ``report.degraded`` is what telemetry reads so a
+    cache-served success never clears the provider's failure streak.
+    """
+    item = _stale_item()
+
+    class _FakeQuery:
+        def filter(self, *args, **kwargs):
+            return self
+
+        def first(self):
+            return item
+
+    class _FakeDB:
+        def query(self, model):
+            return _FakeQuery()
+
+    collector = DataCollector(_FakeDB(), "job", "/tmp")
+
+    def _degraded_fetch(fetch_item, start_date, end_date):
+        collector._last_fetch_degraded = True
+        return pd.DataFrame({"Date": [pd.Timestamp("2024-01-15")], "Value": [1.0]})
+
+    monkeypatch.setattr(collector, "_fetch_item_data", _degraded_fetch)
+
+    collected = collector.collect([1], "2024-01-01", "2024-02-01")
+
+    assert list(collected) == ["STALE_ITEM"]
+    report = collector.last_report
+    assert report.collected == ["STALE_ITEM"]
+    assert report.degraded == ["STALE_ITEM"]
+    assert report.to_dict()["degraded"] == ["STALE_ITEM"]
+    assert report.success_ratio == 1.0  # degraded is not failed
