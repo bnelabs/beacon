@@ -138,6 +138,11 @@ KNOWN_UNREACHABLE: Dict[str, Disposition] = {
         plan="wire",
         next_step="use LEI resolution when the EBA transparency ingest lands, so institution identities join across sources without guessed matches",
     ),
+    "backend.modules.results.vintage_backfill": Disposition(
+        blocker="it is an operator tool: snapshots live on the job volume, so it runs from scripts/backfill_indicator_vintages.py against a filesystem path, and no API or Celery caller owns that path",
+        plan="wire",
+        next_step="give it a production home as an ops task (Celery beat or an admin-only endpoint) that resolves snapshot_root_for the job wrote to, so a deployment can re-apply certified snapshots without shell access; its reader (observations_as_of / GET /api/v1/observations/as-of) is already wired",
+    ),
     # -- decide: blocked on a call, not on effort ----------------------------
     "backend.modules.engine.foundation_encoders": Disposition(
         blocker="the encoder contract, compose_input and the deterministic stand-in survive; the Toto wrapper and its dependency train were deleted in the 2026-09 hygiene round because no production path ever embedded a node with them",

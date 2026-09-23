@@ -38,6 +38,7 @@ from .routes import (
     alert_rules,
     reports,
     network,
+    observations,
 )
 from backend import __version__
 from backend.database import DATABASE_URL, init_db, close_db
@@ -198,6 +199,9 @@ app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["Advanced
 app.include_router(alert_rules.router, prefix="/api/v1/alert-rules", tags=["Alert Rules"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
 app.include_router(network.router, prefix="/api/v1/network", tags=["Network Graph & Bilateral Exposures"])
+# The point-in-time reader for indicator vintages. ``observations_as_of`` has had
+# no production caller since the vintage-log migration; this router is the caller.
+app.include_router(observations.router, prefix="/api/v1/observations", tags=["Observations (Point-in-Time)"])
 
 # This API exposes no metrics endpoint.
 

@@ -64,6 +64,7 @@ TAG_ORDER = (
     "Predictions v2",
     "Advanced Analytics",
     "Alert Rules",
+    "Observations (Point-in-Time)",
 )
 
 METHOD_ORDER = ("get", "post", "put", "patch", "delete")
