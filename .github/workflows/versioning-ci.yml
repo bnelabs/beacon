@@ -27,3 +27,10 @@ jobs:
           python-version: "3.12"
       - name: Version policy guard
         run: python scripts/check_versioning.py
+      - name: Release coverage guard
+        # L-48: the tag is the machine anchor, the GitHub Release is the public
+        # artifact -- every release tag on the remote must have its release.
+        # The runner's gh refuses the implicit GITHUB_TOKEN in workflows.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/check_release_coverage.py

@@ -132,6 +132,29 @@ def test_release_wiring_refuses_the_cut(repo, capsys):
     assert "#10" in capsys.readouterr().err
 
 
+def test_a_newer_non_release_tag_does_not_become_the_base(repo):
+    """L-48: ``git describe``'s nearest tag can be a non-release mark — the
+    ``prereg-early-warning-v*`` tags are ancestors of main today. The base
+    must stay the highest-semver release tag, so an uncovered consumer merge
+    is still caught (and the cut is not failed with "not a release tag")."""
+    _merge(repo, 41, "backend/app.py", "VALUE = 3\n", entry=False)
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "tag", "prereg-mark-v1", head)
+    result = _check(repo)
+    assert result.returncode == 1, result.stdout
+    assert "#41" in result.stderr
+    assert "not a release tag" not in result.stderr
+
+
+def test_a_newer_non_release_tag_does_not_hide_a_covered_range(repo):
+    _merge(repo, 42, "backend/app.py", "VALUE = 4\n", entry=True)
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "tag", "prereg-mark-v2", head)
+    result = _check(repo)
+    assert result.returncode == 0, result.stderr
+    assert "v1.0.0" in result.stdout
+
+
 def test_live_tree_is_covered():
     """The real repository must always satisfy its own gate."""
     result = subprocess.run(
