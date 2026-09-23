@@ -60,7 +60,25 @@ never touches production state. A backup nobody has restored is a hypothesis.
 | Custom-API source refused | `URL policy refusal` in the job failure | scheme/host policy; allowlist or https migration, never disable the policy wholesale |
 | 401 across the UI | `BEACON_API_TOKEN` set | supply the token in the prompt the SPA shows; rotate if leaked |
 
-## 5. What this platform will not do (operator expectations)
+## 5. Alert rules
+
+Rules are created with `POST /api/v1/alert-rules` (there is no UI page yet)
+and evaluated by the Celery beat task `evaluate_alert_rules` (every five
+minutes); each rule declares its own `evaluation_frequency_minutes`, and a
+breach lands as a high-priority notification once per
+`evaluation_window_minutes` cooldown. A monitoring platform whose alerts
+never fire is quieter than one with no alert feature — the silence reads as
+health — so check the notifications, not just the job list.
+
+**Write thresholds on the metric's own scale.** `quality_score` and
+`completeness` are stored on the quality gate's 0–100 scale
+(`QualityPolicy.min_quality_score = 70.0`), so a data-quality floor is
+`quality_score lt 70` — never `quality_score lt 0.8`: every gate-scale score
+is > 1.0, so a fraction floor can never breach; the rule reports "ok" for
+every dataset the gate refuses. `success_rate` is the exception — it is a
+genuine fraction (0–1), and its thresholds stay fractions (L-39).
+
+## 6. What this platform will not do (operator expectations)
 
 - It will not invent data: missing feeds raise typed errors; gaps stay gaps.
 - It will not present uncalibrated model output as a risk probability;
@@ -70,7 +88,7 @@ never touches production state. A backup nobody has restored is a hypothesis.
   require declared or uploaded balance sheets; maximum-entropy estimates
   (`network_estimation`) carry their prior-status caveat into every result.
 
-## 6. Release procedure
+## 7. Release procedure
 
 1. Merge the open cycle PRs.
 2. `python scripts/release.py minor` on a release branch (bumps `VERSION`,
