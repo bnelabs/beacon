@@ -753,6 +753,30 @@ the doc in the release commit (PR #120), so the bump and the regeneration are on
 atomic step. Status: **FIXED** — PR #119 (regen), PR #120 (tooling guard); the 5.2.0
 cut is the first to run through the fixed tooling, closing L-25's deferred item.
 
+**L-48. The release surface was tags-only: thirteen release tags shipped with
+an empty GitHub Releases page, the RUNBOOK told the operator to tag the wrong
+commit, and the changelog gate's base lookup was one prereg mark away from
+breaking.** No GitHub Release existed for any release tag, so the public
+Releases page was empty for everything since v3.1.0; `docs/RUNBOOK.md`'s
+release procedure said "tag the merge commit `vX.Y.Z`" while every real tag
+sits on the release commit (`release.py --tag` runs on the release branch
+before the merge); and `check_changelog_history.py` found its base tag with
+`git describe --tags --abbrev=0` — the *nearest* tag, not the newest release.
+The `prereg-early-warning-v*` tags are ancestors of main, so the first
+preregistration mark cut after a release would have displaced the base and
+failed the gate with "not a release tag" (or measured against the wrong
+range). Status: **FIXED** — the Semver release design (PR #138): the tag
+stays the machine anchor and the GitHub Release becomes the public artifact
+(`release.py publish [VERSION]` creates or refreshes it after the tag is
+pushed, notes are the versioned changelog block verbatim, pre-release
+versions publish as GitHub pre-releases); the base lookup now takes the
+highest-semver release tag reachable from HEAD (both dispositions pinned by
+synthetic tests); the required "check" job gained a parity guard
+(`check_release_coverage.py`) that fails while any release tag lacks its
+GitHub Release; the thirteen releases were backfilled from their changelog
+blocks as a maintainer act before the PR; RUNBOOK §7 and VERSIONING.md were
+rewritten to the tag/release split.
+
 ---
 
 *Adding an entry: open it when the failure is confirmed, with a pointer; close
