@@ -174,7 +174,18 @@ class _Database:
         admin.dispose()
 
         base = sa.engine.make_url(self._admin_url)
-        self.url = str(base.set(database=self.name))
+        # `render_as_string(hide_password=False)`, not `str(...)`. SQLAlchemy 2.0
+        # masks the password when a URL is stringified -- `str()` of
+        # `postgresql://user:secret@host/db` is `postgresql://user:***@host/db` --
+        # so the derived URL carried a literal `***` as the password and every
+        # connection to the throwaway database failed with
+        #     FATAL: password authentication failed for user "..."
+        # while the admin connection (same credentials, stringified by hand)
+        # worked. That is why all 12 tests here failed locally on a password
+        # cluster while CI passed: CI's admin URL has no password to mask.
+        # `_alembic` also receives this value as `DATABASE_URL`, so the same
+        # string has to be the one that actually authenticates.
+        self.url = base.set(database=self.name).render_as_string(hide_password=False)
         self.engine = sa.create_engine(self.url, poolclass=sa.pool.NullPool)
 
     def __enter__(self) -> "_Database":

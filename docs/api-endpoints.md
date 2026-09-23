@@ -12,7 +12,7 @@ schema at `/openapi.json` or the Swagger UI at `/docs`.
 
 Application: **BEACON API - Banking Network Engine** v5.0.0
 
-**123 operations across 22 tags.**
+**124 operations across 23 tags.**
 
 
 ## Pipeline (DATA-ENGINE-RESULTS)
@@ -243,6 +243,13 @@ Application: **BEACON API - Banking Network Engine** v5.0.0
 | `GET` | `/api/v1/alert-rules/{rule_id}` | `AlertRuleResponse` | Get specific alert rule. |
 | `PUT` | `/api/v1/alert-rules/{rule_id}` | `AlertRuleResponse` | Update alert rule. |
 | `DELETE` | `/api/v1/alert-rules/{rule_id}` | — | Delete alert rule. |
+
+
+## Observations (Point-in-Time)
+
+| Method | Path | Success model | Purpose |
+|---|---|---|---|
+| `GET` | `/api/v1/observations/as-of` | untyped | The indicator series as this deployment knew it at ``as_of``. |
 
 
 ## Network Graph & Bilateral Exposures

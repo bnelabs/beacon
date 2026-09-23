@@ -9,6 +9,62 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Added
+- **Point-in-time reads of indicator vintages are now queryable, and the certified
+  snapshots that prove them are read back into the audit log.** This closes the
+  half-built point-in-time contract from the vintage-log change: the log recorded
+  every publication, but nothing read it, and the payload that proves what the
+  deployment knew earlier sat on the job volume unqueried.
+  - `GET /api/v1/observations/as-of` — the production caller for
+    `TimeSeriesStore.observations_as_of`. It reads **only** `indicator_vintage_log`
+    (the latest-value store is never substituted, so an `as_of` never answers a
+    historical question with today's belief), reports `publication_basis`
+    (`certified_snapshot` / `ingest_instant` / `unknown`) on every row with a
+    coverage census, names a malformed `as_of` in a typed 422, returns HTTP 200
+    `status:"unavailable"` + a reason when nothing was known (never the current
+    values), and reports truncation (`truncated`, `vintages_at_or_before_as_of`).
+  - `backend.modules.results.vintage_backfill` — re-hashes every certified
+    snapshot before writing, stamps each recovered vintage with the **snapshot's
+    capture instant** (never `now()`), records each application in the new
+    `vintage_backfill_runs` ledger (so a re-run reports "already applied" instead of
+    duplicating history), skips panel-shaped datasets as ambiguous rather than
+    collapsing them, and never touches `indicator_observations`.
+  - `scripts/backfill_indicator_vintages.py` — the operator CLI. Resolves each job's
+    snapshot root with the same helper the collector used (`snapshot_root_for`),
+    supports `--dry-run`, prints the report an operator can paste into a runbook,
+    and exits non-zero when any snapshot fails verification.
+- **Vintage provenance columns + idempotency ledger (migration `vintage_provenance_001`).**
+  `indicator_vintage_log` gains nullable `snapshot_id` (content address of the
+  certified snapshot a vintage was read from; NULL for a live write) and
+  `publication_basis` (why `published_at` is what it is; NULL reports as `unknown`
+  and is deliberately never backfilled to a real value). New append-only
+  `vintage_backfill_runs` ledger holds one row per applied snapshot. Two new
+  indexes (`ix_vintage_series_published` for the as-of access path,
+  `ix_vintage_log_snapshot` for "which vintages came from snapshot X"). Every model
+  column is mirrored by a migration; `test_migrations_live` passes against live
+  PostgreSQL/TimescaleDB (fresh, legacy `create_all`, and partial histories end at
+  the same schema; second `upgrade head` is a no-op).
+- **Vintage timestamps read back as aware UTC on every backend.** A `UTCDateTime`
+  type decorator on the two provenance tables normalises the read side, because
+  SQLite returns `DATETIME` naive while PostgreSQL returns it aware. Before this,
+  `row.published_at == the_instant_written` was True in CI (Postgres) and False on
+  SQLite, and `observations_as_of` keys a dict on `row.time` and `sorted()`s it —
+  a mix of naive and aware keys would raise `TypeError`. Storage DDL is unchanged.
+  (Scope is deliberately limited to the two tables that carry as-of semantics; the
+  latest-value tables are left as-is so the change does not widen what every
+  analytics read sees.)
+
+### Fixed
+- `test_migrations_live` could not run against a password-protected cluster.
+  `str(URL)` in SQLAlchemy 2.0 masks the password as `***`, so the derived
+  throwaway-database URL carried a literal `***` and every connection to the test
+  database failed with `FATAL: password authentication failed`, while the admin
+  connection (same credentials) worked. That is why all 12 live-migration tests
+  "failed locally on auth" while CI (whose admin URL has no password) passed.
+  Switched to `render_as_string(hide_password=False)`, so the same string
+  authenticates for both the test engine and the alembic subprocess. The live
+  tests now pass against a real password-protected PostgreSQL.
+
 ## [5.0.0] - 2026-09-22
 
 ### Added

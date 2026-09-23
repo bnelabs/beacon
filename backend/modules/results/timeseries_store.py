@@ -24,6 +24,7 @@ from backend.models.timeseries import (
     IndicatorVintageLog,
     ModelMetricPoint,
     RiskScorePoint,
+    VintageBackfillRun,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,15 @@ INDICATOR_OBSERVATIONS_DAILY = "indicator_observations_daily"
 
 BASE_TABLE_SOURCE = "base_table"
 CONTINUOUS_AGGREGATE_SOURCE = "continuous_aggregate"
+
+#: What a vintage row's ``published_at`` means. A live write knows the instant
+#: *this deployment* began believing a value; a backfill knows the instant a
+#: certified snapshot captured it. Collapsing the two would let a backdated row
+#: claim a publication the deployment never witnessed, and would make an as-of
+#: answer unauditable.
+INGEST_INSTANT_BASIS = "ingest_instant"
+CERTIFIED_SNAPSHOT_BASIS = "certified_snapshot"
+UNKNOWN_BASIS = "unknown"
 
 _RISK_SCORE_KEYS = ("time", "entity_type", "entity_id", "model_version", "horizon_days")
 _OBSERVATION_KEYS = ("time", "source_code", "indicator_code", "region")
@@ -97,6 +107,11 @@ class TimeSeriesStore:
         store keeps what is currently believed, the log keeps what was
         believed when, which is the difference between a restated series and
         a silently rewritten history.
+
+        The vintage's publication instant is the instant of this write, and the
+        row says so (``publication_basis = "ingest_instant"``). That is the
+        honest statement available here: this path knows when *this deployment*
+        began believing the value, and not when the provider published it.
         """
         rows = list(rows)
         count = self._upsert(
@@ -108,10 +123,62 @@ class TimeSeriesStore:
         self._append_vintages(rows)
         return count
 
-    def _append_vintages(self, rows: Iterable[Dict[str, Any]]) -> None:
-        from datetime import datetime, timezone
+    def record_backfilled_vintages(
+        self,
+        rows: Iterable[Dict[str, Any]],
+        *,
+        snapshot_id: str,
+        published_at: datetime,
+        job_id: Optional[str] = None,
+        source_directory: Optional[str] = None,
+    ) -> int:
+        """Append vintages recovered from a certified snapshot.
 
-        published_at = datetime.now(timezone.utc)
+        Two things distinguish this from ``record_observations``, and both are
+        the point:
+
+        * ``published_at`` is the **snapshot's capture instant**, not now. A
+          row backdated to ``now()`` is unqueryable at every earlier as-of,
+          which is the look-ahead defect in the other direction.
+        * The latest-value store is not touched. A certification from March
+          attests what was believed in March; writing it over today's belief
+          would let a backfill quietly change what current dashboards read.
+
+        The application is recorded in ``vintage_backfill_runs`` in the same
+        commit, including applications that wrote nothing, so a re-run can tell
+        "already done" apart from "nothing to do" -- and so that a snapshot
+        which was refused (it did not verify) is never recorded as applied.
+        """
+        rows = list(rows)
+        self._append_vintages(
+            rows,
+            published_at=published_at,
+            snapshot_id=snapshot_id,
+            publication_basis=CERTIFIED_SNAPSHOT_BASIS,
+        )
+        self.session.add(
+            VintageBackfillRun(
+                snapshot_id=snapshot_id,
+                job_id=job_id,
+                snapshot_created_at=published_at,
+                applied_at=datetime.now(timezone.utc),
+                rows_written=len(rows),
+                rows_skipped=0,
+                source_directory=source_directory,
+            )
+        )
+        self.session.commit()
+        return len(rows)
+
+    def _append_vintages(
+        self,
+        rows: Iterable[Dict[str, Any]],
+        *,
+        published_at: Optional[datetime] = None,
+        snapshot_id: Optional[str] = None,
+        publication_basis: str = INGEST_INSTANT_BASIS,
+    ) -> None:
+        published_at = published_at or datetime.now(timezone.utc)
         vintages = [
             IndicatorVintageLog(
                 source_code=row["source_code"],
@@ -121,6 +188,8 @@ class TimeSeriesStore:
                 value=row["value"],
                 published_at=published_at,
                 ingest_job_id=row.get("ingest_job_id"),
+                snapshot_id=snapshot_id,
+                publication_basis=publication_basis,
             )
             for row in rows
         ]
@@ -128,18 +197,49 @@ class TimeSeriesStore:
             self.session.add_all(vintages)
             self.session.commit()
 
+    def applied_backfills(self) -> List[VintageBackfillRun]:
+        """Every certified snapshot already read into the vintage log."""
+        return list(
+            self.session.query(VintageBackfillRun)
+            .order_by(VintageBackfillRun.snapshot_created_at)
+            .all()
+        )
+
+    def has_backfill_been_applied(self, snapshot_id: str) -> bool:
+        """Whether this certified snapshot has already been read in.
+
+        Idempotency lives here rather than in a unique constraint on the
+        vintage log: making the append-only audit table idempotent by adding a
+        key would mean computing and writing an identity for rows it already
+        holds, and an UPDATE on the log to please a backfill tool is precisely
+        what the log exists to make impossible.
+        """
+        found = (
+            self.session.query(VintageBackfillRun.id)
+            .filter(VintageBackfillRun.snapshot_id == snapshot_id)
+            .first()
+        )
+        return found is not None
+
     def observations_as_of(
         self,
         source_code: str,
         indicator_code: str,
         as_of,
         region: Optional[str] = None,
+        *,
+        valid_from=None,
+        valid_to=None,
     ):
         """The series as it was believed at ``as_of``.
 
         For each period, the newest vintage published at or before ``as_of``:
         exactly the values a decision made at that instant could have seen.
         Restatements published later are invisible here by construction.
+
+        ``valid_from`` / ``valid_to`` narrow which *periods* are returned. They
+        do not move the cut-off: the publication bound stays ``as_of``, because
+        no period's value may come from a vintage published after it.
         """
         query = self.session.query(IndicatorVintageLog).filter(
             IndicatorVintageLog.source_code == source_code,
@@ -148,6 +248,10 @@ class TimeSeriesStore:
         )
         if region:
             query = query.filter(IndicatorVintageLog.region == region)
+        if valid_from is not None:
+            query = query.filter(IndicatorVintageLog.time >= valid_from)
+        if valid_to is not None:
+            query = query.filter(IndicatorVintageLog.time <= valid_to)
         rows = query.order_by(
             IndicatorVintageLog.time, IndicatorVintageLog.published_at
         ).all()
