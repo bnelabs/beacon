@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.0.5] - 2026-09-23
+
 ### Added
 - **Semver release design: the GitHub Release is the public artifact
   (L-48).** The tag stays the machine anchor (`vX.Y.Z` on the release
