@@ -88,6 +88,23 @@ def sync_lockfile(lock_path: Path, new_version: str) -> bool:
     return changed
 
 
+def check_changelog_history(root: Path) -> None:
+    """L-41 gate: refuse the cut if the changelog has drifted from the history.
+
+    Since the last release tag, every merge that touched backend/, frontend/
+    or scripts/ must carry its PR number in the [Unreleased] block. The
+    backfill that fixed L-41's five silent merges is not a process; this is.
+    """
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "check_changelog_history.py"), "--root", str(root)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        fail(result.stderr.strip())
+    print(result.stdout.strip())
+
+
 def regen_api_docs() -> None:
     """Regenerate docs/api-endpoints.md so the release commit carries the new version.
 
@@ -121,6 +138,8 @@ def main() -> None:
     if subprocess.run(["git", "status", "--porcelain"], cwd=ROOT,
                       capture_output=True, text=True).stdout.strip() and not args.dry_run:
         fail("working tree is not clean; commit or stash first")
+
+    check_changelog_history(ROOT)
 
     new = bump(read_version(), args.part)
     new_version = f"{new[0]}.{new[1]}.{new[2]}"
