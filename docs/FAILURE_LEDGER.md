@@ -412,6 +412,30 @@ disagree (`test_panel_normalization.py::TestPredictionPathReportsItsGrain`). Sta
 **OPEN** — the grouping decision belongs to a change that updates the consumers in the
 same breath; found while fixing L-42 and left out of that PR's scope on purpose.
 
+**L-45. The vintage reader's `published_at` compared equal in CI but not on SQLite,
+because one backend returned the column aware and the other naive.** `vintage_log_001`
+writes `published_at` as `DateTime(timezone=True)`. PostgreSQL hands those values back
+aware; SQLite's `DATETIME` has no timezone support and hands back a naive one. So the
+assertion that pins the backfill's point-in-time contract — `row.published_at == the
+certified snapshot's instant` — was True in CI (Postgres) and False on SQLite: a
+backfilled vintage could not be verified as carrying the snapshot's capture instant on
+any SQLite deployment, and a live re-run would have "fixed" it by accident of backend.
+It was worse than an unequal comparison: `observations_as_of` keys a dict on `row.time`
+and `sorted()`s the keys, so a mix of naive and aware period keys raises
+`TypeError` the moment a value read from one backend meets one read from another. The
+row *was* written and the manifest's `created_at` *was* read — the defect was the read
+side, not a refused snapshot or a missed rewrite. Mitigation: `UTCDateTime`, a
+`TypeDecorator` over `DateTime(timezone=True)` that normalises the read side so the two
+provenance tables (`indicator_vintage_log`, `vintage_backfill_runs`) always come back
+aware UTC. Storage DDL is unchanged (SQLite writes the same naive-UTC string it always
+did; Postgres was already aware), so no migration is needed and existing rows read back
+identically; the decorator is scoped to the two tables that carry as-of semantics, so
+the latest-value reads are untouched. Detected by:
+`backend/tests/test_vintage_backfill.py::test_a_backfilled_vintage_is_published_at_the_snapshot_instant`
+(written red first; the `all(row.published_at == PUBLISHED_AT ...)` assertion failed on
+SQLite). Status: **FIXED** — CHANGELOG (Unreleased, Added), PR #116,
+`backend/tests/test_vintage_backfill.py`, `backend/tests/test_vintage_log.py`.
+
 ## D. Test and CI infrastructure that lied
 
 **L-16. The deep backend suite could not start at all.** The sharded rewrite
@@ -577,6 +601,27 @@ identically). The remaining known difference is Node 22 locally against Node 24
 in CI, where `frontend/package.json` declares `engines.node >= 24` — asserted,
 not proven. Status: **OPEN** — `frontend/tests/results.spec.js`, runs
 `35706057051` (`9169be29`) and `35744391049` (`fe70ddd`).
+
+**L-46. The live-migration gate failed as "local auth" on any password-protected
+cluster, because the harness stringified the password away.** `test_migrations_live.py`
+derives the throwaway database URL with `str(make_url(admin).set(database=name))`. In
+SQLAlchemy 2.0, stringifying a `URL` masks the password as `***`, so the derived URL —
+used for both the test engine and the alembic subprocess's `DATABASE_URL` — carried a
+literal `***` as the password. Every connection to the throwaway database then failed
+with `FATAL: password authentication failed`, while the admin connection (same
+credentials, never re-stringified) worked. On a developer's password-protected local
+cluster all 12 live-migration tests therefore failed as an unexplained "auth" error that
+looked environmental and was a harness defect; the gate passed in CI only because CI's
+admin URL (`postgresql://beacon_user@...`, trust auth, no password) had nothing to mask.
+The whole point of the module — running the migrations against a real PostgreSQL the
+guards can inspect — was unreachable from any password-protected cluster. Mitigation:
+`render_as_string(hide_password=False)`, so the derived URL actually authenticates.
+Verified: 12/12 live tests pass against a password-protected TimescaleDB (fresh, legacy
+`create_all`, partial history, no-op re-upgrade, single head). Detected by:
+`backend/tests/test_migrations_live.py` (all 12 tests fail on a password cluster before
+the fix; the "local PostgreSQL auth only" note in the handoff was this defect, not the
+environment). Status: **FIXED** — CHANGELOG (Unreleased, Fixed), PR #116,
+`backend/tests/test_migrations_live.py`.
 
 ## E. Release and process hygiene
 
