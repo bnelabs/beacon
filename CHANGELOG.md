@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.0.4] - 2026-09-23
+
 ### Added
 - **The RUNBOOK documents the alert-rule unit (L-39).** New section 5,
   "Alert rules": rules are created with `POST /api/v1/alert-rules` and
