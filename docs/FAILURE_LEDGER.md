@@ -702,9 +702,15 @@ entries were written back into `## [Unreleased]` from their merge commits and
 diffs rather than from memory, and every entry in this batch carries its PR
 number from `git log`/`gh pr list` rather than from the changelog. The durable
 fix is the same one L-25 deferred — a release-time check that the changelog and
-the merge history agree — still unowned. Status: **FIXED** (backfill) —
-CHANGELOG (Unreleased); the gate for this class remains **OPEN**. The 5.0.0 cycle is
-the first release that needed no backfill: `git log v4.0.0..HEAD --no-merges --
+the merge history agree — now implemented in PR #132:
+`scripts/check_changelog_history.py` (wired into `release.py` before the
+bump) refuses a cut while any merge since the last release tag touches
+`backend/`, `frontend/` or `scripts/` without its PR number in the
+`[Unreleased]` block; release-branch merges and docs-only merges never
+demand entries, and throwaway-repo tests pin both dispositions. Status:
+**FIXED** (backfill) — CHANGELOG (Unreleased); the gate for this class is
+**CLOSED** (PR #132). The 5.0.0 cycle is the first release that needed no
+backfill: `git log v4.0.0..HEAD --no-merges --
 CHANGELOG.md` carries an entry commit for every merge from #102 to #113, and those
 entries moved into `## [5.0.0]` verbatim.
 
