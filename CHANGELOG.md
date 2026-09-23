@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.0.3] - 2026-09-23
+
 ### Added
 - **A release can no longer cut over a merge the changelog has not recorded (L-41).**
   Since the last release tag, every merge whose diff touches `backend/`, `frontend/`
