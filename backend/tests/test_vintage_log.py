@@ -122,3 +122,37 @@ def test_as_of_never_sees_the_future(db):
     store.record_observations([_row(T1, 42.0, job="job-c")])
     before_any = datetime(2025, 12, 31, tzinfo=timezone.utc)
     assert store.observations_as_of("imf", "LIQ_RATIO", before_any) == []
+
+
+def test_vintages_for_returns_the_full_candidate_set_oldest_first(db):
+    # Direct inserts with explicit publication stamps: record_observations
+    # stamps now(), which would not pin the ordering this query must return.
+    rows = [
+        IndicatorVintageLog(
+            source_code="imf", indicator_code="PIT_FEAT", region="GLOBAL",
+            time=T0, value=100.0, published_at=T0,
+        ),
+        IndicatorVintageLog(
+            source_code="imf", indicator_code="PIT_FEAT", region="GLOBAL",
+            time=T0, value=95.0, published_at=T1,
+        ),
+        IndicatorVintageLog(
+            source_code="imf", indicator_code="PIT_FEAT", region="GLOBAL",
+            time=T1, value=42.0, published_at=T1,
+        ),
+    ]
+    db.add_all(rows)
+    db.commit()
+
+    store = TimeSeriesStore(db)
+
+    all_rows = store.vintages_for("imf", "PIT_FEAT", region="GLOBAL")
+    assert [row.value for row in all_rows] == [100.0, 95.0, 42.0]
+
+    # valid_to bounds the described period (time), not publication.
+    bounded = store.vintages_for("imf", "PIT_FEAT", region="GLOBAL", valid_to=T0)
+    assert [row.value for row in bounded] == [100.0, 95.0]
+
+    # A region with no vintages and an unknown indicator both return [].
+    assert store.vintages_for("imf", "PIT_FEAT", region="US") == []
+    assert store.vintages_for("imf", "NO_SUCH_INDICATOR") == []

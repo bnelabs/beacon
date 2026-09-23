@@ -1501,6 +1501,19 @@ def run_backtest(self, job_id: int, parameters: dict):
             except TypeError as def_exc:
                 raise ValueError(f"invalid event_definition: {def_exc}") from def_exc
 
+            from backend.modules.data.pit import attach_pit_features_at_onsets
+            from backend.modules.results.timeseries_store import TimeSeriesStore
+
+            # Opt-in point-in-time feature attach: a list of indicator codes to
+            # read, as of each stress-event onset, from the indicator vintages
+            # on this source. Off by default; an unchanged job produces
+            # byte-identical event_metrics.
+            pit_features = None
+            pit_features_raw = parameters.get("pit_features")
+            if isinstance(pit_features_raw, (list, tuple)) and pit_features_raw:
+                pit_features = [str(code) for code in pit_features_raw]
+            pit_store = TimeSeriesStore(db) if pit_features else None
+
             value_col = 'Close' if 'Close' in test_data.columns else 'Value'
             frame = risk_series.frame if risk_series is not None else None
             event_metrics_payload = {"definition": definition.to_dict(), "by_source": {}}
@@ -1550,7 +1563,7 @@ def run_backtest(self, job_id: int, parameters: dict):
                     event_metrics_payload["by_source"][source_name] = {"skipped": "no_events_in_window"}
                     continue
                 alarms = scores_block >= np.quantile(scores_block, definition.quantile)
-                event_metrics_payload["by_source"][source_name] = {
+                source_metrics = {
                     "n_events": int(labelling.n_events),
                     "roc_auc": roc_auc(events_aligned, scores_block),
                     "average_precision": average_precision(events_aligned, scores_block),
@@ -1558,6 +1571,22 @@ def run_backtest(self, job_id: int, parameters: dict):
                         events_aligned, alarms, max_lead=2 * definition.horizon
                     ),
                 }
+                if pit_features is not None:
+                    onset_dates = source_rows["Date"].iloc[list(labelling.onsets)].to_list()
+                    window_end = source_rows["Date"].max()
+                    vintages_by_indicator = {
+                        feature_indicator: pit_store.vintages_for(
+                            source_name,
+                            feature_indicator,
+                            region="GLOBAL",
+                            valid_to=window_end,
+                        )
+                        for feature_indicator in pit_features
+                    }
+                    source_metrics["pit_features"] = attach_pit_features_at_onsets(
+                        labelling.onsets, onset_dates, vintages_by_indicator, source_name
+                    )
+                event_metrics_payload["by_source"][source_name] = source_metrics
             backtest_metrics["event_metrics"] = event_metrics_payload
         elif isinstance(event_definition_raw, dict):
             backtest_metrics["event_metrics"] = {

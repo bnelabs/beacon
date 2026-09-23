@@ -14,6 +14,8 @@ seeded with a fixed integer where randomness is involved.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -23,6 +25,7 @@ from backend.modules.data.pit import (
     Observation,
     PITStore,
     as_of_join,
+    attach_pit_features_at_onsets,
 )
 
 # The central fixture: one series, one period, three vintages. The number moves
@@ -679,3 +682,68 @@ class TestObjectDatetimeColumns:
         )
 
         assert joined["value"].tolist() == [1.0]
+
+
+# ---------------------------------------------------------------------------
+# attach_pit_features_at_onsets: PIT features at stress-event onsets
+# ---------------------------------------------------------------------------
+def _vintage(valid_time, published_at, value):
+    """A duck-typed vintage row as the store returns them."""
+    return SimpleNamespace(
+        time=pd.Timestamp(valid_time),
+        published_at=pd.Timestamp(published_at),
+        value=float(value),
+    )
+
+
+class TestAttachPitFeaturesAtOnsets:
+    def test_freshest_published_wins_and_restatements_block_until_published(self):
+        # Vintages of indicator F on source S (aware UTC).
+        vintages = [
+            _vintage("2020-01-01", "2020-01-01", 100.0),  # A: Jan period, first print
+            _vintage("2020-01-01", "2020-03-01", 105.0),  # B: Jan period, restated in March
+            _vintage("2020-02-01", "2020-02-01", 200.0),  # C: Feb period
+            _vintage("2020-04-01", "2020-03-01", 999.0),  # D: Apr period, pre-announced in March
+        ]
+        onsets = [0, 1, 2, 3]
+        onset_dates = [
+            pd.Timestamp("2020-01-15"),  # only A known -> 100 (B's restatement not yet out)
+            pd.Timestamp("2020-03-15"),  # A, B, C known; B freshest -> 105 (D's period not begun)
+            pd.Timestamp("2020-01-01"),  # A published same day -> 100
+            pd.Timestamp("2019-12-31"),  # nothing known yet -> None
+        ]
+        report = attach_pit_features_at_onsets(onsets, onset_dates, {"F": vintages}, "S")
+        values = [entry["value"] for entry in report["F"]["onsets"]]
+        assert values == [100.0, 105.0, 100.0, None]
+
+    def test_indicator_with_no_vintages_on_the_source_is_skipped(self):
+        report = attach_pit_features_at_onsets(
+            [0], [pd.Timestamp("2020-01-15")], {"F": []}, "S"
+        )
+        assert report["F"] == {"skipped": "no vintages for this indicator on this source"}
+
+    def test_no_events_skips_every_indicator(self):
+        report = attach_pit_features_at_onsets(
+            [], [], {"F": [_vintage("2020-01-01", "2020-01-01", 1.0)]}, "S"
+        )
+        assert report["F"] == {"skipped": "no stress events in the window"}
+
+    def test_onset_dates_must_be_parallel_to_onsets(self):
+        with pytest.raises(ValueError):
+            attach_pit_features_at_onsets(
+                [0, 1],
+                [pd.Timestamp("2020-01-15")],
+                {"F": [_vintage("2020-01-01", "2020-01-01", 1.0)]},
+                "S",
+            )
+
+    def test_event_times_are_reported_as_utc_iso_and_value_is_numeric(self):
+        report = attach_pit_features_at_onsets(
+            [0],
+            [pd.Timestamp("2020-01-15 12:30:00+00:00")],
+            {"F": [_vintage("2020-01-01", "2020-01-01", 42.0)]},
+            "S",
+        )
+        entry = report["F"]["onsets"][0]
+        assert entry["event_time"] == "2020-01-15T12:30:00+00:00"
+        assert entry["value"] == 42.0
