@@ -10,6 +10,15 @@ import { useRouter, type RouteParams } from '../store/useRouter'
 import EmptyState from '../components/ui/EmptyState'
 import type { ModelResultMetrics, PerSourceMetrics, ScenarioResult, ValidationSourceStats, VolatilityBaselineEntry } from '../types/api'
 
+// Stable module-level empty refs. While the model query is still loading,
+// `modelDetail` is undefined; `modelDetail?.result || {}` (and the analogous
+// `per_source_metrics || {}`) allocated a fresh object on every render, which
+// made `availableSources` a fresh array every render, which re-ran the
+// `builderAdjustments` effect every render -- an infinite re-render loop
+// ("Maximum update depth exceeded"). Reusing stable constants breaks the loop.
+const EMPTY_MODEL_RESULT: ModelResultMetrics = {}
+const EMPTY_PER_SOURCE_METRICS: Record<string, PerSourceMetrics> = {}
+
 /** The error `detail` FastAPI answers with: a plain string, or the typed
  *  {user_friendly, technical} envelope the backend raises on pipeline errors. */
 type ApiErrorDetail = { detail?: { user_friendly?: string } | string }
@@ -432,8 +441,8 @@ export default function Results({ params = {} }: ResultsProps) {
   const [builderLoading, setBuilderLoading] = useState(false)
   const builderRef = useRef<HTMLElement>(null)
 
-  const baselineMetrics: ModelResultMetrics = modelDetail?.result || {}
-  const perSourceMetrics: Record<string, PerSourceMetrics> = baselineMetrics?.per_source_metrics || {}
+  const baselineMetrics: ModelResultMetrics = modelDetail?.result ?? EMPTY_MODEL_RESULT
+  const perSourceMetrics: Record<string, PerSourceMetrics> = baselineMetrics.per_source_metrics ?? EMPTY_PER_SOURCE_METRICS
   const availableSources = useMemo(() => Object.keys(perSourceMetrics), [perSourceMetrics])
 
   useEffect(() => {
