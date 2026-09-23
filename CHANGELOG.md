@@ -9,6 +9,21 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.0.5] - 2026-09-23
+
+### Added
+- **Semver release design: the GitHub Release is the public artifact
+  (L-48).** The tag stays the machine anchor (`vX.Y.Z` on the release
+  commit); `release.py publish [VERSION]` publishes the pushed tag as a
+  GitHub Release whose notes are the versioned changelog block verbatim,
+  with pre-release versions publishing as GitHub pre-releases. The
+  changelog gate's base lookup now takes the highest-semver release tag
+  reachable from HEAD, so a non-release mark on main can never displace
+  it; the required check job fails while any release tag lacks its
+  GitHub Release; RUNBOOK §7 and VERSIONING.md document the tag/release
+  split (PR #138). Thirteen prior releases were backfilled as GitHub
+  Releases from their changelog blocks.
+
 ## [6.0.4] - 2026-09-23
 
 ### Added
