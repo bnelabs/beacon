@@ -585,8 +585,11 @@ written that way can never breach a gate-scale score; the suite pins both
 dispositions (`lt 0.8` reports "ok" on a 42.0 dataset, `lt 70` triggers on the
 same data). Re-basing any operator-written rule is an owner decision, not a
 migration in disguise. Status: **FIXED** — CHANGELOG (Unreleased), PR #111
-(merged `fe70ddd`); the `0.8` consequence is **OPEN** (owner action) regardless
-of the merge.
+(merged `fe70ddd`). The `0.8` consequence is now **CLOSED**: the owner's
+decision was made in PR #129 (merged `dfebd2a`) — the rule the suite seeds is
+`quality_score lt 70` on the gate scale, sourced from
+`QualityPolicy().min_quality_score`, with the unit stated in the module
+docstring; an operator-written rule is to be seeded the same way.
 
 **L-40. The frontend suite is deterministically red locally and green in CI on
 the same commit.** Three tests in `frontend/tests/results.spec.js` — "predictive
