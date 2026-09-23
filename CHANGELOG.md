@@ -9,6 +9,18 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.0.2] - 2026-09-23
+
+### Fixed
+- **The alert-rule tests now seed the quality floor on the gate's own scale (L-39).**
+  The suite's default alert rule was still written `quality_score lt 0.8` with
+  0–1 fraction fixtures — a floor that can never breach a gate-scale score
+  (every gate verdict is > 1.0), so it read as a guard while guarding nothing.
+  It is now `quality_score lt 70`, sourced from `QualityPolicy().min_quality_score`,
+  with job fixtures on the 0–100 scale and the unit stated in the module
+  docstring; `success_rate` (a fraction) and `execution_time` (minutes) keep
+  their native units (PR #129). Test-only change: no user-visible change.
+
 ## [6.0.1] - 2026-09-23
 
 ### Fixed
