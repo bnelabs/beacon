@@ -260,6 +260,33 @@ class TimeSeriesStore:
             latest[row.time] = row
         return [latest[key] for key in sorted(latest)]
 
+    def vintages_for(
+        self,
+        source_code: str,
+        indicator_code: str,
+        region: str = "GLOBAL",
+        *,
+        valid_to=None,
+    ) -> List[IndicatorVintageLog]:
+        """Every vintage of one (source, indicator, region), oldest first.
+
+        Unlike :meth:`observations_as_of` this does *not* collapse to the
+        newest vintage per period -- it returns the full candidate set, so a
+        caller (e.g. ``pit.attach_pit_features_at_onsets``) can do its own
+        as-of selection against a set of event times. ``valid_to`` is an upper
+        bound on the described period (``time``), not on publication.
+        """
+        query = self.session.query(IndicatorVintageLog).filter(
+            IndicatorVintageLog.source_code == source_code,
+            IndicatorVintageLog.indicator_code == indicator_code,
+            IndicatorVintageLog.region == region,
+        )
+        if valid_to is not None:
+            query = query.filter(IndicatorVintageLog.time <= valid_to)
+        return query.order_by(
+            IndicatorVintageLog.time, IndicatorVintageLog.published_at
+        ).all()
+
     def record_risk_scores(self, rows: Iterable[Dict[str, Any]]) -> int:
         """Upsert risk scores keyed by (time, entity_type, entity_id, model_version, horizon)."""
         return self._upsert(

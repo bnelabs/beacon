@@ -59,21 +59,19 @@ Production status (recorded so the gap is a decision, not a silence)
 
 ``PITStore`` and ``Observation`` are wired: the bilateral-exposure store
 (``services/bilateral_exposure_store``) persists exposure vintages through them
-and serves ``load_as_of`` queries. :func:`as_of_join` currently has **no
-production caller** -- it is implemented, exported and covered by
-``tests/test_pit.py``, pre-positioned for the event-metrics path (attaching
-point-in-time features to labelled stress events in ``run_backtest``). The
-reachability census walks modules, not functions, so this note is where the
-function-level status lives; wiring it into a consumer, or deleting it, is a
-``decide`` disposition for the next census pass -- not something to discover
-by accident.
+and serves ``load_as_of`` queries. :func:`as_of_join` is wired too:
+:func:`attach_pit_features_at_onsets` uses it to attach point-in-time features
+to the labelled stress events in ``run_backtest``'s event-metrics path (opt-in,
+via the job's ``pit_features`` parameter), reading the indicator vintages the
+point-in-time store exposes. The reachability census walks modules, not
+functions, so this note is where the function-level status lives.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -82,6 +80,7 @@ __all__ = [
     "Observation",
     "PITStore",
     "as_of_join",
+    "attach_pit_features_at_onsets",
     "OBSERVATION_COLUMNS",
 ]
 
@@ -521,3 +520,92 @@ def as_of_join(
             result[column] = values.reindex(row_ids).to_numpy()
 
     return result
+
+
+def _iso_utc(stamp: object) -> str:
+    """ISO-8601 string for a timestamp, naive input treated as UTC."""
+    ts = pd.Timestamp(stamp)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    return ts.tz_convert("UTC").isoformat()
+
+
+def attach_pit_features_at_onsets(
+    onsets: Sequence,
+    onset_dates: Sequence,
+    vintages_by_indicator: Dict[str, Sequence],
+    source: str,
+) -> Dict[str, Any]:
+    """Attach point-in-time feature values to each stress-event onset.
+
+    ``onsets`` and ``onset_dates`` are parallel: ``onset_dates[i]`` is the
+    timestamp of ``onsets[i]``. ``vintages_by_indicator`` maps each declared
+    feature indicator to the sequence of its vintage rows (each row exposes
+    ``.time`` (the period it describes), ``.published_at`` (when it became
+    known) and ``.value``), all on ``source``.
+
+    For each indicator the freshest vintage *published at or before the
+    onset* whose *period had already begun* is attached, via :func:`as_of_join`
+    -- the same leak-free rule the exposure store uses. That is what makes this
+    an as-of read rather than a plain merge: a restatement published after the
+    onset is invisible, and a value whose period had not begun (a forecast, a
+    pre-announcement) is blocked.
+
+    Returns one entry per declared indicator: ``{"onsets": [{"event_time",
+    "value"}, ...]}`` parallel to ``onsets``, or ``{"skipped": reason}`` when the
+    indicator has no vintage on the source, or there are no events. A ``value``
+    is ``None`` when no qualifying vintage exists for that onset -- it is never
+    forward-filled.
+    """
+    onsets = list(onsets)
+    if not onsets:
+        return {
+            indicator: {"skipped": "no stress events in the window"}
+            for indicator in vintages_by_indicator
+        }
+    if len(onset_dates) != len(onsets):
+        raise ValueError("onset_dates must be parallel to onsets")
+
+    events = pd.DataFrame(
+        {
+            "entity": [source] * len(onsets),
+            "event_time": list(onset_dates),
+        }
+    )
+
+    report: Dict[str, Any] = {}
+    for indicator, vintages in vintages_by_indicator.items():
+        vintages = list(vintages)
+        if not vintages:
+            report[indicator] = {
+                "skipped": "no vintages for this indicator on this source"
+            }
+            continue
+        features = pd.DataFrame(
+            {
+                "entity": [source] * len(vintages),
+                "valid_time": [vintage.time for vintage in vintages],
+                "observed_at": [vintage.published_at for vintage in vintages],
+                "value": [vintage.value for vintage in vintages],
+            }
+        )
+        joined = as_of_join(
+            events,
+            features,
+            on="entity",
+            event_time_col="event_time",
+            observed_at_col="observed_at",
+            valid_time_col="valid_time",
+            feature_cols=["value"],
+        )
+        values = joined["value"].to_numpy()
+        report[indicator] = {
+            "onsets": [
+                {
+                    "event_time": _iso_utc(onset_dates[i]),
+                    "value": None if not np.isfinite(values[i]) else float(values[i]),
+                }
+                for i in range(len(onsets))
+            ]
+        }
+    return report
