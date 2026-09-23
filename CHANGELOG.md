@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-09-23
+
 ### Fixed
 - **The frontend e2e suite no longer red-loops locally on a deep-linked Results page (L-40).**
   While the model query is loading, `Results.tsx` allocated a fresh `baselineMetrics`
