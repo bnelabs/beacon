@@ -9,6 +9,19 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-09-23
+
+### Fixed
+- **The frontend e2e suite no longer red-loops locally on a deep-linked Results page (L-40).**
+  While the model query is loading, `Results.tsx` allocated a fresh `baselineMetrics`
+  object on every render (`modelDetail?.result || {}`), which re-ran the
+  builder-adjustments effect every render — an infinite re-render loop whose dev-mode
+  "Maximum update depth exceeded" warning the Playwright spec's console-error handler
+  turned into a failure. It now reuses stable module-level empty refs, so the effect
+  runs once. The local e2e is also pinned to the CI engine: `frontend/.nvmrc` and a
+  `pretest` guard that reads `engines.node` and fails fast on a mismatched Node
+  (PR #126). No user-visible change.
+
 ## [6.0.0] - 2026-09-23
 
 ### Changed
