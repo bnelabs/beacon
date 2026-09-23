@@ -9,6 +9,27 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-09-23
+
+### Added
+- **Point-in-time features attached to stress-event onsets.** A backtest job can now
+  declare `pit_features` (a list of indicator codes); each source's labelled stress
+  events then carry, at each onset, the point-in-time value of every declared
+  indicator, read from the indicator vintages (step 4) via `as_of_join` — the
+  freshest vintage published at or before the onset whose period had already begun
+  (a restatement published after the onset is invisible; a forecast for a period that
+  had not begun is blocked; no qualifying vintage yields `None`, never a
+  forward-filled guess). Opt-in: an unchanged job produces byte-identical
+  `event_metrics` (PR #119).
+- **The release tooling regenerates `docs/api-endpoints.md` on every release** and
+  includes it in the release commit. The doc embeds the app version, so a version
+  bump alone used to leave the generated inventory one version stale (PR #120).
+
+### Fixed
+- `docs/api-endpoints.md` was left at v5.0.0 by the 5.1.0 release; it is regenerated
+  (PR #119) and the root cause is fixed in the release tooling (PR #120) — ledger
+  L-47, the second occurrence of L-25.
+
 ## [5.1.0] - 2026-09-23
 
 ### Added
