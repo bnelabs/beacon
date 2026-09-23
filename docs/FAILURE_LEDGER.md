@@ -651,13 +651,15 @@ before it could reach a nightly. Mitigation: the inventory was regenerated
 checklist now carries "regenerate `docs/api-endpoints.md` immediately after
 `release.py`" as a numbered step; a release-tooling guard (fail when the
 generated inventory disagrees with `VERSION`) is recorded as the durable fix
-if this class recurs. Status: **FIXED** (tooling guard: OPEN, deliberately
-deferred until a second occurrence justifies touching the release script). The
+if this class recurs. Status: **FIXED** (tooling guard: was OPEN, deliberately
+deferred until a second occurrence justified touching the release script). The
 checklist step was exercised at the 5.0.0 cut: `release: v5.0.0` (`85cb051`)
 regenerates `docs/api-endpoints.md` in the same commit as the `VERSION` bump, so the
 generated inventory reads v5.0.0 and `generate_api_docs.py --check` is green at the
-release commit. No second occurrence, so the guard stays deferred — but bumping and
-regenerating are now a documented two-step rather than an act of memory.
+release commit. A second occurrence did follow — the 5.1.0 release left the doc at
+v5.0.0 (L-47) — which is exactly what the deferral was waiting on; the guard is now
+implemented in `release.py` itself (PR #120), so the bump and the regeneration are
+one atomic step rather than a documented two-step.
 
 **L-41. Five merges landed after v4.0.0 with no changelog entry.** #97 (plugin
 configuration and provider hardening), #98 (ECB/FRED/SEC collection hardening,
@@ -699,6 +701,21 @@ bump by enumerating what a consumer reads differently on unchanged data, not by
 counting added endpoints.** L-11 applied that rule to 4.0.0 after the fact; here it
 was applied before the cut, which is what turned a planned minor into a fix batch.
 Status: **RECORDED** — CHANGELOG (5.0.0, Changed), `v5.0.0`, `docs/VERSIONING.md`.
+
+**L-47. The 5.1.0 release left a generated doc stale — the second occurrence
+L-25 deferred a guard for.** `docs/api-endpoints.md` embeds the application version;
+the 5.1.0 release (`release: v5.1.0`, `d0664e7`) bumped `VERSION` to 5.1.0 but the
+release tooling did not regenerate the inventory, so the committed doc still claimed
+v5.0.0. The fast CI gates do not include the inventory check (the deep suite does),
+and the release was merged on the fast gates alone, so the staleness was not caught at
+merge — it surfaced during the next feature's gate run (PR #119), where
+`generate_api_docs.py --check` failed against the stale file. Mitigation: the
+inventory was regenerated in PR #119 (one-line version diff); and the durable fix
+L-25 deferred — regeneration in the release tooling itself — is now implemented:
+`release.py` runs `scripts/generate_api_docs.py` after writing `VERSION` and includes
+the doc in the release commit (PR #120), so the bump and the regeneration are one
+atomic step. Status: **FIXED** — PR #119 (regen), PR #120 (tooling guard); the 5.2.0
+cut is the first to run through the fixed tooling, closing L-25's deferred item.
 
 ---
 
