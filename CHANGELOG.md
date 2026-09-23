@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.0.2] - 2026-09-23
+
 ### Fixed
 - **The alert-rule tests now seed the quality floor on the gate's own scale (L-39).**
   The suite's default alert rule was still written `quality_score lt 0.8` with
