@@ -196,9 +196,11 @@ async def get_validation_report(job_id: int, db: Session = Depends(get_db)):
             "validation": None,
         }
 
-    by_source = event_metrics.get("by_source", {}) or {}
+    # New backtests key their event metrics by series; legacy payloads used
+    # by_source. Read the new key first and fall back so old jobs still report.
+    by_series = event_metrics.get("by_series") or event_metrics.get("by_source", {}) or {}
     measured = {
-        name: payload for name, payload in by_source.items()
+        name: payload for name, payload in by_series.items()
         if isinstance(payload, dict) and "roc_auc" in payload
     }
     aucs = [payload["roc_auc"] for payload in measured.values() if payload.get("roc_auc") is not None]
@@ -207,12 +209,12 @@ async def get_validation_report(job_id: int, db: Session = Depends(get_db)):
         "status": "validated",
         "validation": {
             "definition": event_metrics.get("definition"),
-            "sources_measured": len(measured),
-            "sources_skipped": {
-                name: payload for name, payload in by_source.items() if name not in measured
+            "series_measured": len(measured),
+            "series_skipped": {
+                name: payload for name, payload in by_series.items() if name not in measured
             },
             "mean_roc_auc": float(sum(aucs) / len(aucs)) if aucs else None,
-            "by_source": by_source,
+            "by_series": by_series,
             "quant_metrics": {
                 key: backtest_metrics.get(key)
                 for key in ("mse", "mae", "rmse", "r2", "directional_accuracy", "hit_rate")

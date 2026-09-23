@@ -1279,14 +1279,14 @@ def run_backtest(self, job_id: int, parameters: dict):
                     predicted_offsets, target_series, pred_values
                 )
                 if mask.any():
-                    # The aligned subset drops rows (each source's final window
+                    # The aligned subset drops rows (each series's final window
                     # has no predicted row in range), so the seam boundaries
-                    # are rebuilt from the aligned per-source counts rather
+                    # are rebuilt from the aligned per-series counts rather
                     # than reused from the full-length series.
-                    source_labels = frame["source"].to_numpy()
+                    series_labels = frame["series"].to_numpy()
                     valid_counts = [
-                        int(((source_labels == name) & mask).sum())
-                        for name in risk_series.sources
+                        int(((series_labels == name) & mask).sum())
+                        for name in risk_series.series_ids
                     ]
                     aligned_boundaries = list(boundaries_from_group_sizes(valid_counts))
                     actuals_full = np.full(pred_values.size, np.nan)
@@ -1356,8 +1356,8 @@ def run_backtest(self, job_id: int, parameters: dict):
         # Evaluation extension: directional agreement between the risk series and
         # any available ground truth, plus walk-forward fold diagnostics.
         #
-        # The series is ordered in time and source-major, so `boundaries` marks
-        # the seam between sources and no metric differences across it.
+        # The series is ordered in time and series-major, so `boundaries` marks
+        # the seam between series and no metric differences across it.
         wf_raw = parameters.get("walk_forward")
         if not isinstance(wf_raw, dict):
             wf_raw = {}
@@ -1408,27 +1408,27 @@ def run_backtest(self, job_id: int, parameters: dict):
                 if quant_key in quant_metrics:
                     backtest_metrics[quant_key] = quant_metrics[quant_key]
 
-            # Folds are generated inside each source's own contiguous span: folding
-            # across a concatenation of sources would train on one entity and test
+            # Folds are generated inside each series's own contiguous span: folding
+            # across a concatenation of series would train on one entity and test
             # on another.
             walk_forward = {
                 "config": wf_config.to_dict(),
                 "folds": [],
-                "aggregation": "per_source",
+                "aggregation": "per_series",
             }
-            source_names = risk_series.sources if risk_series is not None else []
+            series_names = risk_series.series_ids if risk_series is not None else []
             entries, failures = walk_forward_folds_per_segment(
                 boundaries or None, int(pred_values.size), wf_config
             )
             for segment_index, _segment, folds in entries:
-                source_name = (
-                    source_names[segment_index]
-                    if segment_index < len(source_names)
+                series_name = (
+                    series_names[segment_index]
+                    if segment_index < len(series_names)
                     else str(segment_index)
                 )
                 for fold_index, (train_idx, test_idx) in enumerate(folds):
                     walk_forward["folds"].append({
-                        "source": source_name,
+                        "series": series_name,
                         "fold": fold_index,
                         "train_start": int(train_idx[0]),
                         "train_end": int(train_idx[-1]) + 1,
@@ -1442,12 +1442,12 @@ def run_backtest(self, job_id: int, parameters: dict):
                         ),
                     })
             if failures:
-                walk_forward["skipped_sources"] = {
-                    source_names[index] if index < len(source_names) else str(index): reason
+                walk_forward["skipped_series"] = {
+                    series_names[index] if index < len(series_names) else str(index): reason
                     for index, reason in failures.items()
                 }
             if not walk_forward["folds"]:
-                walk_forward["skipped"] = "no source had enough timesteps for the fold configuration"
+                walk_forward["skipped"] = "no series had enough timesteps for the fold configuration"
             backtest_metrics["walk_forward"] = walk_forward
         else:
             skip_reason = risk_series_error or (
@@ -1516,21 +1516,28 @@ def run_backtest(self, job_id: int, parameters: dict):
 
             value_col = 'Close' if 'Close' in test_data.columns else 'Value'
             frame = risk_series.frame if risk_series is not None else None
-            event_metrics_payload = {"definition": definition.to_dict(), "by_source": {}}
-            for source_name in (risk_series.sources if risk_series is not None else []):
-                block = frame[frame["source"] == source_name]
-                source_rows = test_data[test_data['source_code'] == source_name].sort_values('Date')
-                series_values = pd.to_numeric(source_rows[value_col], errors='coerce').to_numpy(dtype=float)
+            # The series is scored per entity (``series_id``) when the payload
+            # carries one, else per feed; the labels here and the seams above
+            # are series-level. Stress direction and indicator vintages are
+            # properties of the FEED, so they are looked up by the series'
+            # feed code, not the entity.
+            series_col = 'series_id' if 'series_id' in test_data.columns else 'source_code'
+            event_metrics_payload = {"definition": definition.to_dict(), "by_series": {}}
+            for series_name in (risk_series.series_ids if risk_series is not None else []):
+                block = frame[frame["series"] == series_name]
+                feed = str(block["source"].iloc[0])
+                series_rows = test_data[test_data[series_col] == series_name].sort_values('Date')
+                series_values = pd.to_numeric(series_rows[value_col], errors='coerce').to_numpy(dtype=float)
                 if series_values.size < definition.horizon + definition.min_duration:
-                    event_metrics_payload["by_source"][source_name] = {"skipped": "series_too_short"}
+                    event_metrics_payload["by_series"][series_name] = {"skipped": "series_too_short"}
                     continue
                 from dataclasses import replace as _dc_replace
 
                 from backend.modules.data.semantics import event_direction
 
-                resolved_direction = definition.direction or event_direction(source_name)
+                resolved_direction = definition.direction or event_direction(feed)
                 if resolved_direction is None:
-                    event_metrics_payload["by_source"][source_name] = {
+                    event_metrics_payload["by_series"][series_name] = {
                         "skipped": "no declared or registered stress direction for this series"
                     }
                     continue
@@ -1546,7 +1553,7 @@ def run_backtest(self, job_id: int, parameters: dict):
                 keep = (offsets >= 0) & (offsets < series_values.size) & np.isfinite(scores_raw)
                 offsets = offsets[keep]
                 if offsets.size == 0:
-                    event_metrics_payload["by_source"][source_name] = {"skipped": "no_aligned_scores"}
+                    event_metrics_payload["by_series"][series_name] = {"skipped": "no_aligned_scores"}
                     continue
                 # Direction: for a direction=-1 series stress lives in FALLING
                 # values, so scoring the high tail of the raw score against
@@ -1560,7 +1567,7 @@ def run_backtest(self, job_id: int, parameters: dict):
                 labelling = label_events(series_values, source_definition)
                 events_aligned = labelling.events[offsets]
                 if events_aligned.size == 0 or not events_aligned.any():
-                    event_metrics_payload["by_source"][source_name] = {"skipped": "no_events_in_window"}
+                    event_metrics_payload["by_series"][series_name] = {"skipped": "no_events_in_window"}
                     continue
                 alarms = scores_block >= np.quantile(scores_block, definition.quantile)
                 source_metrics = {
@@ -1572,11 +1579,11 @@ def run_backtest(self, job_id: int, parameters: dict):
                     ),
                 }
                 if pit_features is not None:
-                    onset_dates = source_rows["Date"].iloc[list(labelling.onsets)].to_list()
-                    window_end = source_rows["Date"].max()
+                    onset_dates = series_rows["Date"].iloc[list(labelling.onsets)].to_list()
+                    window_end = series_rows["Date"].max()
                     vintages_by_indicator = {
                         feature_indicator: pit_store.vintages_for(
-                            source_name,
+                            feed,
                             feature_indicator,
                             region="GLOBAL",
                             valid_to=window_end,
@@ -1584,9 +1591,9 @@ def run_backtest(self, job_id: int, parameters: dict):
                         for feature_indicator in pit_features
                     }
                     source_metrics["pit_features"] = attach_pit_features_at_onsets(
-                        labelling.onsets, onset_dates, vintages_by_indicator, source_name
+                        labelling.onsets, onset_dates, vintages_by_indicator, feed
                     )
-                event_metrics_payload["by_source"][source_name] = source_metrics
+                event_metrics_payload["by_series"][series_name] = source_metrics
             backtest_metrics["event_metrics"] = event_metrics_payload
         elif isinstance(event_definition_raw, dict):
             backtest_metrics["event_metrics"] = {
@@ -1594,32 +1601,34 @@ def run_backtest(self, job_id: int, parameters: dict):
             }
 
         # Volatility track (the census's `garch` disposition, wired): GARCH(1,1)
-        # priced against unconditional variance per source, on each source's own
-        # contiguous span -- returns never difference across a source seam. This
+        # priced against unconditional variance per series, on each series's own
+        # contiguous span -- returns never difference across a series seam. A
+        # panel feed is priced per entity, not as one interleaved series. This
         # track prices VOLATILITY, not levels: it consumes none of the quant or
-        # event metrics above and feeds none of them. Skips are per-source and
+        # event metrics above and feeds none of them. Skips are per-series and
         # declared, as everywhere else.
         if 'source_code' in test_data.columns:
             from backend.modules.engine.backtesting import compare_volatility_baselines
 
             volatility_value_col = 'Close' if 'Close' in test_data.columns else 'Value'
+            volatility_col = 'series_id' if 'series_id' in test_data.columns else 'source_code'
             volatility_payload = {}
-            for volatility_source in test_data['source_code'].unique():
+            for volatility_series in test_data[volatility_col].unique():
                 volatility_rows = test_data[
-                    test_data['source_code'] == volatility_source
+                    test_data[volatility_col] == volatility_series
                 ].sort_values('Date')
                 volatility_values = pd.to_numeric(
                     volatility_rows[volatility_value_col], errors='coerce'
                 ).to_numpy(dtype=float)
                 try:
-                    volatility_payload[str(volatility_source)] = compare_volatility_baselines(
+                    volatility_payload[str(volatility_series)] = compare_volatility_baselines(
                         volatility_values
                     )
-                except Exception as vol_exc:  # noqa: BLE001 - a per-source failure is recorded, it does not void the backtest
-                    volatility_payload[str(volatility_source)] = {
+                except Exception as vol_exc:  # noqa: BLE001 - a per-series failure is recorded, it does not void the backtest
+                    volatility_payload[str(volatility_series)] = {
                         "failed": f"{type(vol_exc).__name__}: {vol_exc}"
                     }
-            backtest_metrics["volatility_baselines"] = {"by_source": volatility_payload}
+            backtest_metrics["volatility_baselines"] = {"by_series": volatility_payload}
 
         # Persist scalar metrics to the metrics hypertable (fifth-round wiring).
         try:

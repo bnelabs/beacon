@@ -250,7 +250,11 @@ class TestRiskSeries:
         decoded = json.loads(json.dumps(result.to_dict(), allow_nan=False))
         assert decoded["n_steps"] == 6
         assert decoded["boundaries"] == [3]
-        assert decoded["ordering"] == "source_major_then_time"
+        assert decoded["ordering"] == "series_major_then_time"
+        # A feed-grain payload has no per-entity identity, so each series IS its
+        # feed: the new series fields mirror the source fields.
+        assert decoded["n_series"] == 2
+        assert decoded["series_ids"] == list(SOURCES)
         assert decoded["stats_provenance"] == {source: "checkpoint" for source in SOURCES}
 
 
