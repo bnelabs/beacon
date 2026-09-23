@@ -605,7 +605,25 @@ Vite dep cache (cleared, identical failures), a leftover dev server on port 8173
 (none), and this change's own edits (a control run on a stashed tree fails
 identically). The remaining known difference is Node 22 locally against Node 24
 in CI, where `frontend/package.json` declares `engines.node >= 24` — asserted,
-not proven. Status: **OPEN** — `frontend/tests/results.spec.js`, runs
+not proven.
+
+Resolved: a clean Node 24 install (`npm ci`, Node 24.21.0) reproduced the red,
+so the engine was never the cause. The real defect was a re-render loop in
+`Results.tsx`: while the model query is loading, `modelDetail` is undefined, so
+`modelDetail?.result || {}` allocated a fresh object on every render, which made
+`availableSources` a fresh array on every render and re-ran the
+`builderAdjustments` effect on every render. In dev mode React logs "Maximum
+update depth exceeded", and the spec's console-error handler turned that into a
+failure before `toBeVisible` could observe the (correctly rendered) heading —
+the heading renders in ~250ms and nothing reaches the live backend (the suite is
+fully mocked). Fixed by reusing stable module-level empty refs for
+`baselineMetrics`/`perSourceMetrics`, and by pinning the local e2e engine to
+Node 24 (`frontend/.nvmrc` + a `pretest` guard that reads `engines.node` from
+`package.json` and fails fast on a mismatched Node). Verified: the three
+deep-link tests and the full 15-test suite pass on Node 24 (clean `npm ci`),
+locally and in the dispatched `frontend-e2e` run. Status: **FIXED** (v6.0.1,
+PR #126) — `frontend/src/pages/Results.tsx`,
+`frontend/scripts/ensure-playwright.mjs`, `frontend/.nvmrc`, runs
 `35706057051` (`9169be29`) and `35744391049` (`fe70ddd`).
 
 **L-46. The live-migration gate failed as "local auth" on any password-protected
