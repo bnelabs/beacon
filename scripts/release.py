@@ -5,9 +5,10 @@ Usage:
     python scripts/release.py patch|minor|major [--tag] [--dry-run]
 
 Moves the ``[Unreleased]`` block of CHANGELOG.md under a dated ``[X.Y.Z]``
-heading, writes the new version to VERSION, keeps
-frontend/package.json equal to it, and commits atomically. ``--tag`` creates
-the annotated git tag locally (pushing tags is a maintainer act).
+heading, writes the new version to VERSION, keeps frontend/package.json and
+docs/api-endpoints.md (which embed the version) equal to it, and commits
+atomically. ``--tag`` creates the annotated git tag locally (pushing tags is
+a maintainer act).
 
 See docs/VERSIONING.md for the policy this script enforces.
 """
@@ -17,6 +18,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import os
 import re
 import subprocess
 import sys
@@ -86,6 +88,25 @@ def sync_lockfile(lock_path: Path, new_version: str) -> bool:
     return changed
 
 
+def regen_api_docs() -> None:
+    """Regenerate docs/api-endpoints.md so the release commit carries the new version.
+
+    The docs embed the app version, which ``backend`` reads from the root
+    ``VERSION`` file at import time. A release that bumps ``VERSION`` without
+    regenerating the docs leaves them stale -- the api-docs check (Tier 2 and
+    CI) then fails. The generator is import-only (no DB), so it runs
+    self-contained under ``USE_SQLITE``. Runs after ``VERSION`` is written, so
+    the regenerated doc already shows the new version.
+    """
+    env = {**os.environ, "PYTHONPATH": str(ROOT), "USE_SQLITE": "true"}
+    subprocess.run(
+        [sys.executable, "scripts/generate_api_docs.py"],
+        cwd=ROOT,
+        env=env,
+        check=True,
+    )
+
+
 def run(cmd: list[str]) -> None:
     subprocess.run(cmd, cwd=ROOT, check=True)
 
@@ -117,8 +138,9 @@ def main() -> None:
     CHANGELOG.write_text(changelog, encoding="utf-8")
     PACKAGE_JSON.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
     sync_lockfile(PACKAGE_LOCK, new_version)
+    regen_api_docs()
 
-    run(["git", "add", "VERSION", "CHANGELOG.md", "frontend/package.json"])
+    run(["git", "add", "VERSION", "CHANGELOG.md", "frontend/package.json", "docs/api-endpoints.md"])
     if PACKAGE_LOCK.exists():
         run(["git", "add", "frontend/package-lock.json"])
     run(["git", "commit", "-m", f"release: v{new_version}"])
