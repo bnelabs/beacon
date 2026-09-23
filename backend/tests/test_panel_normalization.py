@@ -343,10 +343,12 @@ class TestInferenceHonoursTheRecordedGrain:
 
 
 class TestPredictionPathReportsItsGrain:
-    """``RealPredictionEngine`` scores a payload grouped by feed, so a checkpoint
-    that standardizes per series has no entry describing a whole feed. It must
-    normalize from the payload and say so, not borrow one entity's scale for the
-    entire feed."""
+    """``_prepare_sequence`` consulted by a feed label against a series-grain
+    checkpoint has no entry describing a whole feed. It must normalize from the
+    payload and say so, not borrow one entity's scale for the entire feed.
+    ``predict_risk_series`` itself now groups by ``series_id`` (see
+    ``TestPredictionSeriesGroupsBySeries``), so this is the safety net for the
+    point-prediction path and any direct feed-label lookup."""
 
     @staticmethod
     def _engine(output_dir: str) -> RealPredictionEngine:
@@ -414,3 +416,56 @@ class TestPredictionPathReportsItsGrain:
         values = np.full(12, 999_950.0, dtype=np.float32)
         _, stats = engine._prepare_sequence(values, FEED)
         assert stats["mean"] == pytest.approx(1_000_000.0)
+
+
+class TestPredictionSeriesGroupsBySeries:
+    """``predict_risk_series`` must score a panel feed per entity, not as one
+    interleaved series. L-42 fixed the statistics grain on the training path and
+    the orchestrator's scoring loop; this is the per-timestep risk-series path,
+    which grouped ``working`` by ``source_code`` and collapsed every entity of a
+    feed into a single fabricated series until this fix."""
+
+    def test_panel_is_scored_per_series(self, panel_run):
+        from backend.modules.data.quality_gate import QualityAttestation
+
+        _, _, output_dir = panel_run
+        attestation = QualityAttestation(
+            job_id="job-panel-series",
+            verified=True,
+            checked_at="2024-01-01T00:00:00+00:00",
+        )
+        engine = RealPredictionEngine(
+            model_path=os.path.join(output_dir, "best_model.pt"),
+            device=torch.device("cpu"),
+            config={"sequence_length": SEQUENCE_LENGTH},
+            quality_attestation=attestation,
+        )
+        result = engine.predict_risk_series(_panel_frame(), attestation=attestation)
+
+        # One feed, two entities: the series grain, not the feed grain.
+        assert result.n_sources == 1
+        assert result.sources == [FEED]
+        assert result.n_series == 2
+        assert sorted(result.series_ids) == sorted(SERIES_KEYS)
+
+        # Each entity keeps its own contiguous window; the single seam sits
+        # between the two series, not between interleaved rows.
+        per_series = ROWS - SEQUENCE_LENGTH + 1
+        assert result.n_steps == 2 * per_series
+        assert result.boundaries == [per_series]
+        assert set(result.frame["series"].unique()) == set(SERIES_KEYS)
+        assert set(result.frame["source"].unique()) == {FEED}
+
+        # The frame is grouped, never interleaved: each entity's rows form one
+        # contiguous run.
+        for key in SERIES_KEYS:
+            positions = np.flatnonzero(
+                result.frame["series"].to_numpy() == key
+            )
+            assert positions.size == per_series, f"expected {per_series} rows for {key}"
+            assert (np.diff(positions) == 1).all(), f"{key} rows are interleaved"
+
+        # A series-grain checkpoint carries each entity's own statistics, so
+        # nothing falls back to the payload window: no grain mismatch.
+        assert set(result.stats_provenance) == set(SERIES_KEYS)
+        assert set(result.stats_provenance.values()) == {"checkpoint"}

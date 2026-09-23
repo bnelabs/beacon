@@ -104,9 +104,12 @@ class RiskSeriesResult:
     :meth:`RealPredictionEngine.predict_risk_series` rolls the same window and
     the same normalisation across the payload.
 
-    Rows are grouped by source and time-ordered inside each group, so
-    ``boundaries`` marks the seam between consecutive sources: those seams are
+    Rows are grouped by series -- ``series_id`` when the payload carries one,
+    else the feed's ``source_code`` -- and time-ordered inside each group, so
+    ``boundaries`` marks the seam between consecutive series: those seams are
     not observations and must never be differenced as if they were.
+    ``sources`` is the deduplicated list of feed codes; ``series_ids`` is one
+    entry per series, in frame order.
 
     Alignment convention: the model predicts the row *after* its window ends.
     ``frame['row_offset']`` is the caller-frame position of the window's last
@@ -119,6 +122,7 @@ class RiskSeriesResult:
     frame: pd.DataFrame
     boundaries: List[int]
     sources: List[str]
+    series_ids: List[str]
     n_dropped_for_history: int
     truncated: Dict[str, int]
     stats_provenance: Dict[str, str]
@@ -133,19 +137,25 @@ class RiskSeriesResult:
     def n_sources(self) -> int:
         return len(self.sources)
 
+    @property
+    def n_series(self) -> int:
+        return len(self.series_ids)
+
     def to_dict(self) -> Dict[str, Any]:
         """JSON-ready metadata. The row-level series is not inlined here."""
         return {
             "n_sources": self.n_sources,
+            "n_series": self.n_series,
             "n_steps": self.n_steps,
             "n_dropped_for_history": int(self.n_dropped_for_history),
             "boundaries": [int(value) for value in self.boundaries],
             "sources": list(self.sources),
+            "series_ids": list(self.series_ids),
             "truncated": dict(self.truncated),
             "stats_provenance": dict(self.stats_provenance),
             "batch_size": int(self.batch_size),
             "max_steps": None if self.max_steps is None else int(self.max_steps),
-            "ordering": "source_major_then_time",
+            "ordering": "series_major_then_time",
         }
 
 
@@ -613,9 +623,10 @@ class RealPredictionEngine:
         series ordered in time, so this rolls the same window, the same source
         mapping and the same normalisation across the payload.
 
-        Predictions come back grouped by source and time-ordered within each
-        group; ``boundaries`` records the seam between consecutive sources so
-        those seams are never differenced as if they were observations.
+        Predictions come back grouped by series (``series_id`` when the payload
+        carries one, else the feed's ``source_code``) and time-ordered within
+        each group; ``boundaries`` records the seam between consecutive series
+        so those seams are never differenced as if they were observations.
 
         ``max_steps`` caps the timesteps inferred per source, keeping the most
         recent ones, because every step costs a model forward pass; ``None``
@@ -654,20 +665,34 @@ class RealPredictionEngine:
         )
 
         frames: List[pd.DataFrame] = []
-        sources: List[str] = []
+        series_ids: List[str] = []
+        source_order: List[str] = []
         group_sizes: List[int] = []
         truncated: Dict[str, int] = {}
         stats_provenance: Dict[str, str] = {}
         dropped_for_history = 0
 
-        for raw_source, group in working.groupby('source_code', sort=True):
-            source_code = str(raw_source)
+        # Group at the grain the payload carries. A panel feed (``series_id``
+        # present) is scored per entity; a feed without a per-entity identity
+        # keeps its feed grain. This must match the grain the checkpoint's
+        # statistics were keyed at -- scoring a panel as one interleaved series
+        # is the defect L-43 named.
+        group_col = 'series_id' if 'series_id' in input_data.columns else 'source_code'
+        stats_grain = str(getattr(self, 'stats_grain', 'feed'))
+
+        for raw_series, group in working.groupby(group_col, sort=True):
+            series = str(raw_series)
+            source_code = (
+                str(group['source_code'].iloc[0])
+                if 'source_code' in group.columns and not group.empty
+                else series
+            )
             ordered = group.sort_values('Date') if 'Date' in group.columns else group
             value_column = 'Close' if 'Close' in ordered.columns else 'Value'
             if value_column not in ordered.columns:
                 raise SchemaValidationError(
-                    "Payload has neither a 'Close' nor a 'Value' column for source "
-                    f"{source_code}"
+                    "Payload has neither a 'Close' nor a 'Value' column for series "
+                    f"{series}"
                 )
 
             # Gaps stay as NaN here. They are imputed with the standardised mean
@@ -680,29 +705,28 @@ class RealPredictionEngine:
                 .to_numpy(dtype=float)
             )
             if step_cap is not None and values.size > step_cap:
-                truncated[source_code] = int(values.size - step_cap)
+                truncated[series] = int(values.size - step_cap)
                 values = values[-step_cap:]
                 ordered = ordered.iloc[-step_cap:]
 
             if values.size <= sequence_length:
                 dropped_for_history += int(values.size)
                 logger.warning(
-                    "Risk series: source %s has %d row(s), too few for a %d-step window",
-                    source_code,
+                    "Risk series: series %s has %d row(s), too few for a %d-step window",
+                    series,
                     values.size,
                     sequence_length,
                 )
                 continue
 
-            # Reuse `_prepare_sequence`'s normalisation so a rolling prediction is
-            # directly comparable with the point prediction `predict()` returns
-            # for the same row. Checkpoint stats are the training-time ones;
-            # falling back to stats computed over the evaluated window is
-            # recorded, because that fallback lets the normalisation see the
-            # future and makes the resulting metrics optimistic.
-            _, stats = self._prepare_sequence(values, source_code)
-            stats_provenance[source_code] = (
-                "checkpoint" if self.source_stats.get(source_code) else "payload_window"
+            # Normalise at the grain the checkpoint's statistics were keyed at:
+            # per series for a series-grain checkpoint, per feed for a
+            # feed-grain one. Looking up the wrong grain standardises an entity
+            # with a scale that is not its own (the 10^2 entity scored at 10^6).
+            stats_key = series if stats_grain == 'series' else source_code
+            _, stats = self._prepare_sequence(values, stats_key)
+            stats_provenance[series] = (
+                "checkpoint" if self.source_stats.get(stats_key) else "payload_window"
             )
             mean = float(stats.get('mean', 0.0))
             std = float(stats.get('std', 1.0)) or 1.0
@@ -712,6 +736,8 @@ class RealPredictionEngine:
             normalized = np.where(np.isfinite(normalized), normalized, 0.0)
 
             windows = np.lib.stride_tricks.sliding_window_view(normalized, sequence_length)
+            # The model's per-source embedding is keyed by the feed, not the
+            # entity; the entity's scale is carried by the normalisation above.
             scores = self._score_windows(
                 windows, self._map_source_id(source_code), window_batch
             )
@@ -721,9 +747,9 @@ class RealPredictionEngine:
             # (target = normalized[i + window]). `row_offset` therefore marks
             # the row the window ends on, and `predicted_row_offset` marks the
             # row the score is a prediction FOR -- the caller-frame position of
-            # the next row within the same source, or -1 for each source's
-            # final window, whose predicted row lies beyond the source's span
-            # and must never resolve into the next source's rows.
+            # the next row within the same series, or -1 for each series's
+            # final window, whose predicted row lies beyond the series's span
+            # and must never resolve into the next series's rows.
             ends = np.arange(sequence_length - 1, values.size)
             row_offsets = np.asarray(ordered['__row_offset'])
             next_positions = ends + 1
@@ -734,6 +760,7 @@ class RealPredictionEngine:
             )
             frame = pd.DataFrame({
                 'source': source_code,
+                'series': series,
                 'row_offset': row_offsets[ends],
                 'predicted_row_offset': predicted_row_offsets,
                 'risk_score': scores,
@@ -744,12 +771,14 @@ class RealPredictionEngine:
 
             dropped_for_history += sequence_length - 1
             frames.append(frame)
-            sources.append(source_code)
+            series_ids.append(series)
+            if source_code not in source_order:
+                source_order.append(source_code)
             group_sizes.append(int(frame.shape[0]))
 
         if not frames:
             raise SchemaValidationError(
-                "No source in the payload has enough history for a per-timestep risk series",
+                "No series in the payload has enough history for a per-timestep risk series",
                 context={
                     "sequence_length": sequence_length,
                     "max_steps": step_cap,
@@ -758,14 +787,14 @@ class RealPredictionEngine:
             )
 
         optimistic = sorted(
-            source
-            for source, origin in stats_provenance.items()
+            series
+            for series, origin in stats_provenance.items()
             if origin == "payload_window"
         )
         if optimistic:
             logger.warning(
                 "Risk series normalisation for %s came from the evaluated window rather "
-                "than the checkpoint, so metrics on those sources are optimistic: the "
+                "than the checkpoint, so metrics on those series are optimistic: the "
                 "normalisation saw the future",
                 optimistic,
             )
@@ -773,7 +802,8 @@ class RealPredictionEngine:
         return RiskSeriesResult(
             frame=pd.concat(frames, ignore_index=True),
             boundaries=[int(value) for value in boundaries_from_group_sizes(group_sizes)],
-            sources=sources,
+            sources=source_order,
+            series_ids=series_ids,
             n_dropped_for_history=int(dropped_for_history),
             truncated=truncated,
             stats_provenance=stats_provenance,

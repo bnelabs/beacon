@@ -50,7 +50,7 @@ class TestValidationReport:
             "backtest_metrics": {
                 "event_metrics": {
                     "definition": {"direction": "up", "quantile": 0.95, "horizon": 5, "min_duration": 2},
-                    "by_source": {
+                    "by_series": {
                         "SRC_A": {
                             "n_events": 2,
                             "roc_auc": 0.81,
@@ -68,7 +68,7 @@ class TestValidationReport:
         payload = response.json()
         assert payload["status"] == "validated"
         assert payload["validation"]["mean_roc_auc"] == pytest.approx(0.81)
-        assert payload["validation"]["by_source"]["SRC_B"]["skipped"] == "no_events_in_window"
+        assert payload["validation"]["by_series"]["SRC_B"]["skipped"] == "no_events_in_window"
         assert payload["validation"]["quant_metrics"]["directional_accuracy"] == 0.6
 
     def test_unvalidated_backtest_reports_absence(self, db):
