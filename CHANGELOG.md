@@ -9,6 +9,14 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Added
+- **The RUNBOOK documents the alert-rule unit (L-39).** New section 5,
+  "Alert rules": rules are created with `POST /api/v1/alert-rules` and
+  evaluated per rule by the beat tick, and thresholds must be written on the
+  metric's own scale — `quality_score lt 70` on the gate's 0–100 scale (never
+  the unreachable fraction `lt 0.8`), `success_rate` as a fraction
+  (PR #135). Operator-facing documentation; no behaviour change.
+
 ## [6.0.3] - 2026-09-23
 
 ### Added
