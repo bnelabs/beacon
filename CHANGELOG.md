@@ -9,6 +9,15 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Added
+- **A release can no longer cut over a merge the changelog has not recorded (L-41).**
+  Since the last release tag, every merge whose diff touches `backend/`, `frontend/`
+  or `scripts/` must carry its PR number in the `[Unreleased]` block, or
+  `scripts/release.py` refuses the cut and names the missing PRs. Release-branch
+  and docs-only merges never demand an entry. This is the durable guard L-25
+  deferred and L-41's backfill pointed at — five silent merges after v4.0.0 could
+  no longer reach a release (PR #132).
+
 ## [6.0.2] - 2026-09-23
 
 ### Fixed
