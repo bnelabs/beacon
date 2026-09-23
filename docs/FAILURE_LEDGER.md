@@ -409,8 +409,14 @@ those labels as feed codes. What #113 did instead: the engine records `stats_gra
 a series-grain checkpoint consulted by feed label no longer borrows an entity's scale
 — it normalizes the window from its own observations and warns once that the grains
 disagree (`test_panel_normalization.py::TestPredictionPathReportsItsGrain`). Status:
-**OPEN** — the grouping decision belongs to a change that updates the consumers in the
-same breath; found while fixing L-42 and left out of that PR's scope on purpose.
+**FIXED** (v6.0.0, PR #123) — `predict_risk_series` now groups by `series_id`
+when the payload carries one (else `source_code`), so a panel feed is scored per
+entity, never as one interleaved series. The model's per-source embedding stays
+feed-keyed and normalisation statistics are looked up at the checkpoint's grain.
+`RiskSeriesResult` reports `series_ids`/`n_series`, the frame carries both
+`source` and `series`, and boundaries mark series seams; the consumers
+(target-alignment seams, walk-forward folds, `by_series` event metrics, the
+volatility track and the validation report) were updated in the same breath.
 
 **L-45. The vintage reader's `published_at` compared equal in CI but not on SQLite,
 because one backend returned the column aware and the other naive.** `vintage_log_001`
