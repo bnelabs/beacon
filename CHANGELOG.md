@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-09-23
+
 ### Changed
 - **The per-timestep risk series is now scored per series, not per feed (MAJOR).**
   `predict_risk_series` grouped the payload by `source_code`, so a panel feed (many
