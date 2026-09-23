@@ -9,6 +9,24 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-09-23
+
+### Changed
+- **The per-timestep risk series is now scored per series, not per feed (MAJOR).**
+  `predict_risk_series` grouped the payload by `source_code`, so a panel feed (many
+  entities under one source) was scored as a single fabricated series with interleaved
+  entity windows, and every consumer read those labels as feed codes (L-43). It now
+  groups by `series_id` when the payload carries one (else `source_code`), keeps the
+  model's per-source embedding feed-keyed, and looks normalisation statistics up at the
+  checkpoint's grain. `RiskSeriesResult` reports `series_ids`/`n_series`, the frame
+  carries both `source` (feed) and `series` (series id), and `boundaries` mark series
+  seams. Consumers were updated in the same breath: target-alignment seams, the
+  walk-forward folds (`per_series`), `by_series` event metrics (stress direction and PIT
+  vintages looked up by the series' feed code), the volatility track, and the validation
+  report (`series_measured`/`series_skipped`, reading `by_series` with a fallback to the
+  legacy `by_source`). A feed-grain payload (no `series_id`) is byte-identical — each
+  series is its own feed (PR #123).
+
 ## [5.2.0] - 2026-09-23
 
 ### Added
