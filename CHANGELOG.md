@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-09-23
+
 ### Added
 - **Point-in-time features attached to stress-event onsets.** A backtest job can now
   declare `pit_features` (a list of indicator codes); each source's labelled stress
