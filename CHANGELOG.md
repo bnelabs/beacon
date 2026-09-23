@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-09-23
+
 ### Added
 - **Point-in-time reads of indicator vintages are now queryable, and the certified
   snapshots that prove them are read back into the audit log.** This closes the
