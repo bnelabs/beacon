@@ -589,7 +589,10 @@ migration in disguise. Status: **FIXED** — CHANGELOG (Unreleased), PR #111
 decision was made in PR #129 (merged `dfebd2a`) — the rule the suite seeds is
 `quality_score lt 70` on the gate scale, sourced from
 `QualityPolicy().min_quality_score`, with the unit stated in the module
-docstring; an operator-written rule is to be seeded the same way.
+docstring; an operator-written rule is to be seeded the same way. The
+RUNBOOK now carries that example for the operator: a new section 5,
+"Alert rules", shows `quality_score lt 70` on the gate scale and
+`success_rate`'s native fraction scale, with the why in one line (PR #135).
 
 **L-40. The frontend suite is deterministically red locally and green in CI on
 the same commit.** Three tests in `frontend/tests/results.spec.js` — "predictive
