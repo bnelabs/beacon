@@ -88,10 +88,24 @@ genuine fraction (0–1), and its thresholds stay fractions (L-39).
   require declared or uploaded balance sheets; maximum-entropy estimates
   (`network_estimation`) carry their prior-status caveat into every result.
 
-## 7. Release procedure
+## 7. Release procedure (maintainer)
 
-1. Merge the open cycle PRs.
-2. `python scripts/release.py minor` on a release branch (bumps `VERSION`,
-   dates the changelog block, syncs `frontend/package.json`); PR + merge.
-3. Tag the merge commit `vX.Y.Z` (annotated message: what the release
-   carries). `scripts/check_versioning.py` guards drift in CI.
+The Semver release design (L-48) splits a release into two artifacts: the
+**tag** is the machine anchor, the **GitHub Release** is the public artifact.
+
+1. Merge the open cycle PRs, then `git checkout -b release/X.Y.Z` from
+   `main` (the branch holds the `[Unreleased]` block the release will carry).
+2. `python scripts/release.py patch --tag` (or `minor`/`major`) on the
+   release branch: moves `[Unreleased]` to a dated `[X.Y.Z]` heading, bumps
+   `VERSION`, syncs `frontend/package.json`, commits atomically, and tags
+   the **release commit** `vX.Y.Z`. The changelog-history gate runs inside
+   the cut and refuses a cut the changelog has not recorded (L-41). PR +
+   merge.
+3. Push the tag, then publish: `python scripts/release.py publish` creates
+   the GitHub Release for the pushed tag — notes are the versioned
+   changelog block verbatim (pre-release versions publish as GitHub
+   pre-releases; re-running refreshes an existing release's notes).
+4. Verify: `VERSION` and `frontend/package.json` agree, the `[X.Y.Z]`
+   heading is dated, and the Releases page shows the new release — the
+   versioning CI job fails while any release tag lacks its GitHub Release.
+   Pushing the tag and publishing are maintainer acts, never CI's.

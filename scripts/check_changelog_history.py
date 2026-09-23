@@ -35,8 +35,16 @@ import sys
 from pathlib import Path
 
 MERGE_SUBJECT = re.compile(r"Merge pull request #(\d+) from (\S+)")
-RELEASE_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
+RELEASE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$")
 CONSUMER_PREFIXES = ("backend/", "frontend/", "scripts/")
+
+
+def _semver_key(tag: str) -> tuple:
+    """Order release tags per SemVer: pre-releases sort before their release."""
+    match = RELEASE_TAG.match(tag)
+    numbers = tuple(int(g) for g in match.groups()[:3])
+    prerelease = match.group(4)
+    return (numbers, 0 if prerelease else 1, prerelease or "")
 
 
 def run_git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -47,13 +55,24 @@ def run_git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedP
 
 
 def last_release_tag(root: Path) -> str:
-    result = run_git(root, "describe", "--tags", "--abbrev=0", check=False)
-    if result.returncode != 0:
+    """The highest-semver release tag reachable from HEAD (L-48).
+
+    Not ``git describe``'s nearest tag: a non-release tag placed on main after
+    the last release (the ``prereg-early-warning-v*`` marks are ancestors of
+    main today) would otherwise become the base and break the cut. The base
+    is the newest *release* tag in reach, ordered per SemVer.
+    """
+    result = run_git(root, "tag", "--list", "v*")
+    candidates = []
+    for tag in result.stdout.split():
+        if not RELEASE_TAG.match(tag):
+            continue
+        ancestor = run_git(root, "merge-base", "--is-ancestor", tag, "HEAD", check=False)
+        if ancestor.returncode == 0:
+            candidates.append(tag)
+    if not candidates:
         raise SystemExit("changelog-history: no release tag reachable from HEAD")
-    tag = result.stdout.strip()
-    if not RELEASE_TAG.match(tag):
-        raise SystemExit(f"changelog-history: nearest tag {tag!r} is not a release tag (vX.Y.Z)")
-    return tag
+    return max(candidates, key=_semver_key)
 
 
 def unreleased_block(root: Path) -> str:

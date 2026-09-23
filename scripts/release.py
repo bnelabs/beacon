@@ -3,12 +3,20 @@
 
 Usage:
     python scripts/release.py patch|minor|major [--tag] [--dry-run]
+    python scripts/release.py publish [VERSION] [--dry-run]
 
-Moves the ``[Unreleased]`` block of CHANGELOG.md under a dated ``[X.Y.Z]``
-heading, writes the new version to VERSION, keeps frontend/package.json and
-docs/api-endpoints.md (which embed the version) equal to it, and commits
-atomically. ``--tag`` creates the annotated git tag locally (pushing tags is
-a maintainer act).
+Bump modes move the ``[Unreleased]`` block of CHANGELOG.md under a dated
+``[X.Y.Z]`` heading, write the new version to VERSION, keep
+frontend/package.json and docs/api-endpoints.md (which embed the version)
+equal to it, and commit atomically. ``--tag`` creates the annotated git tag
+locally.
+
+``publish`` is the other half of the Semver release design (L-48): the tag is
+the machine anchor, the GitHub Release is the public artifact. It publishes
+an already-pushed tag as a GitHub Release whose notes are the versioned
+CHANGELOG.md block verbatim (pre-release versions publish as pre-releases),
+and is idempotent -- an existing release gets its notes refreshed. Pushing
+the tag and publishing are maintainer acts, never CI's.
 
 See docs/VERSIONING.md for the policy this script enforces.
 """
@@ -22,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import NoReturn
 
@@ -39,11 +48,15 @@ def fail(message: str) -> NoReturn:
     raise SystemExit(1)
 
 
-def read_version() -> tuple[int, int, int]:
+def read_version_string() -> str:
     raw = VERSION_FILE.read_text(encoding="utf-8").strip()
-    match = SEMVER.match(raw)
-    if not match:
+    if not SEMVER.match(raw):
         fail(f"VERSION file is not strict semver: {raw!r}")
+    return raw
+
+
+def read_version() -> tuple[int, int, int]:
+    match = SEMVER.match(read_version_string())
     return int(match.group(1)), int(match.group(2)), int(match.group(3))
 
 
@@ -105,6 +118,76 @@ def check_changelog_history(root: Path) -> None:
     print(result.stdout.strip())
 
 
+def version_block(root: Path, version: str) -> str:
+    """The versioned ``CHANGELOG.md`` block for ``version``, as release notes.
+
+    Runs from the ``## [X.Y.Z]`` heading to the next top-level ``## `` heading
+    or EOF. The changelog is the single source of truth for what a release
+    carries, so the GitHub Release notes are that block verbatim.
+    """
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    pattern = re.compile(
+        rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## |\Z)",
+        flags=re.M | re.S,
+    )
+    match = pattern.search(text)
+    if not match:
+        fail(f"CHANGELOG.md has no [{version}] block to publish")
+    body = match.group(1).strip()
+    if not body:
+        fail(f"CHANGELOG.md [{version}] block is empty; nothing to publish")
+    return body
+
+
+def _release_exists(root: Path, tag: str) -> bool:
+    return subprocess.run(
+        ["gh", "release", "view", tag, "--json", "id"],
+        cwd=root, capture_output=True, text=True,
+    ).returncode == 0
+
+
+def publish_release(root: Path, version: str, dry_run: bool) -> None:
+    """Publish ``v{version}`` as a GitHub Release -- the public artifact (L-48).
+
+    The tag is the machine anchor; the GitHub Release is what consumers read.
+    Notes are the versioned changelog block verbatim. Pre-release versions
+    (``-rc.N``) publish with ``--prerelease``. Idempotent: an existing release
+    gets its notes refreshed. The tag must already be on origin -- this is the
+    maintainer act that follows the push.
+    """
+    tag = f"v{version}"
+    remote = subprocess.run(
+        ["git", "ls-remote", "--tags", "origin", tag],
+        cwd=root, capture_output=True, text=True,
+    )
+    if tag not in remote.stdout:
+        fail(f"tag {tag} is not on origin; push it first (maintainer act)")
+
+    notes = version_block(root, version)
+    is_prerelease = "-" in version
+    verb = "edit" if _release_exists(root, tag) else "create"
+
+    if dry_run:
+        extra = " --prerelease" if is_prerelease else ""
+        print(f"would gh release {verb} {tag}{extra}")
+        print(notes[:400] + ("..." if len(notes) > 400 else ""))
+        return
+
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".md", delete=False, encoding="utf-8"
+    ) as fh:
+        fh.write(notes + "\n")
+        notes_path = fh.name
+    try:
+        cmd = ["gh", "release", verb, tag, "--title", tag, "--notes-file", notes_path]
+        if is_prerelease:
+            cmd.append("--prerelease")
+        subprocess.run(cmd, cwd=root, check=True)
+    finally:
+        os.unlink(notes_path)
+    print(f"published {tag} as a GitHub Release" + (" (pre-release)" if is_prerelease else ""))
+
+
 def regen_api_docs() -> None:
     """Regenerate docs/api-endpoints.md so the release commit carries the new version.
 
@@ -130,10 +213,21 @@ def run(cmd: list[str]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("part", choices=["patch", "minor", "major"])
+    parser.add_argument("part", choices=["patch", "minor", "major", "publish"])
+    parser.add_argument("version", nargs="?", default=None,
+                        help="version to publish (publish mode only; default: current VERSION)")
     parser.add_argument("--tag", action="store_true", help="create annotated git tag")
     parser.add_argument("--dry-run", action="store_true", help="print, do not write")
     args = parser.parse_args()
+
+    if args.part == "publish":
+        if args.tag:
+            fail("--tag is not used with publish")
+        publish_release(ROOT, args.version or read_version_string(), args.dry_run)
+        return
+
+    if args.version is not None:
+        fail("a version argument is only used with publish")
 
     if subprocess.run(["git", "status", "--porcelain"], cwd=ROOT,
                       capture_output=True, text=True).stdout.strip() and not args.dry_run:

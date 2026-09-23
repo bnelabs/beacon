@@ -25,7 +25,25 @@ the parts ship together in one Compose stack and one set of images.
 `scripts/release.py <major|minor|patch>` moves that block under a dated
 `[X.Y.Z]` heading, bumps `VERSION`, syncs `frontend/package.json`, and commits
 atomically. `--tag` additionally creates the annotated git tag
-(`vX.Y.Z`) locally; pushing tags is a maintainer act, never CI's.
+(`vX.Y.Z`) locally. Pushing the tag and publishing the release are
+maintainer acts, never CI's.
+
+## Tags and releases
+
+The Semver release design (L-48) splits a release into two artifacts:
+
+- **The tag is the machine anchor** — an annotated `vX.Y.Z` on the release
+  commit, created by `release.py --tag` and pushed as a maintainer act. Git
+  tooling, the changelog-history gate (`check_changelog_history.py`, which
+  bases itself on the highest-semver release tag reachable, so a
+  non-release mark on main can never displace it) and CI read it.
+- **The GitHub Release is the public artifact** — title `vX.Y.Z`, notes are
+  the versioned `CHANGELOG.md` block verbatim, created after the tag is
+  pushed by `release.py publish [VERSION]` (pre-release versions publish as
+  GitHub pre-releases; an existing release gets its notes refreshed).
+  The changelog stays the single source of truth for what a release carries.
+
+Procedure in full: `docs/RUNBOOK.md`, section 7.
 
 ## Guards
 
@@ -36,7 +54,10 @@ on every push and PR) fails when:
 2. `frontend/package.json` disagrees with `VERSION`;
 3. the top block of `CHANGELOG.md` is neither `[Unreleased]` nor the current
    `VERSION` (a release commit must move the block, not leave it stranded);
-4. a platform version is hard-coded anywhere else (`grep`-based spot checks).
+4. a platform version is hard-coded anywhere else (`grep`-based spot checks);
+5. the same job then runs `scripts/check_release_coverage.py` (L-48), which
+   fails when a release tag on the remote has no GitHub Release — the tag
+   is the machine anchor, the release is the public artifact.
 
 ## What a version does NOT cover
 
