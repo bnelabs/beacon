@@ -7,7 +7,7 @@ from datetime import datetime
 
 class JobBase(BaseModel):
     """Base schema for jobs."""
-    job_type: str = Field(..., description="Type of job (data_collection, training, prediction, backtest)")
+    job_type: str = Field(..., description="Type of job (data_collection, training, prediction, backtest, scenario)")
     parameters: Optional[Dict[str, Any]] = Field(None, description="Job parameters")
 
 

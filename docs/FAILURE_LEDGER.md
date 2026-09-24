@@ -201,9 +201,11 @@ live seconds later (< 1 s, 25 non-null rows 2000–2024). Detected by: the
 plugin now distinguishes 4xx (indicator not in catalogue → `None`, a
 decision) from `requests.RequestException` (timeout, connection failure, 5xx
 → `DataSourceUnavailableError`, retryable), mirroring the SEC plugin.
-Status: **OPEN** — mitigation in branch `fix/610-data-training-fidelity`,
-pattern covered by `backend/tests/test_imf_plugin.py`'s error-path tests
-(the same class of transport).
+Status: **CLOSED** — fixed in 6.1.0 (PR #143): the plugin now
+distinguishes 4xx (`None`) from transport errors (`DataSourceUnavailableError`,
+retryable). Verified: job 15 (the retry of failed job 14) completed 71/71,
+and the final packages (jobs 16, 20) completed with zero collection
+failures.
 
 **L-58. The SEC 13F catalogue item pointed at a retired filer CIK, so the
 holdings series silently stopped in 2024-08.** The item resolved ticker
@@ -215,8 +217,10 @@ per-source freshness audit (F2). Mitigation: `data_catalogue` id 33
 endpoint repointed to `0002012383.13F-HR` (verified in the live DB; job 16
 then collected the current 8 filings), and `KNOWN_SEC_CIKS["BLK"]` in
 `sec_plugin.py` corrected with the retired CIK documented. Status:
-**FIXED** (ops) + **OPEN** (code hardening in branch
-`fix/610-data-training-fidelity`).
+**CLOSED** — ops fix (catalogue id 33 repointed to `0002012383.13F-HR`,
+verified in the live DB; job 16 then collected the current 8 filings) plus
+the code hardening in 6.1.0 (PR #143): `KNOWN_SEC_CIKS["BLK"]` corrected
+with the retired CIK documented.
 
 **L-59. The IMF plugin's default path pointed at a retired endpoint, and the
 two IMF catalogue items could never resolve.** `dataservices.imf.org/REST/
@@ -234,8 +238,10 @@ disabled, with the reason written into their catalogue descriptions rather
 than left as silent dead rows. Mitigation: the plugin's DataMapper path is
 now correct and typed (4xx → `None`, network/5xx →
 `DataSourceUnavailableError`), verified live on `NGDP_RPCH/USA` (27 points
-2000–2026). Status: **OPEN** — mitigation in branch
-`fix/610-data-training-fidelity`, `backend/tests/test_imf_plugin.py`.
+2000–2026). Status: **CLOSED** — fixed in 6.1.0 (PR #143): the DataMapper path is
+correct and typed, verified live on `NGDP_RPCH/USA` (27 points 2000–2026).
+Catalogue items 41/42 remain disabled with the reason (no DataMapper
+equivalent) written into their descriptions — a declared, not silent, gap.
 
 ## C. API and engine honesty bugs
 
@@ -509,8 +515,11 @@ candidate column with at least one non-null value, checking the data), used
 by all six read sites (trainer dataset builder, baseline comparison, risk
 series, prediction, and both backtest metric blocks). Verified on the real
 package: all 67 scalar series enter training (was 11), 145,715 sequences
-(was 14,511). Status: **OPEN** — mitigation in branch `fix/610-data-training-fidelity`,
-retrain + re-backtest to follow.
+(was 14,511). Status: **CLOSED** — fixed in 6.1.0 (PR #143). Verified end-to-end on
+the retrained model: jobs 22 and 26 trained 88,844 sequences from 41 sources
+(15,179 series) — the rates/macro/credit feeds the old builder dropped are
+in the model — and job 28 scored all 71 sources with real per-series values
+(no more `prediction == risk_score` constant rows).
 
 **L-52. The rich `ScenarioParameters` were inert on the API simulate path,
 and the engine transforms that were reachable were miscalibrated.** The
@@ -534,8 +543,14 @@ inferred from the parameters present when absent; `_transform_values`
 applies every candidate value column; rate units/sign corrected; edge
 frames handled; `regional_shock` without a `region` column logs a declared
 no-op instead of failing silently; `combined` recurses into every applicable
-subtype. Status: **OPEN** — mitigation in branch `fix/610-data-training-fidelity`,
-unit tests in `backend/tests/test_scenario_transforms.py`.
+subtype. Status: **CLOSED** — fixed in 6.1.0 (PR #143); unit tests in
+`backend/tests/test_scenario_transforms.py`. Verified end-to-end on the
+6.1.3 model (job 26): all six scenario responses (baseline, market_crash,
+rate_shock, liquidity_freeze, bank_failure, regional_shock) echo
+`scenario_parameters` verbatim and the transforms demonstrably hit the data
+(the non-uniform bank-failure transform moved the AI4RISK topology feed
+0.839→0.790). The separate limitation that the *scores* barely respond to
+the uniform transforms is recorded as L-62, not left implicit here.
 
 **L-53. The brief report displayed anomaly findings as failed checks.**
 `/api/v2/reports/brief/{id}` rendered `anomalies_detected` under the `failed`
@@ -543,7 +558,9 @@ key: job 16 showed "failed: 18197" while 71/71 sources were collected and no
 quality check failed — 18,197 validator warnings read at a glance as 18,197
 failures. Mitigation: `failed` now carries the collection report's failed
 count and `anomalies_detected`/`anomalies_fixed` are their own fields.
-Status: **OPEN** — mitigation in branch `fix/610-data-training-fidelity`.
+Status: **CLOSED** — fixed in 6.1.0 (PR #143); the brief report for the
+final package (job 20) shows 0 failed checks with the 18,197 anomalies as
+their own field.
 
 **L-54. The backtest reported metrics with no ground truth to compare them
 against.** The collection package carries no target column, so the backtest
@@ -555,9 +572,11 @@ standardized on the pre-test window only (standardizing on the test window
 would leak the evaluated split into the target; series without pre-test
 history get NaN targets and are excluded rather than scored on statistics
 they never saw). The derivation is declared in the job result
-(`target_derivation`). Status: **OPEN** — mitigation in branch
-`fix/610-data-training-fidelity`, unit tests in
-`backend/tests/test_backtest_target_derivation.py`.
+(`target_derivation`). Status: **CLOSED** — fixed in 6.1.0 (PR #143).
+Verified: backtest job 27 (final model) reports `target_derivation`
+populated, 25,264 of 26,056 rows aligned to leakage-free derived ground
+truth, and real aligned metrics (R² 0.188, directional accuracy 0.449).
+Unit tests in `backend/tests/test_backtest_target_derivation.py`.
 
 **L-55. The multi-scale trainer's walk-forward baseline comparison was
 permanently `null`.** The trainer honestly reported "not measured" instead of
@@ -565,16 +584,19 @@ lifting the model against persistence/AR(1) baselines — so the complexity of
 the multi-scale architecture went unpriced while the single-scale trainer
 had reported the same metric since round two. The failure mode was the
 same value-column defect as L-51: the denormalized baseline series were read
-from the wrong column and the comparison blew up. Status: **OPEN** —
-mitigated by the L-51 fix (baseline comparison now selects the value column
-per series). The job-22 retrain (v6.1.1) confirmed the top-level null is
+from the wrong column and the comparison blew up. Mitigated by the L-51 fix
+(baseline comparison now selects the value column per series). The job-22
+retrain (v6.1.1) confirmed the top-level null is
 gone — `baseline_comparison` is populated — but every one of its 53
 per-source entries was still skipped, so `mean_lift` remained `null` and the
 metric was still unmeasured. Offline replay of the walk-forward guard found
 why, and it is recorded as L-61: an off-by-one in the window-count check and
 a feature reshape the model cannot consume, both in the same never-measured
-path. The retrain on the fixed code must show at least one measured
-per-source entry (with a lift against persistence/AR(1)) to close.
+path. Closed across three releases: 6.1.0 (PR #143, the value-column
+fix), 6.1.2 (PR #147, the L-61 defects 1–3), and 6.1.3 (PR #149, L-61
+defect 4). Verified: job 26's `baseline_comparison` measures 30 of 65
+candidate sources (all 12 compound-id feeds included, the AI4RISK panel
+recorded once), with a finite `mean_lift` (−50.06).
 
 **L-56. The simulate endpoint could not run a network scenario at all.**
 `engine.predict` accepts `bank_exposures`/`bank_endowments` for the
@@ -590,9 +612,16 @@ declared fraction of gross total exposure (parameter `endowment_fraction`,
 default 1.0; a failed bank's endowment is zeroed — that is the default
 event). Mitigation: `_run_network_clearing` in the simulate route clears the
 latest quarter of the edge rows through `clearing.clear_multiplex` and
-attaches the result with its `declared_assumptions` block. Status: **OPEN**
-— mitigation in branch `fix/610-data-training-fidelity`, unit tests in
-`backend/tests/test_network_scenario_clearing.py`.
+attaches the result with its `declared_assumptions` block. Status:
+**CLOSED** — fixed in 6.1.0 (PR #143); unit tests in
+`backend/tests/test_network_scenario_clearing.py`. Verified end-to-end on
+the 6.1.3 model (job 26): both network scenarios ran the Eisenberg–Noe
+clearing and returned a `network_analysis` block with declared assumptions
+— liquidity_freeze (4,412 nodes, 0 defaults, total shortfall 0.0, converged
+in 1 iteration, 0 contagion edges) and bank_failure (4,401 nodes, 1 default
+for bank "0" — insolvency — total shortfall 4,827,005, 717 contagion edges
+in round 1, converged in 2 iterations). The ML scores' near-invariance to
+the uniform transforms is a separate finding, L-62.
 
 **L-60. The training objective was dominated by degenerate standardization: a
 full-panel retrain reached a val loss of 4.2e18 at epoch 1.** The 6.1.0
@@ -674,13 +703,42 @@ reshape the adapter's features to 2-D, aggregate the per-baseline r2 lift
 (positive = model beats the baseline), and resolve series keys to feeds
 explicitly — measuring single-series compound feeds on their own window and
 recording one honest "panel feed" skip per panel feed instead of a silent
-drop. Status: **OPEN** — fixes 1–3 released in 6.1.2
-(`fix/612-baseline-walkforward-offbyone`, PR #147); fix 4 in branch
-`fix/613-baseline-multi-entity`; regression tests in
+drop. Status: **CLOSED** — fixes 1–3 released in 6.1.2 (PR #147),
+fix 4 released in 6.1.3 (PR #149). Regression tests in
 `backend/tests/test_trainer_composition.py` (`TestBaselineComparison`,
-incl. compound-single-series and panel-skip cases); close requires the
-retrain on the fixed code to report measured entries for the compound-id
-feeds, one recorded skip for the panel feed, and a finite `mean_lift`.
+incl. compound-single-series and panel-skip cases). Closure verified on
+the 6.1.3 retrain (job 26): measured entries for the compound-id feeds
+(30 of 65 candidates), one recorded skip for the AI4RISK panel feed, and a
+finite `mean_lift` (−50.06).
+
+**L-62. The rich scenario parameters do not move the ML scores: uniform
+full-history affine transforms are absorbed by per-series standardisation.**
+The named scenarios (`market_crash`, `policy_intervention`,
+`liquidity_freeze`, `bank_failure`, `regional_shock`) are implemented as
+uniform scale/shift (`mul`/`add`) transforms of whole series over their
+entire history. But the scoring pipeline standardises each window by
+per-series statistics — the checkpoint's statistics when the checkpoint has
+them, otherwise statistics computed from the payload itself
+(`_prepare_sequence`) — and a uniform scale/shift of a series is an affine
+transform that z-scoring cancels. So a 20% price cut, a 60bp rate cut, or a
+70% lending freeze applied uniformly leaves (nearly) every model score
+unchanged. Measured on the 6.1.3 model (job 26), baseline vs scenario, max
+absolute score change over all 71 sources: market_crash 4.8e−7 (float noise),
+rate_shock 0.022 (only IR_EURIBOR_1M −0.547→−0.569 and FRED_REPO_RATE
+−1.393→−1.392 moved, both via checkpoint-statistics feeds), liquidity_freeze
+0, bank_failure 0.049 (only the non-uniform part moved a score: the AI4RISK
+topology feed 0.839→0.790, from zeroing the failed bank's equity and
+haircutting counterparties), regional_shock 0 (the payload carries no
+`region` column, so the shock is a declared no-op). The wiring is correct —
+parameters are echoed verbatim, the transforms demonstrably hit the data,
+and the network-clearing block (independent of the model) responds properly
+(L-56) — but the *scenario's ML score response* is inert for the uniform
+shocks by construction. Detected by: the 2026-09-24 scenario re-run
+(six responses, job 26). Status: **OPEN — a modelling decision, not a code
+bug.** Closing it requires choosing a scenario-relative normalisation (or
+shock shapes that change the variance structure rather than the level),
+which changes the statistical meaning of the scores; it is recorded here and
+in the review report (§7.3, Remaining #6) rather than papered over.
 
 ## D. Test and CI infrastructure that lied
 
