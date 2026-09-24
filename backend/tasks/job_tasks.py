@@ -1105,11 +1105,20 @@ def derive_standardized_targets(
     standardizing on the test window would leak the evaluated split into the
     target, and a series with no pre-test history gets NaN targets and is
     excluded from the aligned metrics rather than scored on statistics it
-    never saw.
+    never saw. The target must follow the SAME law as the training target:
+    the same degenerate-standardization guard (a near-constant pre-test
+    series has no defined scale) and the same +-STANDARDIZED_VALUE_CLIP,
+    so a step change in a tiny-std series contributes a bounded error here
+    exactly as it did in training.
 
     Returns an array aligned positionally to ``test_data``, or ``None`` when
     no series carries enough pre-test history to standardize on.
     """
+    from backend.modules.engine.multi_scale_trainer import (
+        STANDARDIZED_VALUE_CLIP,
+        is_degenerate_standardization,
+    )
+
     if train_data is None or len(train_data) == 0:
         return None
     group_col = 'series_id' if 'series_id' in test_data.columns else 'source_code'
@@ -1120,10 +1129,16 @@ def derive_standardized_targets(
             continue
         values = pd.to_numeric(rows[value_col], errors='coerce').to_numpy(dtype=float)
         finite = values[np.isfinite(values)]
-        # A constant pre-test series has no defined standardization:
-        # dividing by ~0 would turn a flat series into an explosion.
-        if finite.size >= 2 and float(finite.std()) > 1e-8:
-            pre_stats[str(series_name)] = (float(finite.mean()), float(finite.std()) + 1e-8)
+        # A constant or near-constant pre-test series has no defined
+        # standardization: dividing by ~0 (or by a floor) would turn a flat
+        # series into a z-score explosion.
+        if finite.size < 2:
+            continue
+        mean = float(finite.mean())
+        std = float(finite.std()) + 1e-8
+        if is_degenerate_standardization(mean, std):
+            continue
+        pre_stats[str(series_name)] = (mean, std)
     if not pre_stats:
         return None
 
@@ -1140,7 +1155,10 @@ def derive_standardized_targets(
         if value_col is None:
             continue
         values = pd.to_numeric(rows[value_col], errors='coerce').to_numpy(dtype=float)
-        targets.loc[rows.index] = (values - stats[0]) / stats[1]
+        z = (values - stats[0]) / stats[1]
+        # Same clipping law as the training target: a step change in a
+        # tiny-std series is a bounded error, not a 1e4-1e10 z.
+        targets.loc[rows.index] = np.clip(z, -STANDARDIZED_VALUE_CLIP, STANDARDIZED_VALUE_CLIP)
     return targets.to_numpy()
 
 

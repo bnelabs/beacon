@@ -43,21 +43,38 @@ def _split_frame(values_by_series: dict, pre_test: dict, test: dict) -> tuple:
 class TestDerivation:
     def test_standardizes_on_pre_test_stats_only(self):
         pre = {f"2025-{m:02d}-15": 10.0 + m for m in range(1, 7)}   # 11..16
-        test_dates = {"2026-01-15": 100.0, "2026-02-15": 110.0}
+        test_dates = {"2026-01-15": 20.0, "2026-02-15": 21.0}
         train, test = _split_frame(
             {"EQ_A": "EQ_A::X"}, pre, test_dates
         )
         targets = derive_standardized_targets(test, train)
         assert targets is not None
-        # Pre-test mean 13.5, std 2.1213203...: the test values (100, 110)
-        # map far from zero -- a test-window standardization would center
-        # them at (0, 1) instead.
+        # Pre-test mean 13.5, std 2.1213203...: the test values (20, 21) map
+        # to z ~ +3.1/+3.5 -- a test-window standardization would center
+        # them at (-1, +1) instead.
         mean, std = np.mean(list(pre.values())), np.std(list(pre.values()))
-        expected = np.array([(100.0 - mean) / (std + 1e-8), (110.0 - mean) / (std + 1e-8)])
+        expected = np.array([(20.0 - mean) / (std + 1e-8), (21.0 - mean) / (std + 1e-8)])
         assert np.allclose(targets, expected)
-        # Both test values sit far above the pre-test level (11..16); a
-        # test-window standardization would instead center them at ~0/1.
+        # Both test values sit above the pre-test level (11..16); a
+        # test-window standardization would instead center them at -1/+1.
         assert targets[0] > 0 and targets[1] > targets[0]
+
+    def test_targets_follow_the_training_clip_law(self):
+        """A 40-sigma jump in the test window is a bounded target, not 40:
+        the backtest target must follow the same +-10 clipping the training
+        target uses, so a step change in a low-std series is a bounded error
+        in backtest exactly as it was in training."""
+        pre = {f"2025-{m:02d}-15": 10.0 + m for m in range(1, 7)}   # 11..16
+        test_dates = {"2026-01-15": 100.0}
+        train, test = _split_frame(
+            {"EQ_A": "EQ_A::X"}, pre, test_dates
+        )
+        targets = derive_standardized_targets(test, train)
+        assert targets is not None
+        mean, std = np.mean(list(pre.values())), np.std(list(pre.values()))
+        unclipped = (100.0 - mean) / (std + 1e-8)
+        assert unclipped > 10.0, "fixture no longer exceeds the clip"
+        assert np.allclose(targets, [10.0])
 
     def test_series_without_pre_test_history_gets_nan(self):
         pre = {f"2025-{m:02d}-15": 10.0 + m for m in range(1, 7)}

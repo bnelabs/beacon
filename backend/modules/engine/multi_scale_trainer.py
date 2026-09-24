@@ -18,6 +18,32 @@ from .value_columns import select_value_column
 
 logger = logging.getLogger(__name__)
 
+#: A series whose standard deviation is below this fraction of its own scale
+#: (at least 1.0) is near-constant: its z-scores are numerically meaningless
+#: and would dominate the training objective with single-sample squared errors.
+DEGENERATE_STANDARDIZATION_RELATIVE_STD = 1e-6
+
+#: Standardized values entering the model are clipped to this range. A series
+#: with a tiny-but-real std (an edge that drifted 1.6e-5 around 0.27 and then
+#: stepped by 1.3) would otherwise produce z ~ 8e4 and a squared error of
+#: 6.6e9 from one sample, still dominating the MSE objective. Clipping bounds
+#: the per-sample loss and keeps the extreme move's direction; denormalizing a
+#: clipped z through the series' own std lands back at ~mean for near-constant
+#: series, which is exactly the honest prediction for them.
+STANDARDIZED_VALUE_CLIP = 10.0
+
+
+def is_degenerate_standardization(mean: float, std: float) -> bool:
+    """True when (mean, std) cannot standardize a series honestly.
+
+    Covers std == 0 (constant series), non-finite std, and near-constant
+    series whose std is an artifact of the floor added to an exact zero.
+    """
+    if not np.isfinite(std) or std <= 0.0:
+        return True
+    scale = max(1.0, abs(float(mean)))
+    return std < DEGENERATE_STANDARDIZATION_RELATIVE_STD * scale
+
 
 @dataclass
 class MultiScaleTrainingMetrics:
@@ -181,16 +207,50 @@ class MultiSourceDataset(Dataset):
                     continue
                 mean = self.source_stats[series]['mean']
                 std = self.source_stats[series]['std']
-                if not np.isfinite(std) or std <= 0.0:
-                    std = 1.0
+                if is_degenerate_standardization(mean, std):
+                    logger.warning(
+                        "Skipping series '%s' – degenerate training-split "
+                        "standardization (std %.3g against scale %.3g); a z-score "
+                        "at that granularity is numerically meaningless",
+                        series, std, max(1.0, abs(mean)),
+                    )
+                    continue
             else:
                 mean = float(observed_values.mean())
                 std = float(observed_values.std() + 1e-8)
+                if is_degenerate_standardization(mean, std):
+                    # A series constant to within 1e-6 of its own scale carries
+                    # no variance the model could learn from, and its z-scores
+                    # are meaningless: a 2-point constant edge (std 0, std floor
+                    # 1e-8) whose next observation moves by 300 produces
+                    # z = 3e10, and a single such sample dominates the whole
+                    # training objective (squared error 1e21). Skip it instead
+                    # of letting it set the learning signal.
+                    logger.warning(
+                        "Skipping series '%s' – near-constant in the training "
+                        "split (relative std %.3g < 1e-6); no learnable scale",
+                        series, std / max(1.0, abs(mean)),
+                    )
+                    continue
                 self.source_stats[series] = {'mean': mean, 'std': std}
 
             # Normalize, then impute unobserved entries at the standardised mean.
             normalized = (values - mean) / std
             normalized = np.where(np.isfinite(normalized), normalized, 0.0)
+            # Bound the standardized scale: a tiny-but-real std would otherwise
+            # turn a single step change into a z of 1e4-1e10 and a squared
+            # error that drowns the rest of the objective. Clipping keeps the
+            # direction of the extreme move and caps the per-sample loss; the
+            # clip law must match the inference path (_prepare_sequence).
+            n_clipped = int((np.abs(normalized) > STANDARDIZED_VALUE_CLIP).sum())
+            normalized = np.clip(normalized, -STANDARDIZED_VALUE_CLIP, STANDARDIZED_VALUE_CLIP)
+            if n_clipped:
+                logger.warning(
+                    "Series '%s': %d standardized value(s) clipped to [%.0f, %.0f] "
+                    "(std %.3g against scale %.3g)",
+                    series, n_clipped, -STANDARDIZED_VALUE_CLIP, STANDARDIZED_VALUE_CLIP,
+                    std, max(1.0, abs(mean)),
+                )
 
             # Create sequences for this series
             # Skip sources not in the mapping (can happen in test/val sets)
