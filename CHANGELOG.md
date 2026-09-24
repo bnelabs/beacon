@@ -9,6 +9,22 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Fixed
+- **Degenerate standardization no longer dominates the training objective
+  (L-60, PR #145).** Series that are constant or near-constant in the
+  training split (2-point zero-variance AI4RISK edges, a constant-1.0 SEC
+  series) were standardized against a `std + 1e-8` floor, so a single later
+  observation produced z-scores up to 3.1e10 and a squared error of ~1e21
+  that dominated the mean-squared objective — a full-panel retrain on the
+  6.1.0 package reached a val loss of 4.2e18 at epoch 1, making model
+  selection meaningless. Near-constant series (relative std below 1e-6 of
+  their own scale) are now skipped from training with a declared warning,
+  and every standardized value entering the model (training inputs and
+  targets, prediction, backtest risk-series windows, conformal calibration
+  windows) and the backtest's derived targets is clipped to
+  ±`STANDARDIZED_VALUE_CLIP` (10.0), so training, inference and backtest
+  share one bounded space.
+
 ## [6.1.0] - 2026-09-24
 
 ### Changed

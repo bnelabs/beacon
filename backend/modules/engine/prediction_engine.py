@@ -56,6 +56,7 @@ from backend.modules.data.quality_gate import (
 )
 from backend.modules.engine.backtesting import boundaries_from_group_sizes
 from backend.modules.engine.model_io import safe_torch_load
+from backend.modules.engine.multi_scale_trainer import STANDARDIZED_VALUE_CLIP
 from backend.modules.engine.value_columns import VALUE_COLUMN_CANDIDATES, select_value_column
 from backend.modules.risk.bank_analyzer import BankRiskAnalyzer, MultiBankAnalysis, generate_executive_summary
 
@@ -868,6 +869,13 @@ class RealPredictionEngine:
             # Impute unobserved entries at the standardised mean rather than
             # carrying the previous value forward.
             normalized = np.where(np.isfinite(normalized), normalized, 0.0)
+            # Same clipping law as the training dataset builder: the windows
+            # below are model inputs, and the backtest's derived targets are
+            # clipped to the same range, so the scored space matches the trained
+            # space.
+            normalized = np.clip(
+                normalized, -STANDARDIZED_VALUE_CLIP, STANDARDIZED_VALUE_CLIP
+            )
 
             windows = np.lib.stride_tricks.sliding_window_view(normalized, sequence_length)
             # The model's per-source embedding is keyed by the feed, not the
@@ -1358,7 +1366,12 @@ UNCERTAINTY DECOMPOSITION:
         if len(values):
             normalized = (values - mean) / std
             observed = np.isfinite(normalized)
-            normalized = np.where(observed, normalized, 0.0).astype(np.float32)
+            normalized = np.where(observed, normalized, 0.0)
+            # Same clipping law as the training dataset builder: a tiny-but-real
+            # std would otherwise feed a z of 1e4-1e10 into a model whose input
+            # space was bounded to +-STANDARDIZED_VALUE_CLIP at train time.
+            normalized = np.clip(normalized, -STANDARDIZED_VALUE_CLIP, STANDARDIZED_VALUE_CLIP)
+            normalized = normalized.astype(np.float32)
         else:
             normalized = np.zeros(0, dtype=np.float32)
             observed = np.zeros(0, dtype=bool)
@@ -1515,6 +1528,10 @@ UNCERTAINTY DECOMPOSITION:
         std = float(stats.get('std', finite.std() if finite.size else 1.0)) or 1.0
         normalized = (values - mean) / std
         normalized = np.where(np.isfinite(normalized), normalized, 0.0)
+        # Same clipping law as training: these windows are model inputs and the
+        # residual targets are the calibrated quantities, so both must live in
+        # the clipped standardized space.
+        normalized = np.clip(normalized, -STANDARDIZED_VALUE_CLIP, STANDARDIZED_VALUE_CLIP)
 
         sequence_length = int(self.sequence_length)
         n_windows = normalized.size - sequence_length

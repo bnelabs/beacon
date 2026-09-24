@@ -466,6 +466,30 @@ feed-keyed and normalisation statistics are looked up at the checkpoint's grain.
 (target-alignment seams, walk-forward folds, `by_series` event metrics, the
 volatility track and the validation report) were updated in the same breath.
 
+**L-45. The vintage reader's `published_at` compared equal in CI but not on SQLite,
+because one backend returned the column aware and the other naive.** `vintage_log_001`
+writes `published_at` as `DateTime(timezone=True)`. PostgreSQL hands those values back
+aware; SQLite's `DATETIME` has no timezone support and hands back a naive one. So the
+assertion that pins the backfill's point-in-time contract — `row.published_at == the
+certified snapshot's instant` — was True in CI (Postgres) and False on SQLite: a
+backfilled vintage could not be verified as carrying the snapshot's capture instant on
+any SQLite deployment, and a live re-run would have "fixed" it by accident of backend.
+It was worse than an unequal comparison: `observations_as_of` keys a dict on `row.time`
+and `sorted()`s the keys, so a mix of naive and aware period keys raises
+`TypeError` the moment a value read from one backend meets one read from another. The
+row *was* written and the manifest's `created_at` *was* read — the defect was the read
+side, not a refused snapshot or a missed rewrite. Mitigation: `UTCDateTime`, a
+`TypeDecorator` over `DateTime(timezone=True)` that normalises the read side so the two
+provenance tables (`indicator_vintage_log`, `vintage_backfill_runs`) always come back
+aware UTC. Storage DDL is unchanged (SQLite writes the same naive-UTC string it always
+did; Postgres was already aware), so no migration is needed and existing rows read back
+identically; the decorator is scoped to the two tables that carry as-of semantics, so
+the latest-value reads are untouched. Detected by:
+`backend/tests/test_vintage_backfill.py::test_a_backfilled_vintage_is_published_at_the_snapshot_instant`
+(written red first; the `all(row.published_at == PUBLISHED_AT ...)` assertion failed on
+SQLite). Status: **FIXED** — CHANGELOG (Unreleased, Added), PR #116,
+`backend/tests/test_vintage_backfill.py`, `backend/tests/test_vintage_log.py`.
+
 **L-51. The multi-scale dataset builder silently trained on 11 of 71 series:
 the value-column choice read the schema, not the data.** The joined collection
 panel carries `Close` (populated by the OHLC series) on every row, so the
@@ -564,28 +588,36 @@ attaches the result with its `declared_assumptions` block. Status: **OPEN**
 — mitigation in branch `fix/610-data-training-fidelity`, unit tests in
 `backend/tests/test_network_scenario_clearing.py`.
 
-## D. Test and CI infrastructure that lied
-writes `published_at` as `DateTime(timezone=True)`. PostgreSQL hands those values back
-aware; SQLite's `DATETIME` has no timezone support and hands back a naive one. So the
-assertion that pins the backfill's point-in-time contract — `row.published_at == the
-certified snapshot's instant` — was True in CI (Postgres) and False on SQLite: a
-backfilled vintage could not be verified as carrying the snapshot's capture instant on
-any SQLite deployment, and a live re-run would have "fixed" it by accident of backend.
-It was worse than an unequal comparison: `observations_as_of` keys a dict on `row.time`
-and `sorted()`s the keys, so a mix of naive and aware period keys raises
-`TypeError` the moment a value read from one backend meets one read from another. The
-row *was* written and the manifest's `created_at` *was* read — the defect was the read
-side, not a refused snapshot or a missed rewrite. Mitigation: `UTCDateTime`, a
-`TypeDecorator` over `DateTime(timezone=True)` that normalises the read side so the two
-provenance tables (`indicator_vintage_log`, `vintage_backfill_runs`) always come back
-aware UTC. Storage DDL is unchanged (SQLite writes the same naive-UTC string it always
-did; Postgres was already aware), so no migration is needed and existing rows read back
-identically; the decorator is scoped to the two tables that carry as-of semantics, so
-the latest-value reads are untouched. Detected by:
-`backend/tests/test_vintage_backfill.py::test_a_backfilled_vintage_is_published_at_the_snapshot_instant`
-(written red first; the `all(row.published_at == PUBLISHED_AT ...)` assertion failed on
-SQLite). Status: **FIXED** — CHANGELOG (Unreleased, Added), PR #116,
-`backend/tests/test_vintage_backfill.py`, `backend/tests/test_vintage_log.py`.
+**L-60. The training objective was dominated by degenerate standardization: a
+full-panel retrain reached a val loss of 4.2e18 at epoch 1.** The 6.1.0
+value-column fix (L-51) brought 60 previously-dropped series into training.
+Several of them are constant or near-constant over their training span —
+AI4RISK edge series with zero variance and a constant-1.0 SEC series — and
+dividing their values by `std + 1e-8` produced z-scores up to 3.1e10 in the
+evaluation split. A single such sample contributes ~1e21 to the mean-squared
+objective, so it dominated every real signal: job 21's epoch-1 val loss was
+4,230,898,264,780,912,128, and model selection on that metric was
+meaningless. A second tier — tiny-but-real stds (an AI4RISK edge drifting
+1.6e-5 around 0.27 that steps 1.3 in the evaluation split, z ≈ 8e4, squared
+error 6.6e9) — would still dominate. It escaped the test suite because the
+tests counted sequences but never trained the full panel; the first
+full-panel retrain (job 21, cancelled) surfaced it. Detected by: offline
+replay of the job-20 panel through the dataset builder (val max |z| was
+31,031,680,000 before the fix; 10 after). Mitigation: (1)
+`is_degenerate_standardization` in `multi_scale_trainer` — a series whose
+training-split relative std is below 1e-6 is skipped from training with a
+warning (internal and external statistics paths; an external split also
+refuses degenerate training statistics); (2) every standardized value that
+enters the model — training inputs, training targets, `_prepare_sequence`,
+the `predict_risk_series` windows and `_calibration_windows` — and the
+backtest's derived targets is clipped to ±`STANDARDIZED_VALUE_CLIP` (10.0),
+so the objective is bounded and training, inference and backtest share one
+space. Status: **OPEN** — mitigation in branch
+`fix/611-degenerate-standardization`; regression tests in
+`backend/tests/test_trainer_composition.py` (`TestDegenerateStandardization`)
+and `backend/tests/test_backtest_target_derivation.py`
+(`test_targets_follow_the_training_clip_law`); close requires a full retrain
+showing an O(1) epoch-1 val loss.
 
 ## D. Test and CI infrastructure that lied
 

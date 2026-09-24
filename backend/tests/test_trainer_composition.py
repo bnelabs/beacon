@@ -33,6 +33,7 @@ torch = pytest.importorskip("torch")
 from backend.modules.engine.multi_scale_trainer import (  # noqa: E402
     MultiScaleTrainer,
     MultiSourceDataset,
+    is_degenerate_standardization,
 )
 from backend.modules.engine.trainer import (  # noqa: E402
     ModelTrainer,
@@ -369,3 +370,104 @@ class TestChronologicalSplits:
         train_part, val_part, _ = split_train_val_by_date(df, "Date", val_fraction=0.2)
         assert set(val_part["source_code"]) <= set(train_part["source_code"])
         assert set(val_part["source_code"]) == set(five)
+
+
+class TestDegenerateStandardization:
+    """A near-constant series (relative std below the floor) must be skipped,
+    not standardized. The 6.1.0 full-panel retrain hit this: an AI4RISK edge
+    that was constant 2200 in the training split (std 0 -> floor 1e-8) and
+    moved by ~310 afterwards produced z ~ 3e10, a squared error of 1e21 from
+    a handful of samples that dominated the entire validation loss (4e18)
+    and made model selection meaningless."""
+
+    def test_is_degenerate_classifies_floor_std_against_scale(self):
+        # Constant series: std 0.
+        assert is_degenerate_standardization(2200.0, 0.0)
+        assert is_degenerate_standardization(1.0, 1e-8)
+        # Near-constant against a large scale: 1e-8 << 1e-6 * 2200.
+        assert is_degenerate_standardization(2200.0, 1e-8)
+        # Non-finite std.
+        assert is_degenerate_standardization(5.0, float("nan"))
+        # A genuine small scale near zero: 0.5 against scale 1.0 is fine.
+        assert not is_degenerate_standardization(0.0, 0.5)
+        # Tiny scale near zero: 1e-8 << 1e-6 * 1.0.
+        assert is_degenerate_standardization(0.0, 1e-8)
+        # A real relative spread: 1.0 against 1000 is 1e-3 > 1e-6.
+        assert not is_degenerate_standardization(1000.0, 1.0)
+
+    def _two_series_train_frame(self):
+        """One healthy random-walk series and one near-constant series, shaped
+        like the collector's source-major frame."""
+        dates = pd.date_range("2024-01-01", periods=40, freq="D")
+        rng = np.random.default_rng(7)
+        healthy = 10.0 + rng.normal(0.0, 1.0, 40).cumsum()
+        flat = np.full(40, 2200.0)
+        return pd.DataFrame({
+            "Date": list(dates) + list(dates),
+            "date": list(dates) + list(dates),
+            "Close": list(healthy) + list(flat),
+            "Value": list(healthy) + list(flat),
+            "source_code": ["SRC_HEALTHY"] * 40 + ["SRC_FLAT"] * 40,
+        })
+
+    def test_train_dataset_skips_the_near_constant_series(self):
+        df = self._two_series_train_frame()
+        dataset = MultiSourceDataset(df, sequence_length=SEQUENCE_LENGTH)
+        # The healthy series trained; the flat one was refused, not standardized.
+        assert "SRC_HEALTHY" in dataset.series_labels
+        assert "SRC_FLAT" not in dataset.series_labels
+        assert "SRC_FLAT" not in dataset.source_stats
+        # No standardized value anywhere near the floor-driven magnitude.
+        assert np.abs(dataset.targets).max() < 1e3
+        assert np.abs(dataset.sequences).max() < 1e3
+
+    def test_external_split_refuses_degenerate_train_stats(self):
+        df = self._two_series_train_frame()
+        train = df[df["source_code"] == "SRC_HEALTHY"]
+        # Hand the external path a degenerate stat set for a flat series and
+        # check it is skipped rather than standardized at a 1e-8 floor.
+        flat_frame = df[df["source_code"] == "SRC_FLAT"].copy()
+        dataset = MultiSourceDataset(
+            flat_frame,
+            sequence_length=SEQUENCE_LENGTH,
+            source_stats={"SRC_FLAT": {"mean": 2200.0, "std": 1e-8}},
+        )
+        assert len(dataset) == 0
+
+    def test_tiny_real_std_step_change_is_clipped_not_blown_up(self):
+        """The second half of the 6.1.0 blowup: a series with a tiny but real
+        std in the training split (an AI4RISK edge drifting 1.6e-5 around 0.27
+        -- above the degenerate floor, so it trains) that steps by 1.3 in the
+        evaluation split. The step's z is ~8e4, a squared error of 6.6e9 that
+        would still dominate the MSE objective. It must be clipped instead."""
+        train_dates = pd.date_range("2024-01-01", periods=30, freq="D")
+        rng = np.random.default_rng(21)
+        train = 0.27 + rng.normal(0.0, 1.6e-5, 30)
+        train_df = pd.DataFrame({
+            "Date": train_dates, "date": train_dates,
+            "Value": train, "source_code": ["SRC_TINY"] * len(train_dates),
+        })
+        train_dataset = MultiSourceDataset(train_df, sequence_length=SEQUENCE_LENGTH)
+        # Above the degenerate floor: it trains and publishes stats.
+        assert "SRC_TINY" in train_dataset.series_labels
+        std = train_dataset.source_stats["SRC_TINY"]["std"]
+        assert std > 1e-6
+
+        eval_dates = pd.date_range("2024-02-01", periods=SEQUENCE_LENGTH + 2, freq="D")
+        eval_values = np.array([0.27] * (SEQUENCE_LENGTH + 1) + [0.27 + 1.3])
+        eval_df = pd.DataFrame({
+            "Date": eval_dates, "date": eval_dates,
+            "Value": eval_values, "source_code": ["SRC_TINY"] * len(eval_dates),
+        })
+        eval_dataset = MultiSourceDataset(
+            eval_df,
+            sequence_length=SEQUENCE_LENGTH,
+            source_to_id=train_dataset.source_to_id,
+            source_stats=train_dataset.source_stats,
+        )
+        assert len(eval_dataset) > 0
+        # Without the clip the step's z is ~1.3/std = 8e4; it must be bounded.
+        unclipped = (eval_values[-1] - train_dataset.source_stats["SRC_TINY"]["mean"]) / std
+        assert unclipped > 1000, "fixture no longer reproduces the blowup"
+        assert np.abs(eval_dataset.sequences).max() <= 10.0 + 1e-6
+        assert np.abs(eval_dataset.targets).max() <= 10.0 + 1e-6
