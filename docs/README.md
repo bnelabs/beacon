@@ -18,6 +18,7 @@ they stayed stale for ten months without anyone noticing.
 | [`VERSIONING.md`](VERSIONING.md) | SemVer policy, changelog discipline, release tooling, what CI enforces |
 | [`operator_series_onboarding.md`](operator_series_onboarding.md) | Onboarding the six operator-reported registry codes: CSV and custom-API routes, declared directions, SSRF contract, what the pipeline does next, and the parked-EWS boundary |
 | [`FAILURE_LEDGER.md`](FAILURE_LEDGER.md) | The failure & mitigation ledger: every confirmed bug, licence violation, unreachable criterion and negative result, with detection, impact, mitigation, status and evidence pointers |
+| [`TEST_AUDIT_2026-09-24.md`](TEST_AUDIT_2026-09-24.md) | Test-suite audit (2026-09-24): validity verdict over all 2205 tests, cost profile, the three fixes that landed, and the standing decisions |
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | The community contract: norms (freeze-before-measure, publish unchanged, licence-before-download, refuse-don't-fabricate), running and reproducing the tagged science, sharing analyses with provenance, reporting errors/faults/misleads, release checklist |
 | [`LANGUAGE_STRATEGY.md`](LANGUAGE_STRATEGY.md) | The measured Python/Rust boundary and the rule for moving it |
 | [`../.github/workflows/README.md`](../.github/workflows/README.md) | CI/CD workflows and how to reproduce each locally |
@@ -40,7 +41,17 @@ archived narratives:
 - **Parked, not deleted, with preconditions:** temporal GNN (needs exposure
   vintages at training time), mixture-of-experts (needs labelled regime
   history), subgraph explanations, causal validation, streaming/federated
-  training. Each census disposition names its unblocking input.
+  training. Each census disposition names its unblocking input. The 2026-09-24
+  test audit re-confirmed this: the ~269 tests over those census-listed modules
+  stay as deliberate contract insurance; cutting them is a capability decision,
+  not tidiness.
+- **Live-migration tests need an explicitly named server.**
+  `test_migrations_live.py` resolves `MIGRATION_TEST_DATABASE_URL` /
+  `POSTGRES_MIGRATION_TEST_URL` only — no implicit local fallback. The fallback
+  it had (hardcoded `127.0.0.1:5432` URLs, including the live stack's
+  credentials) let a routine local run of the whole suite create and drop
+  databases on the production server; the live stack's postgres stays read-only.
+  See `TEST_AUDIT_2026-09-24.md`.
 - **Deferred with reasons:** copula dependence (the clearing engine already
   propagates joint stress), generalized-hyperbolic tails (the Student-t HMM
   covers the regime-variance channel first).

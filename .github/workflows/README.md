@@ -77,9 +77,11 @@ biggest cost in CI and can never fit a sub-minute budget.
 - **A PostgreSQL service, for the migrations only.** The application tests do not
   need one: they force SQLite through `USE_SQLITE=true` (`test_api_smoke.py`,
   `test_pipeline_integration.py`) and drive the app with FastAPI's in-process
-  `TestClient`, and `test_country_scope.py` is still skipped unless
-  `RUN_DOCKER_SCOPE_TESTS=1`. What needs a real server is
-  `test_migrations_live.py`, which applies the chain to an actual PostgreSQL —
+  `TestClient`, and no test in the suite depends on docker. (The one that did,
+  `test_country_scope.py`, was deleted: it ran only under a variable no workflow
+  ever set, and locally it required bringing the live stack down and up.) What
+  needs a real server is `test_migrations_live.py`, which applies the chain to an
+  actual PostgreSQL —
   the same `timescale/timescaledb:2.15.2-pg15` image compose runs — from each of
   the three histories a deployed database can have (empty, `create_all`, partial)
   and asserts they converge on one schema. `MIGRATION_TEST_DATABASE_URL` points it

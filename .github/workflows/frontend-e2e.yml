@@ -1,7 +1,7 @@
 name: Frontend e2e (deep)
 
 # why: the production build and the Playwright suite are the deep frontend
-# validation: browser download, Vite bundling and the three mocked
+# validation: browser download, Vite bundling and the four mocked
 # navigation specs (dashboard/pages/results/search) -- measured ~1 min on the runner
 # with warm caches, a few minutes cold -- which used to run on every push
 # and pull request. That wait is
