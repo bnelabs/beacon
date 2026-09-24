@@ -17,6 +17,62 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   test fixtures were corrected. Test-only change; deployed behaviour is
   unchanged.
 
+### Fixed
+- **Per-series value-column selection across the whole pipeline (L-51,
+  PR #143).** The joined collection panel carries `Close` on every row, so
+  the frame-wide rule that picked the value column by schema membership
+  read an all-NaN column for every value-only series: the multi-scale
+  trainer silently trained on 11 of 71 series, and the prediction and
+  backtest paths scored degenerate all-zero input that presented as a
+  signal. `backend/modules/engine/value_columns.py` selects the first
+  candidate column that actually holds values, and all six read sites
+  (trainer dataset builder, baseline comparison, risk series, prediction,
+  backtest metrics) use it. Verified on the certified job-16 package: all
+  67 scalar series enter training (was 11), 145,715 sequences (was 14,511).
+- **Scenario parameters now drive the simulate endpoint (L-52, PR #143).**
+  The endpoint applied only legacy adjustments; the rich `ScenarioParameters`
+  (`rate_cut_bps`, `failed_bank_id`, `stock_drop_pct`, …) were inert, and the
+  reachable transforms were miscalibrated (rate shocks under-scaled 100× with
+  an inverted sign; `Value`-only transforms that missed the OHLC series;
+  `STOCK_VIX` taking a price drop and a spike in one run; edge frames
+  ungated). Parameters now flow through `engine.apply_scenario`, the type is
+  inferred from the parameters present when absent, transforms cover every
+  candidate value column, units and signs match the schema, and a
+  `regional_shock` without a `region` column is a declared no-op. The response
+  and its job record now carry `scenario_parameters`.
+- **Network scenarios clear the interbank network (L-56, PR #143).** A
+  `bank_failure` or `liquidity_freeze` scenario now clears the latest quarter
+  of the AI4Risk edge rows through the Eisenberg-Noe engine and returns the
+  cascade (defaults, shortfalls, contagion edges) with its declared
+  assumptions: the edge orientation reading, endowments as
+  `endowment_fraction` × gross total exposure (a new scenario parameter,
+  default 1.0), the failed bank's endowment zeroed, and negative edge values
+  excluded by count. Verified on the real 221-bank network.
+- **Backtest ground truth derived leakage-free (L-54, PR #143).** The
+  backtest no longer reports metrics with nothing to compare them against:
+  each score is paired with the standardized next-step actual of the same
+  series, standardized on the pre-test window only (series without pre-test
+  history keep NaN targets and are excluded); the derivation is declared in
+  the job result.
+- **Brief report no longer relabels anomalies as failures (L-53, PR #143).**
+  `failed` now carries the collection report's failed count;
+  `anomalies_detected` and `anomalies_fixed` are their own fields.
+- **Transient provider failures are retryable again (L-57, L-59, PR #143).**
+  The World Bank and IMF plugins now distinguish 4xx (a decision: `None`)
+  from network/5xx failures (`DataSourceUnavailableError`, which the
+  collector retries with its bounded budget) instead of converting every
+  timeout into "empty dataset".
+- **SEC 13F catalogue corrected to the current filer (L-58, PR #143).**
+  `BLK` resolves to CIK 0002012383 (BlackRock, Inc., 13F through 2026-08-07)
+  instead of the retired BlackRock Finance CIK whose last 13F-HR was
+  2024-08-13; the retired CIK is documented in code and catalogue.
+- **IMF catalogue items 41/42 documented as unmappable (L-59, PR #143).**
+  The retired SDMX endpoint made their legacy identifiers unresolvable and
+  the current DataMapper catalogue has no equivalent (no FSI family; the
+  reserve indicators are emerging-market only with no USA data). Both items
+  remain disabled, with the reason in their catalogue descriptions; the
+  plugin's DataMapper path is corrected and live-verified.
+
 ## [6.0.5] - 2026-09-23
 
 ### Added
