@@ -629,8 +629,7 @@ standardized model input and target is bounded by the ±10 clip (clip
 warnings fire on the AI4RISK series, confirming the bound is active).
 
 **L-61. The walk-forward baseline comparison still measured nothing, despite
-L-55's fix.** Two latent defects sat in the measurement path that no series
-could ever reach because the guard in front of it was itself broken:
+L-55's fix.** Four latent defects sat in the measurement path:
 
 1. **Off-by-one in the window-count guard.**
    `sliding_window_view(values, seq_len)` yields `n - seq_len + 1` windows,
@@ -654,20 +653,34 @@ could ever reach because the guard in front of it was itself broken:
    its *values* with `isinstance(lift, (int, float))` — always false for
    the per-metric dicts — so `mean_lift` was `null` even once sources
    were measured.
+4. **Silent exclusion of compound-id feeds.** The loop resolved each series
+   key through `source_to_id` (feed codes) and silently `continue`d on a
+   miss. Feeds whose `series_id` carries a compound entity id — all 12
+   FX/equity/VIX/gold feeds, the model's strongest series, e.g.
+   `EXR_EUR_USD::USD/EUR` — are never feed codes, so they vanished from the
+   report without even a skip entry: job 23 measured 19 of 53 candidates
+   that did not include any of them. The same silent skip hid the 15k-entity
+   AI4RISK panel, which is genuinely too large to walk forward per entity —
+   a cost-based exclusion, but one that must be *recorded*, not silent.
 
 Detected by: offline replay of the job-20 test split through the guard
 (IR_US_10Y has 1,335 finite test values → 1,305 valid windows, yet job 22
-skipped it), and by an offline end-to-end run of `_baseline_comparison`
-on the real job-20 splits with a small model, which measured 19 of 53
-sources after the first two fixes and then showed `mean_lift` still null.
+skipped it), an offline end-to-end run of `_baseline_comparison` on the
+real job-20 splits (19 of 53 sources measured after fixes 1–3, `mean_lift`
+still null before fix 3), and by diffing job 23's measured candidate set
+against the package's feed list — every compound-id feed absent.
 Mitigation: drop the trailing window so features and targets align 1:1,
-reshape the adapter's features to 2-D, and aggregate the per-baseline r2
-lift (positive = model beats the baseline). Status: **OPEN** —
-mitigation in branch `fix/612-baseline-walkforward-offbyone`; regression
-tests in `backend/tests/test_trainer_composition.py`
-(`TestBaselineComparison`); close requires the retrain on the fixed code to
-report at least one measured per-source baseline entry and a finite
-`mean_lift`.
+reshape the adapter's features to 2-D, aggregate the per-baseline r2 lift
+(positive = model beats the baseline), and resolve series keys to feeds
+explicitly — measuring single-series compound feeds on their own window and
+recording one honest "panel feed" skip per panel feed instead of a silent
+drop. Status: **OPEN** — fixes 1–3 released in 6.1.2
+(`fix/612-baseline-walkforward-offbyone`, PR #147); fix 4 in branch
+`fix/613-baseline-multi-entity`; regression tests in
+`backend/tests/test_trainer_composition.py` (`TestBaselineComparison`,
+incl. compound-single-series and panel-skip cases); close requires the
+retrain on the fixed code to report measured entries for the compound-id
+feeds, one recorded skip for the panel feed, and a finite `mean_lift`.
 
 ## D. Test and CI infrastructure that lied
 

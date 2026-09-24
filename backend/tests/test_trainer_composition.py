@@ -568,3 +568,108 @@ class TestBaselineComparison:
         result = trainer._baseline_comparison(test_dataset)
         entry = result["per_source"]["SRC_SHORT"]
         assert "skipped" in entry
+
+    def test_compound_single_series_feed_is_measured(self):
+        """A single-series feed whose series_id carries a compound entity id
+        (e.g. 'EXR_EUR_USD::USD/EUR') is not a source code, so the old
+        source_to_id lookup silently skipped it -- the whole FX/equity block
+        was missing from the report. It must be measured on its own window.
+        """
+        dates = pd.date_range("2024-01-01", periods=self.N_TRAIN + self.N_TEST, freq="D")
+        rng = np.random.default_rng(11)
+        values = 1.0 + 0.01 * rng.normal(0.0, 1.0, self.N_TRAIN + self.N_TEST).cumsum()
+        frame = pd.DataFrame({
+            "Date": dates, "date": dates, "Value": values,
+            "source_code": "SRC_FX",
+            "series_id": "SRC_FX::USD/EUR",
+        })
+        train_df = frame.iloc[: self.N_TRAIN].reset_index(drop=True)
+        test_df = frame.iloc[self.N_TRAIN :].reset_index(drop=True)
+        train_dataset = MultiSourceDataset(train_df, sequence_length=self.SEQ)
+        test_dataset = MultiSourceDataset(
+            test_df,
+            sequence_length=self.SEQ,
+            source_to_id=train_dataset.source_to_id,
+            source_stats=train_dataset.source_stats,
+        )
+        trainer = MultiScaleTrainer(
+            model_type="temporal_attention",
+            device=torch.device("cpu"),
+            config={
+                "sequence_length": self.SEQ,
+                "d_model": 16,
+                "nhead": 2,
+                "num_layers": 1,
+                "dropout": 0.1,
+            },
+        )
+        trainer.model = MultiScaleTemporalAttentionModel(
+            num_sources=len(train_dataset.sources),
+            sequence_length=self.SEQ,
+            d_model=16,
+            nhead=2,
+            num_layers=1,
+            dropout=0.1,
+        )
+        result = trainer._baseline_comparison(test_dataset)
+        entry = result["per_source"]["SRC_FX::USD/EUR"]
+        assert "skipped" not in entry, f"compound single-series feed must be measured, got: {entry}"
+        assert "primary_metrics" in entry and "lift" in entry
+        assert isinstance(result["mean_lift"], float) and np.isfinite(result["mean_lift"])
+
+    def test_panel_feed_is_recorded_as_one_skip(self):
+        """A panel feed (many entities per source) is too large to walk
+        forward per entity; it must appear as ONE honest skip entry for the
+        feed, not be silently absent, and not flood the report with one
+        entry per entity.
+        """
+        dates = pd.date_range("2024-01-01", periods=40, freq="D")
+        dates_a = pd.date_range("2024-01-01", periods=50, freq="D")
+        rng = np.random.default_rng(12)
+        # Entity A has 40 train + 10 test history; entity B only 40 train
+        # history, so it exercises the series_to_source fallback for keys
+        # absent from the test window.
+        val_a = 100.0 + rng.normal(0.0, 1.0, 50).cumsum()
+        val_b = 110.0 + rng.normal(0.0, 1.0, 40).cumsum()
+        a = pd.DataFrame({"Date": dates_a, "date": dates_a, "Value": val_a,
+                          "source_code": "SRC_PANEL", "series_id": "SRC_PANEL::A"})
+        b = pd.DataFrame({"Date": dates, "date": dates, "Value": val_b,
+                          "source_code": "SRC_PANEL", "series_id": "SRC_PANEL::B"})
+        train_df = pd.concat([a.iloc[:40], b], ignore_index=True).reset_index(drop=True)
+        # Test window keeps only entity A's final 10 rows.
+        test_df = a.iloc[40:].reset_index(drop=True)
+        assert test_df["series_id"].unique().tolist() == ["SRC_PANEL::A"]
+        train_dataset = MultiSourceDataset(train_df, sequence_length=self.SEQ)
+        test_dataset = MultiSourceDataset(
+            test_df,
+            sequence_length=self.SEQ,
+            source_to_id=train_dataset.source_to_id,
+            source_stats=train_dataset.source_stats,
+        )
+        trainer = MultiScaleTrainer(
+            model_type="temporal_attention",
+            device=torch.device("cpu"),
+            config={
+                "sequence_length": self.SEQ,
+                "d_model": 16,
+                "nhead": 2,
+                "num_layers": 1,
+                "dropout": 0.1,
+            },
+        )
+        trainer.model = MultiScaleTemporalAttentionModel(
+            num_sources=len(train_dataset.sources),
+            sequence_length=self.SEQ,
+            d_model=16,
+            nhead=2,
+            num_layers=1,
+            dropout=0.1,
+        )
+        result = trainer._baseline_comparison(test_dataset)
+        per = result["per_source"]
+        assert "SRC_PANEL" in per, f"panel feed must be recorded once, got keys: {sorted(per)}"
+        assert "skipped" in per["SRC_PANEL"]
+        assert "panel feed" in per["SRC_PANEL"]["skipped"]
+        # Exactly one entry for the feed -- no per-entity flood.
+        panel_keys = [k for k in per if k.startswith("SRC_PANEL")]
+        assert panel_keys == ["SRC_PANEL"]

@@ -9,6 +9,21 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Fixed
+- **Baseline comparison no longer silently excludes the compound-id feeds (L-61 defect 4, PR #149).**
+  `_baseline_comparison` resolved each series key through `source_to_id`
+  (feed codes) and silently `continue`d on a miss, so every feed whose
+  `series_id` carries a compound entity id — all 12 FX/equity/VIX/gold
+  feeds, the model's strongest series (e.g. `EXR_EUR_USD::USD/EUR`) —
+  vanished from the report without even a skip entry (job 23 on 6.1.2
+  measured 19 of 53 candidates, none of them compound). Single-series
+  compound feeds are now measured on their own window under the feed's
+  source id; panel feeds (e.g. the 15k-entity AI4RISK network) record one
+  honest `skipped: "panel feed; per-entity walk-forward not measured"`
+  entry per feed instead of disappearing. Panel-ness is judged at the
+  statistics grain so a feed whose other entities end before the test
+  start is not misclassified.
+
 ## [6.1.2] - 2026-09-24
 
 ### Fixed
