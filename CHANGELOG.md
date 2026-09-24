@@ -9,6 +9,38 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Added
+- **Background scenario jobs with a hard two-scenario concurrency cap (PR #151).**
+  A new `scenario` job type runs the exact scenario simulation of the
+  synchronous `POST /api/v1/models/{model_id}/simulate` endpoint in the
+  background: `POST /api/v1/jobs {"job_type": "scenario", ...}` is routed by
+  `dispatch_job` to a dedicated `scenarios` queue consumed by a new
+  `scenario-worker` (concurrency 2), so scenario runs get queue visibility,
+  survive API restarts, never compete with collection/training/prediction/
+  backtest work, and one scenario's failure fails only its own job. The
+  endpoint and the job share one core (`scenario_service.execute_scenario`),
+  so both paths produce the same response and store under the same
+  `/app/results/scenarios/{model_id}/{scenario_id}/` layout; the completed
+  job's `result` is the `ScenarioResponse` payload itself.
+- **Batched cross-source inference on the prediction path (PR #151).**
+  `RealPredictionEngine._predict_single` now scores every source's final
+  window and every held-out calibration window in two batched forward passes
+  (per-row source ids) instead of one forward per source per pass. The
+  serial per-source path is preserved verbatim as `_predict_single_serial`
+  and the dispatcher falls back to it on any batched failure — slow, never
+  different. Normalisation, clipping, calibration windows, conformal
+  interval fitting, uncertainty decomposition, regime labels and result
+  assembly are one shared computation on both paths, pinned by
+  `test_batched_inference_equivalence.py`.
+
+### Fixed
+- **Naive/aware `started_at` subtraction on the job failure path (PR #151).**
+  `update_job_status` crashed when writing `elapsed` for a completed/failed
+  job whose stored `started_at` came back offset-naive (SQLite round-trips
+  datetimes without offsets; Postgres returns them aware). The timestamp is
+  now normalised to UTC before the subtraction, so the failure path works on
+  both drivers and on the test database.
+
 ## [6.1.3] - 2026-09-24
 
 ### Fixed

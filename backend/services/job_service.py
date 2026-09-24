@@ -54,7 +54,7 @@ class JobService:
     def create_job(self, job: JobCreate) -> Job:
         """Create and start a new background job."""
         # Validate job type
-        valid_types = ["data_collection", "training", "prediction", "backtest"]
+        valid_types = ["data_collection", "training", "prediction", "backtest", "scenario"]
         if job.job_type not in valid_types:
             raise ValueError(f"Invalid job type. Must be one of: {', '.join(valid_types)}")
 
@@ -127,7 +127,13 @@ class JobService:
         elif status in ["completed", "failed"]:
             db_job.completed_at = datetime.now(timezone.utc)
             if db_job.started_at:
-                elapsed = (db_job.completed_at - db_job.started_at).total_seconds()
+                # SQLite round-trips stored datetimes as offset-naive; Postgres
+                # returns them aware. Normalise before the subtraction so the
+                # failure path works on both (and on the test database).
+                started_at = db_job.started_at
+                if started_at.tzinfo is None:
+                    started_at = started_at.replace(tzinfo=timezone.utc)
+                elapsed = (db_job.completed_at - started_at).total_seconds()
                 db_job.execution_time_seconds = elapsed
 
         self.db.commit()

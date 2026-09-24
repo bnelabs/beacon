@@ -69,6 +69,10 @@ def _engine(**overrides) -> RealPredictionEngine:
     engine.source_to_id = {}
     engine.model = _Const(0.0)
     engine.ensemble_members = []
+    # The shell bypasses __init__; force the serial path so these stubs
+    # exercise exactly the code this test was written against. The batched
+    # path is covered by test_batched_inference_equivalence.py.
+    engine._batch_inference = False
     for name, value in overrides.items():
         setattr(engine, name, value)
     return engine

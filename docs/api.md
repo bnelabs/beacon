@@ -108,6 +108,34 @@ There is **no** `/api/v1/jobs/download`, `/api/v1/jobs/train`, or
 `/api/v1/jobs/status/{id}`. Training and ingestion are job *types* submitted to
 `POST /api/v1/jobs`, or pipeline runs.
 
+### Scenario jobs
+
+`job_type: "scenario"` runs the same scenario simulation the synchronous
+`POST /api/v1/models/{model_id}/simulate` endpoint runs — identical model
+lookup, scenario transforms, network clearing, engine scoring and storage
+layout — but in the background, on a dedicated `scenario-worker` queue with a
+hard cap of **two concurrent scenarios**. Parameters:
+
+```json
+{
+  "job_type": "scenario",
+  "parameters": {
+    "model_id": 26,
+    "name": "market_crash",
+    "scenario": {"type": "market_crash", "stock_drop_pct": 0.20, "volatility_spike": 2.0},
+    "horizon_days": 30,
+    "adjustments": []
+  }
+}
+```
+
+The completed job's `result` is the `ScenarioResponse` payload itself
+(`scenario_id`, `summary`, `predictions`, `scenario_parameters`,
+`network_analysis`, `executive_summary`, `feature_importances`,
+`storage_path`). Scenario work never competes with collection, training,
+prediction or backtest jobs on the main worker, and one scenario's failure
+fails only its own job.
+
 ## Prediction gating
 
 A prediction or backtest is refused with `PREDICTION_BLOCKED` (409) unless the

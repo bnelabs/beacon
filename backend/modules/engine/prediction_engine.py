@@ -249,6 +249,13 @@ class RealPredictionEngine:
         # a number. See _uncertainty_for_source.
         self.ensemble_members: List[torch.nn.Module] = self._load_ensemble_members()
 
+        # Cross-source batched inference on the single-entity path. Default
+        # on: one forward pass over all sources' final windows and one over
+        # all held-out calibration windows. Tests and operators can force the
+        # per-source serial path (identical numbers, slower) by setting this
+        # to False; the batched path also falls back to serial on any error.
+        self._batch_inference = True
+
         # BankRiskAnalyzer scores institutions directly from the model and runs
         # clearing on supplied exposures. There is no separate explainer: local
         # attribution was removed rather than reimplemented, because the previous
@@ -986,12 +993,94 @@ class RealPredictionEngine:
                 scores[start:start + chunk.shape[0]] = flat[:, 0]
         return scores
 
+    def _score_windows_multi(
+        self,
+        windows: np.ndarray,
+        source_ids: np.ndarray,
+        batch_size: int,
+    ) -> np.ndarray:
+        """Run the frozen model over pre-normalised windows, rows carrying their
+        own source id.
+
+        The cross-source batch of :meth:`_predict_single_batched`: row ``i`` is
+        scored exactly as the serial path scores it — the same normalised
+        window, the same source embedding id, the same no-grad eval pass —
+        with no interaction between rows (the model attends within a window
+        only). Row order is preserved, so callers regroup by source exactly as
+        the serial loop did.
+        """
+        total = int(windows.shape[0])
+        scores = np.empty(total, dtype=float)
+        ids = np.asarray(source_ids, dtype=np.int64)
+        if ids.shape[0] != total:
+            raise ValueError(
+                f"source_ids length {ids.shape[0]} does not match window count {total}"
+            )
+        self.model.eval()
+        with torch.no_grad():
+            for start in range(0, total, batch_size):
+                chunk = np.asarray(windows[start:start + batch_size], dtype=np.float32)
+                inputs = torch.FloatTensor(chunk).to(self.device)
+                chunk_ids = torch.from_numpy(
+                    ids[start:start + chunk.shape[0]].astype(np.int64)
+                ).reshape(-1, 1).to(self.device)
+                outputs = self.model(inputs, chunk_ids)
+                flat = outputs.detach().cpu().numpy().astype(float).reshape(chunk.shape[0], -1)
+                scores[start:start + chunk.shape[0]] = flat[:, 0]
+        return scores
+
+    def _conformal_fit_from_scores(
+        self,
+        residual_targets: np.ndarray,
+        scores: np.ndarray,
+        final_score: float,
+        alpha: float = 0.1,
+    ) -> tuple:
+        """Fit the split-conformal interval on batched calibration scores.
+
+        The tail of :meth:`_conformal_interval` with the scoring step already
+        done: same calibrator, same residual evidence, same interval rule, so
+        a source's bounds are identical to the serial path's for the same
+        windows.
+        """
+        from backend.modules.engine.conformal import SplitConformalCalibrator
+
+        calibrator = SplitConformalCalibrator(alpha=alpha)
+        calibrator.fit(residual_targets, scores[: residual_targets.size])
+        interval = calibrator.interval(float(final_score))
+        return interval.lower, interval.upper, f"split_conformal_alpha_{alpha}"
+
+
     def _predict_single(self, input_data: pd.DataFrame) -> PredictionResult:
-        """Predict for single entity."""
+        """Predict for single entity.
+
+        Scores every source through the batched path (one forward pass over
+        all sources' final windows, one over all held-out calibration
+        windows) and degrades to the per-source serial path on any failure —
+        slow, never different: both paths share the same normalisation,
+        clipping, calibration windows, interval fitting and assembly.
+        """
+        if self._batch_inference:
+            try:
+                return self._predict_single_batched(input_data)
+            except Exception as exc:  # noqa: BLE001 - degrade to slow, never to different
+                logger.warning(
+                    "Batched source inference unavailable (%s); scoring per source", exc
+                )
+        return self._predict_single_serial(input_data)
+
+
+    def _predict_single_serial(self, input_data: pd.DataFrame) -> PredictionResult:
+        """Predict for single entity (per-source serial scoring).
+
+        The reference implementation: every source is prepared, scored and
+        calibrated in its own loop. :meth:`_predict_single_batched` must
+        reproduce this result; ``test_batched_inference_equivalence.py`` pins
+        the equality, and :meth:`_predict_single` falls back to this path
+        whenever the batched path raises.
+        """
 
         # Group by source
-        predictions_list = []
-        confidence_intervals: Dict[str, tuple] = {}
 
         # Pass 1: score every source and collect the regime inputs. The
         # per-source regime nowcast used to run inside this loop, paying a
@@ -1058,7 +1147,141 @@ class RealPredictionEngine:
         # different).
         regime_labels = self._regime_labels_batch(regime_items)
 
+        # Pass 3: assemble (shared with the batched inference path).
+        return self._assemble_prediction_result(scored_rows, regime_items, regime_labels)
+
+    def _predict_single_batched(self, input_data: pd.DataFrame) -> PredictionResult:
+        """Predict for single entity, scoring across sources in batched passes.
+
+        Same contract as :meth:`_predict_single_serial`, with the per-source
+        torch calls collected into two batched passes:
+
+        * every source's final window in one pass (per-row source id, so the
+          per-source embedding each serial forward used is the row's own);
+        * every source's held-out calibration windows in one pass, rows
+          grouped per source in source order, so each source's residual array
+          is byte-identical to the serial one and the per-source conformal
+          fit sees exactly the serial evidence.
+
+        Per-source preparation (value-column selection, the degenerate
+        standardisation guard, gap handling, clipping), the interval fitting
+        and the uncertainty decomposition run unchanged; a source that cannot
+        support a calibration window keeps the serial
+        ``insufficient_history_for_calibration`` method. Any failure anywhere
+        raises and :meth:`_predict_single` falls back to the serial path —
+        never to a different number.
+        """
+        scored_rows = []
+        regime_items = []
+
+        # Pass 1a: per-source preparation (identical rules to the serial loop).
+        prepared = []
+        for source_code in input_data['source_code'].unique():
+            source_data = input_data[input_data['source_code'] == source_code]
+            source_data = source_data.sort_values('Date')
+
+            source_id = self._map_source_id(source_code)
+
+            value_column = select_value_column(source_data)
+            if value_column is None:
+                logger.warning(
+                    "Prediction: source %s has no usable value column (Close/Value); skipped",
+                    source_code,
+                )
+                continue
+            values = pd.to_numeric(
+                source_data[value_column], errors='coerce'
+            ).to_numpy(dtype=float)
+            sequence, stats = self._prepare_sequence(values, source_code)
+            prepared.append({
+                'source_code': source_code,
+                'values': values,
+                'sequence': sequence,
+                'stats': stats,
+                'source_id': source_id,
+                'calibration': self._calibration_windows(values, stats),
+            })
+
+        # Pass 1b: one batched forward over every source's final window.
+        if prepared:
+            final_windows = np.stack([p['sequence'].numpy() for p in prepared])
+            source_ids = np.array([p['source_id'] for p in prepared], dtype=np.int64)
+            point_scores = self._score_windows_multi(final_windows, source_ids, 512)
+        else:
+            point_scores = np.empty(0, dtype=float)
+
+        # Pass 1c: one batched forward over every source's held-out
+        # calibration windows; rows stay grouped per source, in source order.
+        window_blocks = []
+        block_meta = []
+        for p, final_score in zip(prepared, point_scores):
+            p['final_score'] = float(final_score)
+            calibration = p['calibration']
+            if calibration is None:
+                p['interval'] = (None, None, "insufficient_history_for_calibration")
+                continue
+            cal_windows, residual_targets = calibration
+            window_blocks.append(cal_windows)
+            block_meta.append((cal_windows.shape[0], residual_targets, p))
+
+        if window_blocks:
+            stacked = np.concatenate(window_blocks, axis=0)
+            stacked_ids = np.concatenate([
+                np.full(count, p['source_id'], dtype=np.int64)
+                for count, _, p in block_meta
+            ])
+            window_scores = self._score_windows_multi(stacked, stacked_ids, 512)
+            offset = 0
+            for count, residual_targets, p in block_meta:
+                scores = window_scores[offset:offset + count]
+                offset += count
+                lower, upper, method = self._conformal_fit_from_scores(
+                    residual_targets, scores, p['final_score']
+                )
+                p['interval'] = (lower, upper, method)
+        for p in prepared:
+            p.setdefault('interval', (None, None, "insufficient_history_for_calibration"))
+
+        # Pass 1d: per-source denormalisation, interval bounds and the
+        # uncertainty decomposition (unchanged from the serial path).
+        for p in prepared:
+            normalized_prediction = p['final_score']
+            denorm_prediction = self._denormalize_prediction(normalized_prediction, p['stats'])
+            lower, upper, interval_method = p['interval']
+            if lower is not None:
+                conf = (
+                    self._denormalize_prediction(lower, p['stats']),
+                    self._denormalize_prediction(upper, p['stats']),
+                )
+            else:
+                conf = (None, None)
+            uncertainty = self._uncertainty_for_source(
+                p['sequence'], p['values'], p['stats'], p['source_id']
+            )
+            scored_rows.append(
+                (p['source_code'], denorm_prediction, normalized_prediction,
+                 interval_method, conf, uncertainty)
+            )
+            regime_items.append((p['source_code'], p['values'], p['stats']))
+
+        # Pass 2: batched regime nowcast (same as the serial path).
+        regime_labels = self._regime_labels_batch(regime_items)
+
+        # Pass 3: assemble (shared with the serial path).
+        return self._assemble_prediction_result(scored_rows, regime_items, regime_labels)
+
+    def _assemble_prediction_result(
+        self, scored_rows: list, regime_items: list, regime_labels: Dict[str, tuple]
+    ) -> PredictionResult:
+        """Assemble the PredictionResult from scored rows and regime labels.
+
+        Shared by the serial and batched inference paths: the assembly, the
+        uncertainty summary, the executive summary and the metrics are one
+        computation on both sides, so the two paths cannot drift apart.
+        """
         # Pass 3: assemble.
+        predictions_list: List[Dict[str, Any]] = []
+        confidence_intervals: Dict[str, tuple] = {}
         uncertainty_records: Dict[str, Dict[str, Any]] = {}
         for (
             source_code,
