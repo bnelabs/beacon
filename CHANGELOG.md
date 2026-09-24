@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.1.1] - 2026-09-24
+
 ### Fixed
 - **Degenerate standardization no longer dominates the training objective
   (L-60, PR #145).** Series that are constant or near-constant in the
