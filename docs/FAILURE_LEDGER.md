@@ -653,6 +653,51 @@ the fix; the "local PostgreSQL auth only" note in the handoff was this defect, n
 environment). Status: **FIXED** — CHANGELOG (Unreleased, Fixed), PR #116,
 `backend/tests/test_migrations_live.py`.
 
+**L-49. The local test suite could silently write to the live Postgres.**
+`test_migrations_live.py`'s fallback candidate list ended with hardcoded
+`127.0.0.1:5432` URLs carrying the live stack's credentials
+(`beacon_user:beacon_password`), so the suite's documented local command
+(`pytest backend/tests -q`) created and dropped throwaway databases on the
+production server whenever the live stack was up — without anyone making that
+decision. A full-suite audit run did exactly that (no data damage: the fixture
+only ever created and dropped its own `beacon_migration_test_<uuid>`
+database; verified zero leftovers and `beacon_db` intact), but the "postgres
+:5432 is read-only" rule held by convention, not by construction: any local
+developer following CONTRIBUTING.md was one live stack away from writing to
+production Postgres. Detected by: the 2026-09-24 test-suite audit (candidate
+list inspection, plus a second full-suite run observed executing the 12 live
+migration tests against the live server instead of skipping). Mitigation: the
+candidate list is the two env vars only
+(`MIGRATION_TEST_DATABASE_URL`, `POSTGRES_MIGRATION_TEST_URL`); a bare local
+run skips 12/12 with the explicit reason, and CI names its throwaway service
+in the workflow. Verified: bare local run `2192 passed / 12 skipped`; CI
+dispatch `2204 passed / 0 skipped` with the 12 live migrations against the
+job's service. Status: **FIXED** — PR #141,
+`backend/tests/test_migrations_live.py`, `docs/TEST_AUDIT_2026-09-24.md` (F1).
+
+**L-50. The deep CI checkout made the L-48 changelog-history gate unevaluable.**
+`backend-tests.yml` checked out with the `actions/checkout` defaults
+(`fetch-depth: 1`, `fetch-tags: false` — literally
+`git fetch --no-tags --depth=1`), so the clone held no tag refs and no tagged
+commit objects. `scripts/check_changelog_history.py`'s base lookup — the
+highest-semver release tag reachable from HEAD — therefore had no candidates
+on any CI runner, and both `test_changelog_history_gate.py::
+test_live_tree_is_covered` and `test_release_tooling.py`'s release dry-run died
+with "no release tag reachable from HEAD". The gate worked in local full
+clones and at release-cut time; the deep leg was red on every run containing
+the L-48 code (first visible: the 2026-09-24 08:46 UTC nightly on `main`, run
+`35977227135` — the previous green nightly ran a tree predating the gate,
+which had neither the script nor the test). Detected by: the audit's
+`gh workflow run backend-tests.yml --ref <branch>` dispatch failing the same
+two tests. Impact: the CI leg that should have caught a changelog-history
+violation was silently blind — no "green deep run" existed for the gate.
+Mitigation: the deep job checks out with `fetch-depth: 0` + `fetch-tags: true`
+(the ~145 MB full clone against a 30-minute budget), making the deep leg the
+CI equivalent of a local full clone. Verified: post-fix dispatch
+`2204 passed / 0 skipped` (run `35986340481`), both gate tests passing against
+real tags. Status: **FIXED** — PR #141, `.github/workflows/backend-tests.yml`,
+`docs/TEST_AUDIT_2026-09-24.md` (F7).
+
 ## E. Release and process hygiene
 
 **L-23. The v3.3.0 release was stranded: cut, but never tagged.** The release
