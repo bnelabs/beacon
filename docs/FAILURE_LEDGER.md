@@ -567,8 +567,14 @@ had reported the same metric since round two. The failure mode was the
 same value-column defect as L-51: the denormalized baseline series were read
 from the wrong column and the comparison blew up. Status: **OPEN** —
 mitigated by the L-51 fix (baseline comparison now selects the value column
-per series); the retrain after the fix must show a non-null
-`baseline_comparison` to close.
+per series). The job-22 retrain (v6.1.1) confirmed the top-level null is
+gone — `baseline_comparison` is populated — but every one of its 53
+per-source entries was still skipped, so `mean_lift` remained `null` and the
+metric was still unmeasured. Offline replay of the walk-forward guard found
+why, and it is recorded as L-61: an off-by-one in the window-count check and
+a feature reshape the model cannot consume, both in the same never-measured
+path. The retrain on the fixed code must show at least one measured
+per-source entry (with a lift against persistence/AR(1)) to close.
 
 **L-56. The simulate endpoint could not run a network scenario at all.**
 `engine.predict` accepts `bank_exposures`/`bank_endowments` for the
@@ -612,12 +618,46 @@ enters the model — training inputs, training targets, `_prepare_sequence`,
 the `predict_risk_series` windows and `_calibration_windows` — and the
 backtest's derived targets is clipped to ±`STANDARDIZED_VALUE_CLIP` (10.0),
 so the objective is bounded and training, inference and backtest share one
-space. Status: **OPEN** — mitigation in branch
-`fix/611-degenerate-standardization`; regression tests in
+space. Status: **CLOSED** — fixed in 6.1.1 (branch
+`fix/611-degenerate-standardization`); regression tests in
 `backend/tests/test_trainer_composition.py` (`TestDegenerateStandardization`)
 and `backend/tests/test_backtest_target_derivation.py`
-(`test_targets_follow_the_training_clip_law`); close requires a full retrain
-showing an O(1) epoch-1 val loss.
+(`test_targets_follow_the_training_clip_law`). The full-panel retrain on
+6.1.1 (job 22) shows epoch-1 val loss 10.13 — O(1), where job 21 showed
+4.23e18 — model selection picks epoch 3 on that bounded metric, and every
+standardized model input and target is bounded by the ±10 clip (clip
+warnings fire on the AI4RISK series, confirming the bound is active).
+
+**L-61. The walk-forward baseline comparison still measured nothing, despite
+L-55's fix.** Two latent defects sat in the measurement path that no series
+could ever reach because the guard in front of it was itself broken:
+
+1. **Off-by-one in the window-count guard.**
+   `sliding_window_view(values, seq_len)` yields `n - seq_len + 1` windows,
+   but `targets_raw = values[seq_len:]` has `n - seq_len` entries — the last
+   window ends on the final observation and has no next value to predict.
+   The guard `targets_raw.size != windows.shape[0]` was therefore true for
+   *every* series long enough to have any windows at all, so every source
+   was skipped as "not enough windows" and `mean_lift` was `null` even for
+   daily series with 1,300+ windows. In job 22's `baseline_comparison`,
+   every entry that had enough data to measure was skipped for exactly this
+   reason; the remainder were honest "series too short" refusals (quarterly
+   and annual feeds with fewer than 40 test points).
+2. **Adapter reshape the model cannot consume.** The frozen-model adapter
+   fed the model `(batch, seq_len, 1)` features while its forward takes
+   `(batch, seq_len)`. The resulting `RuntimeError` is not caught by the
+   `(TypeError, ValueError)` guard in the loop, so the first series that
+   had ever survived the window guard would have crashed the entire
+   training job.
+
+Detected by: offline replay of the job-20 test split through the guard
+(IR_US_10Y has 1,335 finite test values → 1,305 valid windows, yet job 22
+skipped it). Mitigation: drop the trailing window so features and targets
+align 1:1, and reshape the adapter's features to 2-D. Status: **OPEN** —
+mitigation in branch `fix/612-baseline-walkforward-offbyone`; regression
+tests in `backend/tests/test_trainer_composition.py`
+(`TestBaselineComparison`); close requires the retrain on the fixed code to
+report at least one measured per-source baseline entry.
 
 ## D. Test and CI infrastructure that lied
 
