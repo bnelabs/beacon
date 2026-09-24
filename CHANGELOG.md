@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.2.0] - 2026-09-24
+
 ### Added
 - **Background scenario jobs with a hard two-scenario concurrency cap (PR #151).**
   A new `scenario` job type runs the exact scenario simulation of the
