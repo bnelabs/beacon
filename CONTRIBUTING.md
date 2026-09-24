@@ -47,7 +47,9 @@ pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 python -m compileall -q backend scripts
 ruff check backend scripts --select E9,F63,F7,F82
 python scripts/check_versioning.py
-OMP_NUM_THREADS=2 python -m pytest backend/tests -q     # ~2000 tests
+OMP_NUM_THREADS=2 python -m pytest backend/tests -q     # ~2200 tests
+# (the live-migration module skips locally unless MIGRATION_TEST_DATABASE_URL
+# names a server it may create and drop databases on -- never the live stack)
 ```
 
 Frontend and end-to-end: see `docs/frontend.md` and
@@ -124,7 +126,8 @@ when its mitigation is merged and verified.
   `.github/workflows/README.md`). So a pipeline-, model-, migration- or
   API-surface-touching change is proven before it merges, by hand:
   `gh workflow run backend-tests.yml --ref <branch>`, or the local full suite
-  (~7 min on 2 CPUs). Eight pipeline merges landed on `main` under nothing but
+  (~3 min on 2 CPUs; the CI leg is ~8 min including installs). Eight pipeline
+  merges landed on `main` under nothing but
   the sub-minute gates because this line used to claim the deep suites ran on
   merge; a red deep run found it two modules away from its cause.
 - Don't merge red, and don't merge a vacuous green (see "Infrastructure lie"

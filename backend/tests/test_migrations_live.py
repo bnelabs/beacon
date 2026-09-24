@@ -47,9 +47,17 @@ have, and each one failed differently before the guards landed:
 Both terminal states are asserted to be the *same* schema, which is the property
 that makes the two histories interchangeable rather than merely survivable.
 
-These tests need a live PostgreSQL. Without one they skip, and CI provides one
-(see the ``postgres`` service in ``.github/workflows/backend-ci.yml``), so a skip
-locally is not a pass in CI.
+These tests need a live PostgreSQL named by ``MIGRATION_TEST_DATABASE_URL`` (or
+``POSTGRES_MIGRATION_TEST_URL``). With no such variable they skip, and CI provides
+one (the ``postgres`` service in ``.github/workflows/backend-tests.yml``), so a
+skip locally is not a pass in CI.
+
+There is deliberately NO implicit local fallback -- not even to ``127.0.0.1:5432``:
+this deployment's live stack sits on that port, so the suite's documented local
+command would otherwise create and drop throwaway databases on the production
+server without anyone deciding to. Running these against a real server is an
+explicit, on-demand act: point the variable at a server the tests may create and
+drop databases on.
 """
 
 from __future__ import annotations
@@ -66,21 +74,17 @@ import sqlalchemy as sa
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-#: Read from the environment in CI; falls back to a local cluster for
-#: development. Never a production URL -- every database this creates is dropped,
-#: and the fixture asserts nothing else is on the server worth keeping.
-#:
-#: The passwordless entries match the trust-auth service Backend CI declares, and
-#: the last three are common local setups. They are tried in order and the first
-#: that answers wins, so a developer with a password-protected local cluster can
-#: still run these without setting the variable.
+#: Environment-named URLs only. The old local fallback candidates pointed at
+#: ``127.0.0.1:5432`` -- the port this deployment's LIVE stack listens on -- so a
+#: routine local run of the whole suite silently created and dropped databases on
+#: the production server. A skip is the honest local outcome: CI names its own
+#: throwaway service explicitly, and a developer who wants local proof sets the
+#: variable to a server the tests may create and drop databases on (never a
+#: production URL -- every database this creates is dropped, and only this file's
+#: fixture ever touches the server).
 _CANDIDATE_URLS = (
     os.getenv("MIGRATION_TEST_DATABASE_URL"),
     os.getenv("POSTGRES_MIGRATION_TEST_URL"),
-    "postgresql://beacon_user@127.0.0.1:5432/postgres",
-    "postgresql://postgres@127.0.0.1:5432/postgres",
-    "postgresql://beacon_user:beacon_password@127.0.0.1:5432/postgres",
-    "postgresql://postgres@localhost:5432/postgres",
 )
 
 #: Tables the product cannot run without. Checked rather than "whatever the

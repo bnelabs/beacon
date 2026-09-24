@@ -32,9 +32,11 @@ jobs:
   #     app through FastAPI's in-process TestClient.
   #   * test_pipeline_integration.py points DATABASE_URL at a per-test SQLite
   #     file in tmp_path and drives the pipeline from a locally generated CSV.
-  #   * test_country_scope.py is the only docker/Postgres/Redis-dependent
-  #     test; it is skipped unless RUN_DOCKER_SCOPE_TESTS=1, which this
-  #     workflow never sets.
+  #   * there is no docker/Postgres/Redis-dependent test in the suite. The one
+  #     there used to be (test_country_scope.py) was deleted: it ran only when
+  #     RUN_DOCKER_SCOPE_TESTS=1, which no workflow ever set, and executing it
+  #     locally meant docker-compose up/down of the live stack -- a test no
+  #     environment could run without taking the deployment down.
   #
   # A postgres service IS declared below, and the reason is
   # test_migrations_live.py. This job used to conclude that no service was
