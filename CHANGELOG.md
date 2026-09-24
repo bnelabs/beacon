@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.1.2] - 2026-09-24
+
 ### Fixed
 - **Walk-forward baseline comparison now actually measures (L-61, PR #147).**
   The multi-scale trainer's baseline comparison was still all-skip even
