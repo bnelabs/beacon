@@ -9,6 +9,22 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Fixed
+- **Walk-forward baseline comparison now actually measures (L-61, PR #147).**
+  The multi-scale trainer's baseline comparison was still all-skip even
+  after the L-51/L-55 fixes: the window-count guard compared
+  `sliding_window_view`'s `n - seq_len + 1` windows against the
+  `n - seq_len` targets and fired for every long series, so every source
+  was reported as "not enough windows" and `mean_lift` stayed `null`
+  (job 22: 53 entries, zero measured — including daily series with 1,300+
+  windows). The frozen-model adapter additionally reshaped features to
+  `(batch, seq_len, 1)` while the model's forward takes `(batch,
+  seq_len)`; that `RuntimeError` is not caught by the `(TypeError,
+  ValueError)` guard and would have crashed the training job the first
+  time a series reached measurement. The trailing window is now dropped so
+  features and targets align 1:1 and the adapter feeds 2-D features, so a
+  retrain reports a real lift against persistence/AR(1) per source.
+
 ## [6.1.1] - 2026-09-24
 
 ### Fixed
