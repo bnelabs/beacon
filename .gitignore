@@ -137,3 +137,10 @@ node_modules/
 # the frozen provenance of the tagged protocol.
 data/prereg/work/
 data/prereg/*/work/
+
+# Operational database backups (pg_dump) — never commit real data
+backups/
+# Scenario simulation artefacts
+results/scenarios/
+# Per-job model artefacts (best_model.pt, manifest, plots, predictions)
+models/saved/*/

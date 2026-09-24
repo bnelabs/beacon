@@ -56,6 +56,7 @@ from backend.modules.data.quality_gate import (
 )
 from backend.modules.engine.backtesting import boundaries_from_group_sizes
 from backend.modules.engine.model_io import safe_torch_load
+from backend.modules.engine.value_columns import VALUE_COLUMN_CANDIDATES, select_value_column
 from backend.modules.risk.bank_analyzer import BankRiskAnalyzer, MultiBankAnalysis, generate_executive_summary
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,10 @@ class RiskSeriesResult:
     stats_provenance: Dict[str, str]
     batch_size: int
     max_steps: Optional[int] = None
+    #: Rows in series that carry no usable value column at all. Such a series
+    #: is skipped rather than standardised to a degenerate all-zero input,
+    #: which would score as a plausible-looking value.
+    n_dropped_no_values: int = 0
 
     @property
     def n_steps(self) -> int:
@@ -155,6 +160,7 @@ class RiskSeriesResult:
             "stats_provenance": dict(self.stats_provenance),
             "batch_size": int(self.batch_size),
             "max_steps": None if self.max_steps is None else int(self.max_steps),
+            "n_dropped_no_values": int(self.n_dropped_no_values),
             "ordering": "series_major_then_time",
         }
 
@@ -256,6 +262,62 @@ class RealPredictionEngine:
 
         logger.info(f"Loaded model from {model_path}")
 
+    #: Which scenario parameters each named scenario type consumes. Used both
+    #: to infer the type when the caller supplies parameters without one and
+    #: to decide which sub-scenarios a ``combined`` run recurses into.
+    _SCENARIO_TYPE_KEYS = {
+        'policy_intervention': ('rate_cut_bps', 'qe_amount'),
+        'market_crash': ('stock_drop_pct', 'volatility_spike', 'credit_spread_widening'),
+        'liquidity_freeze': ('interbank_lending_reduction',),
+        'bank_failure': ('failed_bank_id', 'exposure_haircut'),
+        'regional_shock': ('regional_shocks',),
+        'sovereign_crisis': ('sovereign_spread_widening', 'banking_stress'),
+        'commodity_shock': ('oil_price_increase', 'inflation_spike'),
+        'operational_risk': ('market_disruption',),
+    }
+
+    def _infer_scenario_type(self, scenario: Dict[str, Any]) -> str:
+        """Resolve the scenario type, inferring it from the parameters present.
+
+        A caller may pass ``rate_cut_bps`` without a ``type``; the previous
+        behaviour was to apply nothing (``type`` defaulted to ``custom``),
+        which is how the API path silently ignored the rich parameters.
+        """
+        declared = scenario.get('type')
+        if declared not in (None, '', 'custom'):
+            return str(declared)
+        present = {
+            name
+            for name, keys in self._SCENARIO_TYPE_KEYS.items()
+            if any(key in scenario for key in keys)
+        }
+        if not present:
+            return 'custom'
+        return 'combined' if len(present) > 1 else next(iter(present))
+
+    def _transform_values(
+        self,
+        data: pd.DataFrame,
+        mask: pd.Series,
+        kind: str,
+        amount: float,
+    ) -> None:
+        """Apply ``kind`` ('mul' or 'add') to every value column the frame carries.
+
+        The prediction paths read the per-series value column via
+        ``select_value_column``: OHLC rows from ``Close``/``close``, value rows
+        from ``Value``/``value``. Transforming only ``Value`` would leave the
+        OHLC series (equities, FX, gold) untouched, so a scenario that is
+        supposed to shock the market would silently miss exactly the sources
+        the market model watches.
+        """
+        for column in VALUE_COLUMN_CANDIDATES:
+            if column in data.columns:
+                if kind == 'mul':
+                    data.loc[mask, column] = data.loc[mask, column] * amount
+                else:
+                    data.loc[mask, column] = data.loc[mask, column] + amount
+
     def apply_scenario(
         self,
         input_data: pd.DataFrame,
@@ -275,6 +337,10 @@ class RealPredictionEngine:
         - operational_risk: Cyber attacks, system failures
         - combined: Multiple simultaneous stresses
 
+        When ``type`` is absent it is inferred from the parameters present
+        (``_infer_scenario_type``); a ``combined`` run recurses into every
+        applicable named scenario.
+
         Args:
             input_data: DataFrame with Date, Value, source_code (and optionally bank_id)
             scenario: Dictionary with scenario parameters
@@ -282,7 +348,7 @@ class RealPredictionEngine:
         Returns:
             Modified DataFrame with scenario applied
         """
-        scenario_type = scenario.get('type', 'custom')
+        scenario_type = self._infer_scenario_type(scenario)
         modified_data = input_data.copy()
 
         logger.info(f"Applying scenario: {scenario_type}")
@@ -293,32 +359,43 @@ class RealPredictionEngine:
 
             # Handle both network data (source_bank/target_bank) and time-series data (source_code)
             if 'source_bank' in modified_data.columns and 'target_bank' in modified_data.columns:
-                # Network data from AI4Risk plugin - reduce all interbank exposures
-                modified_data['Value'] *= (1 - reduction)
+                # Network data from AI4Risk plugin - reduce the exposure rows
+                # only; a mixed panel frame also carries scalar sources.
+                edge_mask = modified_data['source_bank'].notna()
+                self._transform_values(modified_data, edge_mask, 'mul', (1 - reduction))
             elif 'source_code' in modified_data.columns:
                 # Time-series data - reduce interbank-related sources
-                modified_data.loc[
+                self._transform_values(
+                    modified_data,
                     modified_data['source_code'].str.contains('INTERBANK|AI4RISK', na=False),
-                    'Value'
-                ] *= (1 - reduction)
+                    'mul',
+                    (1 - reduction),
+                )
 
         elif scenario_type == 'policy_intervention':
-            # Apply rate cut (or hike if negative)
+            # Apply rate cut (hike if negative). The rate series are quoted in
+            # percent, so 1bp = 0.01 percentage points: the previous /10000
+            # under-scaled the shock by a factor of 100, and the sign was
+            # inverted against the schema ("negative for hikes").
             rate_cut_bps = scenario.get('rate_cut_bps', 0)
             if rate_cut_bps != 0:
-                modified_data.loc[
+                self._transform_values(
+                    modified_data,
                     modified_data['source_code'].str.contains('RATE|SOFR|ESTR|EURIBOR|FED_FUNDS', na=False),
-                    'Value'
-                ] += rate_cut_bps / 10000  # Convert bps to decimal
+                    'add',
+                    -rate_cut_bps / 100.0,
+                )
 
             # Apply QE (increase liquidity)
             qe_amount = scenario.get('qe_amount', 0)
             if qe_amount > 0:
                 liquidity_boost = qe_amount / 1e12  # Normalize
-                modified_data.loc[
+                self._transform_values(
+                    modified_data,
                     modified_data['source_code'].str.contains('RESERVES|M2|LIQUIDITY', na=False),
-                    'Value'
-                ] *= (1 + liquidity_boost)
+                    'mul',
+                    (1 + liquidity_boost),
+                )
 
         elif scenario_type == 'bank_failure':
             # Simulate bank failure by setting its metrics to critical
@@ -327,103 +404,152 @@ class RealPredictionEngine:
 
             if failed_bank and 'bank_id' in modified_data.columns:
                 # Failed bank's equity goes to zero
-                modified_data.loc[
+                self._transform_values(
+                    modified_data,
                     (modified_data['bank_id'] == failed_bank) &
                     (modified_data['source_code'].str.contains('EQUITY|CAPITAL', na=False)),
-                    'Value'
-                ] = 0
+                    'mul',
+                    0.0,
+                )
 
                 # Counterparties take haircut on exposures
                 if 'target_bank' in modified_data.columns:
-                    modified_data.loc[
+                    self._transform_values(
+                        modified_data,
                         modified_data['target_bank'] == failed_bank,
-                        'Value'
-                    ] *= (1 - haircut)
+                        'mul',
+                        (1 - haircut),
+                    )
+
+            # Edge frames (AI4Risk): the failed bank's own claims go to zero and
+            # the claims held on it take the declared haircut. Direction is
+            # declared, not measured: an edge sourceid -> targetid is read as
+            # "sourceid holds a claim on targetid" (the upstream dataset does
+            # not document the orientation).
+            if failed_bank and 'source_bank' in modified_data.columns and 'target_bank' in modified_data.columns:
+                self._transform_values(
+                    modified_data,
+                    modified_data['source_bank'] == failed_bank,
+                    'mul',
+                    0.0,
+                )
+                self._transform_values(
+                    modified_data,
+                    modified_data['target_bank'] == failed_bank,
+                    'mul',
+                    (1 - haircut),
+                )
 
         elif scenario_type == 'market_crash':
             # Apply stock market crash
             stock_drop = scenario.get('stock_drop_pct', 0.20)
             vol_spike = scenario.get('volatility_spike', 2.0)
 
-            modified_data.loc[
-                modified_data['source_code'].str.contains('STOCK|SPX|EURO|NIKKEI|HSI|EQUITY', na=False),
-                'Value'
-            ] *= (1 - stock_drop)
+            # Equity price series only: the collection names volatility
+            # series STOCK_VIX, so the price mask must exclude the
+            # volatility sources or they get a price drop and a spike.
+            price_mask = (
+                modified_data['source_code'].str.contains('STOCK|SPX|EURO|NIKKEI|HSI|EQUITY', na=False)
+                & ~modified_data['source_code'].str.contains('VIX|VOLATILITY|MOVE', na=False)
+            )
+            self._transform_values(modified_data, price_mask, 'mul', (1 - stock_drop))
 
-            modified_data.loc[
+            self._transform_values(
+                modified_data,
                 modified_data['source_code'].str.contains('VIX|VOLATILITY|MOVE', na=False),
-                'Value'
-            ] *= vol_spike
+                'mul',
+                vol_spike,
+            )
 
             # Widen credit spreads
             spread_widening = scenario.get('credit_spread_widening', 0)
             if spread_widening > 0:
-                modified_data.loc[
+                self._transform_values(
+                    modified_data,
                     modified_data['source_code'].str.contains('SPREAD|TED|CREDIT', na=False),
-                    'Value'
-                ] += spread_widening
+                    'add',
+                    spread_widening,
+                )
 
         elif scenario_type == 'regional_shock':
             # Apply regional shocks
             region_shocks = scenario.get('regional_shocks', [])
-            for shock in region_shocks:
-                region = shock['region']
-                magnitude = shock['magnitude']
-
-                # Apply shock to all data sources in region
-                if 'region' in modified_data.columns:
-                    modified_data.loc[
+            if 'region' in modified_data.columns:
+                for shock in region_shocks:
+                    region = shock['region']
+                    magnitude = shock['magnitude']
+                    self._transform_values(
+                        modified_data,
                         modified_data['region'] == region,
-                        'Value'
-                    ] *= (1 + magnitude)
+                        'mul',
+                        (1 + magnitude),
+                    )
+            elif region_shocks:
+                # Declared, not silent: the collection payload carries no
+                # region column, so a regional shock cannot be located on it.
+                logger.warning(
+                    "regional_shock requested but the payload has no 'region' column; "
+                    "no regional shock was applied"
+                )
 
         elif scenario_type == 'sovereign_crisis':
             # Sovereign debt crisis
             spread_widening = scenario.get('sovereign_spread_widening', 0.04)
-            modified_data.loc[
+            self._transform_values(
+                modified_data,
                 modified_data['source_code'].str.contains('BOND|YIELD|10Y|2Y', na=False),
-                'Value'
-            ] += spread_widening
+                'add',
+                spread_widening,
+            )
 
             # Banking stress from sovereign exposure
-            banking_stress = scenario.get('banking_stress', {})
+            banking_stress = scenario.get('banking_stress', {}) or {}
             deposit_flight = banking_stress.get('deposit_flight', 0)
             if deposit_flight > 0 and 'bank_id' in modified_data.columns:
-                modified_data.loc[
+                self._transform_values(
+                    modified_data,
                     modified_data['source_code'].str.contains('DEPOSIT', na=False),
-                    'Value'
-                ] *= (1 - deposit_flight)
+                    'mul',
+                    (1 - deposit_flight),
+                )
 
         elif scenario_type == 'commodity_shock':
             # Oil/commodity price shock
             oil_increase = scenario.get('oil_price_increase', 0)
             if oil_increase > 0:
-                modified_data.loc[
+                self._transform_values(
+                    modified_data,
                     modified_data['source_code'].str.contains('OIL|WTI|BRENT', na=False),
-                    'Value'
-                ] *= (1 + oil_increase)
+                    'mul',
+                    (1 + oil_increase),
+                )
 
             # Inflation impact
             inflation_spike = scenario.get('inflation_spike', 0)
             if inflation_spike > 0:
-                modified_data.loc[
+                self._transform_values(
+                    modified_data,
                     modified_data['source_code'].str.contains('CPI|HICP|INFLATION', na=False),
-                    'Value'
-                ] += inflation_spike
+                    'add',
+                    inflation_spike,
+                )
 
         elif scenario_type == 'operational_risk':
             # Cyber attack or operational disruption
-            confidence_shock = scenario.get('market_disruption', {}).get('confidence_shock', 0.15)
-            modified_data.loc[
+            market_disruption = scenario.get('market_disruption', {}) or {}
+            confidence_shock = market_disruption.get('confidence_shock', 0.15)
+            self._transform_values(
+                modified_data,
                 modified_data['source_code'].str.contains('VIX|VOLATILITY', na=False),
-                'Value'
-            ] *= (1 + confidence_shock)
+                'mul',
+                (1 + confidence_shock),
+            )
 
         elif scenario_type == 'combined':
-            # Apply multiple stresses recursively
-            for sub_scenario_type in ['policy_intervention', 'market_crash', 'liquidity_freeze']:
-                if any(k in scenario for k in ['rate_cut_bps', 'stock_drop_pct', 'interbank_lending_reduction']):
-                    # Create sub-scenario: unpack original first, then override type to avoid infinite recursion
+            # Recurse into every applicable named scenario. The explicit
+            # ``type`` override terminates the recursion.
+            for sub_scenario_type in self._SCENARIO_TYPE_KEYS:
+                if any(key in scenario for key in self._SCENARIO_TYPE_KEYS[sub_scenario_type]):
                     sub_scenario = {**scenario, 'type': sub_scenario_type}
                     modified_data = self.apply_scenario(modified_data, sub_scenario)
 
@@ -671,6 +797,7 @@ class RealPredictionEngine:
         truncated: Dict[str, int] = {}
         stats_provenance: Dict[str, str] = {}
         dropped_for_history = 0
+        dropped_no_values = 0
 
         # Group at the grain the payload carries. A panel feed (``series_id``
         # present) is scored per entity; a feed without a per-entity identity
@@ -688,12 +815,19 @@ class RealPredictionEngine:
                 else series
             )
             ordered = group.sort_values('Date') if 'Date' in group.columns else group
-            value_column = 'Close' if 'Close' in ordered.columns else 'Value'
-            if value_column not in ordered.columns:
-                raise SchemaValidationError(
-                    "Payload has neither a 'Close' nor a 'Value' column for series "
-                    f"{series}"
+            # Per-series selection: on a joined panel frame a 'Close' column
+            # always exists (filled by the OHLC series), so a frame-wide
+            # membership test reads an all-NaN column for value-only series
+            # and the degenerate zero input scores as a plausible-looking
+            # value. Select on the values, not the schema.
+            value_column = select_value_column(ordered)
+            if value_column is None:
+                dropped_no_values += int(ordered.shape[0])
+                logger.warning(
+                    "Risk series: series %s has no usable value column (Close/Value); skipped",
+                    series,
                 )
+                continue
 
             # Gaps stay as NaN here. They are imputed with the standardised mean
             # below, after normalisation -- never forward-filled, which would
@@ -809,6 +943,7 @@ class RealPredictionEngine:
             stats_provenance=stats_provenance,
             batch_size=window_batch,
             max_steps=step_cap,
+            n_dropped_no_values=int(dropped_no_values),
         )
 
     def _score_windows(
@@ -866,11 +1001,19 @@ class RealPredictionEngine:
             # Get source ID
             source_id = self._map_source_id(source_code)
 
-            # Prepare sequence from the 'Close' column when present. Gaps are
-            # preserved rather than forward-filled: carrying a stale observation
-            # into the future feeds the model values that were not published at
-            # that timestamp, which is look-ahead.
-            value_column = 'Close' if 'Close' in source_data.columns else 'Value'
+            # Prepare the sequence from the column that actually holds this
+            # source's values. Gaps are preserved rather than forward-filled:
+            # carrying a stale observation into the future feeds the model
+            # values that were not published at that timestamp, which is
+            # look-ahead. A source with no usable value column is skipped,
+            # never standardised to a degenerate all-zero input.
+            value_column = select_value_column(source_data)
+            if value_column is None:
+                logger.warning(
+                    "Prediction: source %s has no usable value column (Close/Value); skipped",
+                    source_code,
+                )
+                continue
             values = pd.to_numeric(
                 source_data[value_column], errors='coerce'
             ).to_numpy(dtype=float)

@@ -96,11 +96,23 @@ def _brief_response(job: Job, df: Optional[pd.DataFrame]) -> BriefReportResponse
         timeliness=timeliness,
     )
 
+    # ``failed`` counts sources that failed to collect, from the collection
+    # report -- NOT unresolved anomalies. The previous version stuffed
+    # ``anomalies_detected - anomalies_fixed`` into this field, so a run with
+    # 71/71 sources collected and 18,197 validator findings displayed
+    # "failed: 18197". The anomaly counts keep their own fields.
+    collection_report = result.get("collection_report") or {}
+    failed_sources = collection_report.get("failed")
+    if not isinstance(failed_sources, int):
+        failed_sources = 0
+
     return BriefReportResponse(
         job_id=job.id,
         status=job.status,
         downloaded=downloaded,
-        failed=max(0, (result.get("anomalies_detected") or 0) - (result.get("anomalies_fixed") or 0)),
+        failed=failed_sources,
+        anomalies_detected=result.get("anomalies_detected"),
+        anomalies_fixed=result.get("anomalies_fixed"),
         fit_for_purpose_score=quality_score,
         quality_metrics=metrics,
         coverage_start=start_date,

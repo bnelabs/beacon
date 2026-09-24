@@ -274,7 +274,9 @@ def test_sec_catalogue_tickers_do_not_require_ticker_manifest(monkeypatch):
     monkeypatch.setattr(plugin, "_official_get", manifest_must_not_be_called)
 
     assert plugin._ticker_cik("JPM") == "0000019617"
-    assert plugin._ticker_cik("BLK") == "0001364742"
+    # BLK: 0002012383 (BlackRock, Inc., current 13F filer). The retired
+    # CIK 0001364742 (BlackRock Finance, Inc.) stopped filing in 2024-08.
+    assert plugin._ticker_cik("BLK") == "0002012383"
 
 
 def test_sec_public_submissions_reads_historical_submission_blocks(monkeypatch):

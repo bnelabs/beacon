@@ -8,14 +8,18 @@ import psutil
 import os
 from pathlib import Path
 
+from typing import Optional
+
 from .celery_app import celery_app
 from backend.database import SessionLocal
 from backend.modules.data.quality_gate import DataQualityGate
+from backend.modules.engine.value_columns import select_value_column
 from backend.services.job_service import JobService
 from backend.services.enhanced_error_translator import translate_error_enhanced as translate_error
 import json
 from dataclasses import asdict
 import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -1088,6 +1092,58 @@ def run_prediction(self, job_id: int, parameters: dict):
         db.close()
 
 
+def derive_standardized_targets(
+    test_data: pd.DataFrame,
+    train_data: pd.DataFrame,
+) -> Optional[np.ndarray]:
+    """Derive the backtest ground-truth target the way the model was trained.
+
+    The model's training target is the standardized next-step value of each
+    series (normalized[i + window]), so the backtest pairs each score with
+    the standardized actual of the row it predicts. The standardization
+    statistics come from the pre-test window (``train_data``) only:
+    standardizing on the test window would leak the evaluated split into the
+    target, and a series with no pre-test history gets NaN targets and is
+    excluded from the aligned metrics rather than scored on statistics it
+    never saw.
+
+    Returns an array aligned positionally to ``test_data``, or ``None`` when
+    no series carries enough pre-test history to standardize on.
+    """
+    if train_data is None or len(train_data) == 0:
+        return None
+    group_col = 'series_id' if 'series_id' in test_data.columns else 'source_code'
+    pre_stats = {}
+    for series_name, rows in train_data.groupby(group_col, sort=False):
+        value_col = select_value_column(rows)
+        if value_col is None:
+            continue
+        values = pd.to_numeric(rows[value_col], errors='coerce').to_numpy(dtype=float)
+        finite = values[np.isfinite(values)]
+        # A constant pre-test series has no defined standardization:
+        # dividing by ~0 would turn a flat series into an explosion.
+        if finite.size >= 2 and float(finite.std()) > 1e-8:
+            pre_stats[str(series_name)] = (float(finite.mean()), float(finite.std()) + 1e-8)
+    if not pre_stats:
+        return None
+
+    # Assign by index label, not position: test_data is a date slice of the
+    # collection frame, so its index is gapped and a positional assignment
+    # into a len(test_data) array would be out of range (and wrong, since
+    # the caller reads the target column positionally).
+    targets = pd.Series(index=test_data.index, dtype=float)
+    for series_name, rows in test_data.groupby(group_col, sort=False):
+        stats = pre_stats.get(str(series_name))
+        if stats is None:
+            continue
+        value_col = select_value_column(rows)
+        if value_col is None:
+            continue
+        values = pd.to_numeric(rows[value_col], errors='coerce').to_numpy(dtype=float)
+        targets.loc[rows.index] = (values - stats[0]) / stats[1]
+    return targets.to_numpy()
+
+
 @celery_app.task(base=JobTask, bind=True, name="run_backtest")
 def run_backtest(self, job_id: int, parameters: dict):
     """
@@ -1272,6 +1328,31 @@ def run_backtest(self, job_id: int, parameters: dict):
                 else 'target' if 'target' in test_data.columns
                 else None
             )
+
+            # Ground-truth target. The collection package carries no target
+            # column, so derive one the way the model was trained: the
+            # standardized next-step value of each series (the model's target
+            # is normalized[i + window]), standardized on the pre-test window
+            # only (see derive_standardized_targets for the leak argument).
+            target_derivation = None
+            if target_col is None and 'Date' in test_data.columns:
+                derived = derive_standardized_targets(test_data, train_data)
+                if derived is not None:
+                    test_data = test_data.copy()
+                    test_data['target'] = derived
+                    target_col = 'target'
+                    target_derivation = (
+                        "derived: standardized next-step value of each series, "
+                        "standardized on the pre-test window only (train_data); "
+                        "series without pre-test history keep NaN targets and are "
+                        "excluded from the aligned metrics"
+                    )
+                    logger.info(
+                        "Backtest job %s: derived targets from pre-test "
+                        "standardization", job_id,
+                    )
+            if target_col is not None and target_derivation:
+                backtest_metrics["target_derivation"] = target_derivation
             if target_col is not None:
                 target_series = np.asarray(test_data[target_col].values, dtype=float)
                 predicted_offsets = np.asarray(frame["predicted_row_offset"], dtype=int)
@@ -1330,7 +1411,9 @@ def run_backtest(self, job_id: int, parameters: dict):
                     "std_prediction": float(np.std(pred_values)),
                     "min_prediction": float(np.min(pred_values)),
                     "max_prediction": float(np.max(pred_values)),
-                    "note": "No ground truth column in the test window",
+                    "note": "No ground truth column in the test window and no "
+                            "derivable target (no series carries enough "
+                            "pre-test history to standardize on)",
                 })
         else:
             # No usable series: fall back to the per-source scores so the job still
@@ -1514,7 +1597,6 @@ def run_backtest(self, job_id: int, parameters: dict):
                 pit_features = [str(code) for code in pit_features_raw]
             pit_store = TimeSeriesStore(db) if pit_features else None
 
-            value_col = 'Close' if 'Close' in test_data.columns else 'Value'
             frame = risk_series.frame if risk_series is not None else None
             # The series is scored per entity (``series_id``) when the payload
             # carries one, else per feed; the labels here and the seams above
@@ -1527,6 +1609,10 @@ def run_backtest(self, job_id: int, parameters: dict):
                 block = frame[frame["series"] == series_name]
                 feed = str(block["source"].iloc[0])
                 series_rows = test_data[test_data[series_col] == series_name].sort_values('Date')
+                value_col = select_value_column(series_rows)
+                if value_col is None:
+                    event_metrics_payload["by_series"][series_name] = {"skipped": "no usable value column"}
+                    continue
                 series_values = pd.to_numeric(series_rows[value_col], errors='coerce').to_numpy(dtype=float)
                 if series_values.size < definition.horizon + definition.min_duration:
                     event_metrics_payload["by_series"][series_name] = {"skipped": "series_too_short"}
@@ -1610,13 +1696,16 @@ def run_backtest(self, job_id: int, parameters: dict):
         if 'source_code' in test_data.columns:
             from backend.modules.engine.backtesting import compare_volatility_baselines
 
-            volatility_value_col = 'Close' if 'Close' in test_data.columns else 'Value'
             volatility_col = 'series_id' if 'series_id' in test_data.columns else 'source_code'
             volatility_payload = {}
             for volatility_series in test_data[volatility_col].unique():
                 volatility_rows = test_data[
                     test_data[volatility_col] == volatility_series
                 ].sort_values('Date')
+                volatility_value_col = select_value_column(volatility_rows)
+                if volatility_value_col is None:
+                    volatility_payload[str(volatility_series)] = {"skipped": "no usable value column"}
+                    continue
                 volatility_values = pd.to_numeric(
                     volatility_rows[volatility_value_col], errors='coerce'
                 ).to_numpy(dtype=float)

@@ -14,6 +14,7 @@ import json
 
 from .models import create_model
 from .model_io import safe_torch_load, safe_torch_save
+from .value_columns import select_value_column
 
 logger = logging.getLogger(__name__)
 
@@ -140,11 +141,19 @@ class MultiSourceDataset(Dataset):
             series = str(source_data[self.series_column].iloc[0])
             source_data = source_data.sort_values('Date')
 
-            # Extract values - use 'Close' column from timeseries data. Gaps are
-            # preserved and imputed with the observed mean below, never carried
-            # forward: forward-filling would present the encoder with a level
-            # that had not been published at that timestamp.
-            value_column = 'Close' if 'Close' in source_data.columns else 'Value'
+            # Extract values - per-series column selection. In the joined panel
+            # frame a 'Close' column always exists (contributed by the OHLC
+            # series), so a frame-wide membership test reads an all-NaN column
+            # for value-only series and silently drops them from training.
+            # Pick the first candidate that actually has non-null values for
+            # THIS series. Gaps are preserved and imputed with the observed
+            # mean below, never carried forward: forward-filling would present
+            # the encoder with a level that had not been published at that
+            # timestamp.
+            value_column = select_value_column(source_data)
+            if value_column is None:
+                logger.warning("Skipping series '%s' – no usable value column", series)
+                continue
             values = (
                 pd.to_numeric(source_data[value_column], errors='coerce')
                 .to_numpy(dtype=float)
@@ -684,7 +693,10 @@ class MultiScaleTrainer:
             if source_id is None:
                 continue
             frame = test_dataset.data[test_dataset.data['source_code'] == source].sort_values('Date')
-            value_col = 'Close' if 'Close' in frame.columns else 'Value'
+            value_col = select_value_column(frame)
+            if value_col is None:
+                per_source[source] = {"skipped": "no usable value column"}
+                continue
             values = pd.to_numeric(frame[value_col], errors='coerce').to_numpy(dtype=float)
             values = values[np.isfinite(values)]
             if values.size < seq_len + 10:
