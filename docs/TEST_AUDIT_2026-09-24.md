@@ -120,6 +120,41 @@ plugin, validator_anomalies test), `datetime.utcnow()` (fred_plugin), a torch
 testclient deprecation from the venv. Code-side cleanup candidates; none affect
 validity.
 
+### F7 — The CI deep leg was red for the L-48 gate on every run since v6.0.5 (found by the audit's CI dispatch; fixed)
+
+The audit's `gh workflow run backend-tests.yml --ref <branch>` dispatch failed
+2 tests, and the same failure was already present in the 2026-09-24 08:46 UTC
+nightly on `main` (run 35977227135) — so it is not a branch problem:
+
+```
+FAILED backend/tests/test_changelog_history_gate.py::test_live_tree_is_covered
+       AssertionError: changelog-history: no release tag reachable from HEAD
+FAILED backend/tests/test_release_tooling.py::test_release_dry_run_computes_the_next_version_without_writing
+       AssertionError: release: changelog-history: no release tag reachable from HEAD
+```
+
+Root cause: `backend-tests.yml`'s checkout is the `actions/checkout` default —
+`fetch-depth: 1`, `fetch-tags: false` (the runner fetches literally
+`git fetch --no-tags --depth=1`). In that clone `git tag --list v*` is empty and
+no tagged commit object exists, so `scripts/check_changelog_history.py`'s base
+lookup ("highest-semver release tag reachable from HEAD") has no candidates and
+exits "no release tag reachable from HEAD". The gate works in a local full clone
+and at release-cut time on the operator's machine; it was never evaluable on a
+CI runner. The last green nightly (2026-09-23 08:50) predated the L-48 code —
+it checked out a tree in which the gate script and its test did not exist yet.
+
+**Fix (landed with this PR):** `backend-tests.yml` checks out with
+`fetch-depth: 0` and `fetch-tags: true` — the deep leg is the CI equivalent of a
+local full clone, and the gate tests run on the repository's real git state.
+Cost: the full clone (~145 MB), seconds on a warm runner against a 30-minute
+job. The dispatch re-run after the fix is the evidence.
+
+Consequence to expect (by design, per the L-41 flow): once this PR merges, `main`
+carries an uncovered consumer merge (#141) until the next release branch adds the
+`[Unreleased]` entry naming it — a deep nightly in that window reports
+"uncovered merge" until the release cut moves the block. That is the documented
+cycle, not a regression.
+
 ## Cost profile (167 s local run, top consumers)
 
 ```
@@ -146,7 +181,9 @@ All four items were approved on 2026-09-24 and landed together:
    referenced it updated (`backend-tests.yml`, `workflows/README.md`).
 3. Stale figures fixed in `CONTRIBUTING.md` and the spec-count comment in
    `frontend-e2e.yml` (F4).
-4. F3 resolved as **keep all**: the ~269 tests over census-listed modules stand
+4. `backend-tests.yml` checkout given `fetch-depth: 0` + `fetch-tags: true` so
+   the changelog-history gate is evaluable in CI (F7); dispatch re-run green.
+5. F3 resolved as **keep all**: the ~269 tests over census-listed modules stand
    as the repo's deliberate "recorded rather than deleted" insurance.
 
 Post-cleanup local numbers: a bare local run is `2192 passed, 12 skipped` (the

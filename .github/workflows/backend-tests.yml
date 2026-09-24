@@ -99,6 +99,21 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          # why: this job's gate tests run on the REAL repository's git state,
+          # and the default checkout (depth 1, no tags) has neither.
+          # test_changelog_history_gate.py::test_live_tree_is_covered and
+          # test_release_tooling.py's dry run both base their check on the
+          # highest-semver release tag reachable from HEAD
+          # (scripts/check_changelog_history.py): with a depth-1, no-tag clone
+          # `git tag --list v*` is empty and the gate dies with
+          # "no release tag reachable from HEAD" -- the whole job has been red
+          # since the L-48 gate first ran in CI. The deep leg is the CI
+          # equivalent of a local full clone, so it must have the full history
+          # and the tags. Cost: ~145 MB of extra clone, seconds on a warm
+          # runner against this job's 30-minute budget.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Python
         uses: actions/setup-python@v7
