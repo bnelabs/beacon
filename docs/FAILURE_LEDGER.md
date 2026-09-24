@@ -649,15 +649,25 @@ could ever reach because the guard in front of it was itself broken:
    `(TypeError, ValueError)` guard in the loop, so the first series that
    had ever survived the window guard would have crashed the entire
    training job.
+3. **`mean_lift` aggregated the wrong shape.** `payload["lift"]` is
+   `{baseline: {metric: value|None}}`, but the aggregate loop filtered
+   its *values* with `isinstance(lift, (int, float))` — always false for
+   the per-metric dicts — so `mean_lift` was `null` even once sources
+   were measured.
 
 Detected by: offline replay of the job-20 test split through the guard
 (IR_US_10Y has 1,335 finite test values → 1,305 valid windows, yet job 22
-skipped it). Mitigation: drop the trailing window so features and targets
-align 1:1, and reshape the adapter's features to 2-D. Status: **OPEN** —
+skipped it), and by an offline end-to-end run of `_baseline_comparison`
+on the real job-20 splits with a small model, which measured 19 of 53
+sources after the first two fixes and then showed `mean_lift` still null.
+Mitigation: drop the trailing window so features and targets align 1:1,
+reshape the adapter's features to 2-D, and aggregate the per-baseline r2
+lift (positive = model beats the baseline). Status: **OPEN** —
 mitigation in branch `fix/612-baseline-walkforward-offbyone`; regression
 tests in `backend/tests/test_trainer_composition.py`
 (`TestBaselineComparison`); close requires the retrain on the fixed code to
-report at least one measured per-source baseline entry.
+report at least one measured per-source baseline entry and a finite
+`mean_lift`.
 
 ## D. Test and CI infrastructure that lied
 

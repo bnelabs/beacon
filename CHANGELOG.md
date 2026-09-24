@@ -21,9 +21,13 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   `(batch, seq_len, 1)` while the model's forward takes `(batch,
   seq_len)`; that `RuntimeError` is not caught by the `(TypeError,
   ValueError)` guard and would have crashed the training job the first
-  time a series reached measurement. The trailing window is now dropped so
-  features and targets align 1:1 and the adapter feeds 2-D features, so a
-  retrain reports a real lift against persistence/AR(1) per source.
+  time a series reached measurement. Third, the `mean_lift` aggregate
+  filtered `payload["lift"]` values with an `isinstance(…, (int, float))`
+  check, but those values are per-metric dicts — so `mean_lift` was `null`
+  even with measured sources. The trailing window is now dropped so
+  features and targets align 1:1, the adapter feeds 2-D features, and the
+  aggregate takes the per-baseline r2 lift, so a retrain reports a real
+  lift against persistence/AR(1) per source plus a finite `mean_lift`.
 
 ## [6.1.1] - 2026-09-24
 

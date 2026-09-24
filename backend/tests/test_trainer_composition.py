@@ -542,6 +542,9 @@ class TestBaselineComparison:
             f"measured, got: {entry}"
         )
         assert "primary_metrics" in entry and "lift" in entry
+        # The aggregate must be a real number, not the null that the
+        # dict-valued lift used to produce through an isinstance filter.
+        assert isinstance(result["mean_lift"], float) and np.isfinite(result["mean_lift"])
 
     def test_short_series_is_skipped_honestly(self):
         trainer, _ = self._trainer_with_test_dataset()

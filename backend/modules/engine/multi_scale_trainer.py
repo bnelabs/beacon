@@ -796,9 +796,15 @@ class MultiScaleTrainer:
                 "baseline_metrics": {name: res["metrics"] for name, res in payload["baselines"].items()},
                 "lift": payload["lift"],
             }
-            for lift in payload["lift"].values():
-                if isinstance(lift, (int, float)) and np.isfinite(lift):
-                    lifts.append(float(lift))
+            # Scalar lift for the aggregate: the r2 lift per baseline
+            # (positive = the model beats that baseline on out-of-sample R^2).
+            # payload["lift"] is {baseline: {metric: value|None}} -- iterating
+            # its values sees dicts, so an isinstance(…, (int, float)) filter
+            # appends nothing and mean_lift was null even with measured sources.
+            for per_metric in payload["lift"].values():
+                value = per_metric.get("r2")
+                if value is not None and isinstance(value, (int, float)) and np.isfinite(value):
+                    lifts.append(float(value))
 
         if not per_source:
             return None
