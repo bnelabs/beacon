@@ -10,7 +10,7 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Added
-- **Background scenario jobs with a hard two-scenario concurrency cap.**
+- **Background scenario jobs with a hard two-scenario concurrency cap (PR #151).**
   A new `scenario` job type runs the exact scenario simulation of the
   synchronous `POST /api/v1/models/{model_id}/simulate` endpoint in the
   background: `POST /api/v1/jobs {"job_type": "scenario", ...}` is routed by
@@ -22,7 +22,7 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   so both paths produce the same response and store under the same
   `/app/results/scenarios/{model_id}/{scenario_id}/` layout; the completed
   job's `result` is the `ScenarioResponse` payload itself.
-- **Batched cross-source inference on the prediction path.**
+- **Batched cross-source inference on the prediction path (PR #151).**
   `RealPredictionEngine._predict_single` now scores every source's final
   window and every held-out calibration window in two batched forward passes
   (per-row source ids) instead of one forward per source per pass. The
@@ -32,10 +32,14 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   interval fitting, uncertainty decomposition, regime labels and result
   assembly are one shared computation on both paths, pinned by
   `test_batched_inference_equivalence.py`.
-- **Fixed a latent datetime defect on the job failure path** (naive/aware
-  `started_at` subtraction in `update_job_status`, which crashed the
-  failed-job update on SQLite-backed deployments and any driver that
-  round-trips timestamps without offsets).
+
+### Fixed
+- **Naive/aware `started_at` subtraction on the job failure path (PR #151).**
+  `update_job_status` crashed when writing `elapsed` for a completed/failed
+  job whose stored `started_at` came back offset-naive (SQLite round-trips
+  datetimes without offsets; Postgres returns them aware). The timestamp is
+  now normalised to UTC before the subtraction, so the failure path works on
+  both drivers and on the test database.
 
 ## [6.1.3] - 2026-09-24
 
