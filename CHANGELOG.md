@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.1.3] - 2026-09-24
+
 ### Fixed
 - **Baseline comparison no longer silently excludes the compound-id feeds (L-61 defect 4, PR #149).**
   `_baseline_comparison` resolved each series key through `source_to_id`
