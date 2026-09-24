@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import datetime
 import requests
 import logging
+from backend.exceptions import DataSourceUnavailableError
 from .base import DataSourcePlugin, register_plugin
 
 logger = logging.getLogger(__name__)
@@ -219,6 +220,26 @@ class WorldBankPlugin(DataSourcePlugin):
                 logger.warning(f"No data returned for {indicator_id} from World Bank")
                 return None
 
+        except requests.RequestException as e:
+            # Preserve the provider outage as retryable instead of converting
+            # it to ``None``: the collector's bounded retry policy can recover
+            # from a transient World Bank timeout or connection failure, and
+            # an empty frame is reserved for a reachable API that genuinely
+            # has no data. A 4xx response is not a provider outage -- the
+            # indicator code is wrong and retrying will not help, so it
+            # keeps the empty-dataset semantics.
+            status = getattr(e, "response", None)
+            if isinstance(e, requests.HTTPError) and status is not None and 400 <= status.status_code < 500:
+                logger.error(
+                    f"World Bank API rejected {indicator_id} with HTTP {status.status_code}: {e}"
+                )
+                return None
+            logger.error(f"World Bank provider unavailable for {indicator_id}: {e}")
+            raise DataSourceUnavailableError(
+                f"World Bank API unavailable for '{indicator_id}'",
+                context={"indicator": indicator_id, "provider": "world_bank"},
+                cause=e,
+            ) from e
         except Exception as e:
             logger.error(f"Error fetching indicator {indicator_id} from World Bank: {e}")
             return None

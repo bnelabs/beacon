@@ -238,6 +238,91 @@ def _apply_adjustments(df: pd.DataFrame, adjustments: List[ScenarioAdjustment], 
     return scenario_df
 
 
+def _run_network_clearing(df: pd.DataFrame, scenario_parameters: dict) -> Optional[dict]:
+    """Clear the interbank network for network-type scenario parameters.
+
+    Runs the Eisenberg-Noe multiplex clearing on the latest quarter of the
+    AI4Risk edge rows. Two assumptions are DECLARED in the output, never
+    silently made:
+
+    * edge orientation: ``sourceid -> targetid`` is read as "sourceid holds a
+      claim on targetid", so ``liabilities[debtor, creditor]`` is built from
+      ``(targetid, sourceid)``. The upstream dataset does not document the
+      orientation, so the result is conditional on this reading;
+    * endowments: the dataset carries no balance sheets, so each bank's
+      endowment is ``endowment_fraction`` times its gross total exposure
+      (default 1.0). A failed bank's endowment is set to zero -- that is the
+      default event driving the cascade.
+    """
+    if not any(key in scenario_parameters for key in ('failed_bank_id', 'interbank_lending_reduction')):
+        return None
+    if 'source_bank' not in df.columns or 'target_bank' not in df.columns:
+        return {"skipped": "no interbank edge rows in the payload"}
+    edges = df[df['source_bank'].notna()]
+    if edges.empty:
+        return {"skipped": "no interbank edge rows in the payload"}
+
+    latest_date = edges['Date'].max()
+    latest = edges[edges['Date'] == latest_date]
+
+    # The interbank panel carries a small number of negative values
+    # (~0.8% of edges): a negative "exposure" is not a liability the
+    # Eisenberg-Noe map can price, so those rows are excluded and the
+    # exclusion is declared in the output rather than absorbed silently.
+    exposures: dict = {}
+    dropped_nonpositive = 0
+    for row in latest.to_dict(orient='records'):
+        value = row.get('Value')
+        if value is None:
+            continue
+        value = float(value)
+        if not math.isfinite(value) or value <= 0:
+            dropped_nonpositive += 1
+            continue
+        debtor = str(row['target_bank'])
+        creditor = str(row['source_bank'])
+        if debtor == creditor:
+            continue
+        exposures[(debtor, creditor)] = exposures.get((debtor, creditor), 0.0) + value
+
+    node_ids = sorted({bank for pair in exposures for bank in pair})
+    index = {bank: position for position, bank in enumerate(node_ids)}
+    n = len(node_ids)
+    matrix = [[0.0] * n for _ in range(n)]
+    for (debtor, creditor), amount in exposures.items():
+        matrix[index[debtor]][index[creditor]] += amount
+    gross = {bank: 0.0 for bank in node_ids}
+    for (debtor, _creditor), amount in exposures.items():
+        gross[debtor] += amount
+
+    fraction = float(scenario_parameters.get('endowment_fraction', 1.0))
+    endowments = [fraction * gross[bank] for bank in node_ids]
+    failed_bank = scenario_parameters.get('failed_bank_id')
+    failed_bank_note = None
+    if failed_bank is not None:
+        if failed_bank not in index:
+            return {
+                "skipped": f"failed bank {failed_bank!r} is not present in the "
+                           "latest network quarter"
+            }
+        endowments[index[failed_bank]] = 0.0
+        failed_bank_note = {"bank": failed_bank, "endowment": 0.0}
+
+    import numpy as np
+    from backend.modules.risk.clearing import clear_multiplex, NetworkLayer
+
+    result = clear_multiplex([NetworkLayer('interbank', np.asarray(matrix))], endowments, node_ids=node_ids)
+    payload = result.to_dict()
+    payload['declared_assumptions'] = {
+        'edge_orientation': 'sourceid holds a claim on targetid (upstream does not document orientation)',
+        'endowments': f'{fraction} x gross total exposure per bank (no balance sheets in dataset)',
+        'as_of': str(latest_date),
+        'failed_bank': failed_bank_note,
+        'dropped_nonpositive_edges': dropped_nonpositive,
+    }
+    return payload
+
+
 @router.post("/{model_id}/simulate", response_model=ScenarioResponse)
 async def simulate_model(
     model_id: int,
@@ -298,6 +383,22 @@ async def simulate_model(
             quality_attestation=attestation,
         )
 
+        # Rich scenario parameters (type, rate_cut_bps, failed_bank_id, ...).
+        # The legacy adjustments above are applied first; the named scenario
+        # transforms run on top of them through the engine's apply_scenario.
+        # The nested ``adjustments`` field is the same legacy mechanism,
+        # already applied via the top-level field, so it is dropped here.
+        scenario_parameters = scenario.scenario.model_dump(exclude_none=True)
+        scenario_parameters.pop("adjustments", None)
+        if scenario_parameters:
+            adjusted_df = engine.apply_scenario(adjusted_df, scenario_parameters)
+
+        # Network propagation: when the scenario carries network parameters,
+        # clear the latest interbank quarter under the declared assumptions
+        # (see _run_network_clearing). The ML scores below are unaffected;
+        # the clearing is attached to the result as its own block.
+        network_analysis = _run_network_clearing(adjusted_df, scenario_parameters)
+
         # The scenario adjustments transform the frame, so the attestation is
         # passed explicitly rather than relying on frame metadata surviving the
         # reshape. It attests the source dataset the scenario is applied to.
@@ -333,6 +434,8 @@ async def simulate_model(
             "horizon_days": scenario.horizon_days,
             "created_at": timestamp.isoformat(),
             "adjustments": [adjustment.dict() for adjustment in scenario.adjustments],
+            "scenario_parameters": scenario_parameters,
+            "network_analysis": network_analysis,
             "executive_summary": prediction_result.executive_summary,
             "feature_importances": feature_importances,
         }
@@ -368,6 +471,8 @@ async def simulate_model(
             summary=summary,
             predictions=predictions,
             adjustments=scenario.adjustments,
+            scenario_parameters=scenario_parameters,
+            network_analysis=network_analysis,
             executive_summary=prediction_result.executive_summary,
             feature_importances=feature_importances,
             storage_path=str(predictions_path),

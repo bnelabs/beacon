@@ -19,7 +19,12 @@ KNOWN_SEC_CIKS = {
     # multi-megabyte ticker manifest makes those jobs independent of a second
     # SEC endpoint that is especially prone to proxy/read timeouts.
     "JPM": "0000019617",
-    "BLK": "0001364742",
+    # BlackRock, Inc. -- the current 13F-HR filer (continuous through
+    # 2026-08-07). The previous value, 0001364742, is BlackRock **Finance**,
+    # Inc., whose last 13F-HR ended 2024-08-13: a keyless BLK row pointed at
+    # it silently collected data 25 months stale (the 2026-09-24 review's
+    # F2). If the filer changes again, update here and in the catalogue.
+    "BLK": "0002012383",
 }
 
 

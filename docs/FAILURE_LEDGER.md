@@ -189,6 +189,54 @@ any tracked file (grep-verified at every phase), recorded endpoints redact
 **rotate both** — until confirmed, treat both as burned. Status: **OPEN**
 (owner action).
 
+**L-57. A transient World Bank timeout killed an entire strict collection
+run because the plugin misclassified it as empty data.** `world_bank_plugin`
+caught *all* exceptions and returned `None`, which the collector reads as
+"empty dataset" — and `EmptyDatasetError` is not retried (only
+`DataSourceUnavailableError` is: 3 attempts, 120 s budget). Job 14, the first
+2000–2026 strict run, failed on a single 30 s read timeout to
+api.worldbank.org (`WB_DOMESTIC_CREDIT_ZA`); the upstream data was verified
+live seconds later (< 1 s, 25 non-null rows 2000–2024). Detected by: the
+2026-09-24 review (F1), with the live probe as the witness. Mitigation: the
+plugin now distinguishes 4xx (indicator not in catalogue → `None`, a
+decision) from `requests.RequestException` (timeout, connection failure, 5xx
+→ `DataSourceUnavailableError`, retryable), mirroring the SEC plugin.
+Status: **OPEN** — mitigation in branch `fix/610-data-training-fidelity`,
+pattern covered by `backend/tests/test_imf_plugin.py`'s error-path tests
+(the same class of transport).
+
+**L-58. The SEC 13F catalogue item pointed at a retired filer CIK, so the
+holdings series silently stopped in 2024-08.** The item resolved ticker
+`BLK` to CIK 0001364742 (BlackRock **Finance**, Inc.), whose last 13F-HR is
+2024-08-13; the current filer is BlackRock, Inc., CIK 0002012383 (13F-HR
+through 2026-08-07). The collector happily fetched the dead CIK's history —
+a stale series presented as current. Detected by: the 2026-09-24 review's
+per-source freshness audit (F2). Mitigation: `data_catalogue` id 33
+endpoint repointed to `0002012383.13F-HR` (verified in the live DB; job 16
+then collected the current 8 filings), and `KNOWN_SEC_CIKS["BLK"]` in
+`sec_plugin.py` corrected with the retired CIK documented. Status:
+**FIXED** (ops) + **OPEN** (code hardening in branch
+`fix/610-data-training-fidelity`).
+
+**L-59. The IMF plugin's default path pointed at a retired endpoint, and the
+two IMF catalogue items could never resolve.** `dataservices.imf.org/REST/
+SDMX_JSON.svc` is retired upstream, so the legacy `Database.Frequency.
+Country.Indicator` identifiers (items 41 `FSI.A.US.FSIRE_PA_PT`, 42
+`IFS.M.US.RAFA_BP6_USD`) could not resolve, and a DataMapper attempt had
+been made against the wrong response shape. The current public API is
+DataMapper (`/api/v1/{INDICATOR}/{COUNTRY}`, dict-of-dicts of
+year→value — verified live; it ignores the country path segment and the
+`periods` parameter, so both are applied locally). Probe result: the
+DataMapper catalogue (132 indicators) contains **no FSI family at all**, and
+its reserve indicators (BRASS_MI, Reserves_ARA/M2/STD/M) are emerging-market
+only with no USA data — so items 41/42 have no current equivalent and stay
+disabled, with the reason written into their catalogue descriptions rather
+than left as silent dead rows. Mitigation: the plugin's DataMapper path is
+now correct and typed (4xx → `None`, network/5xx →
+`DataSourceUnavailableError`), verified live on `NGDP_RPCH/USA` (27 points
+2000–2026). Status: **OPEN** — mitigation in branch
+`fix/610-data-training-fidelity`, `backend/tests/test_imf_plugin.py`.
+
 ## C. API and engine honesty bugs
 
 **L-11. The v2 predictions API fabricated scores.** `_extract_nodes` coerced
@@ -418,8 +466,105 @@ feed-keyed and normalisation statistics are looked up at the checkpoint's grain.
 (target-alignment seams, walk-forward folds, `by_series` event metrics, the
 volatility track and the validation report) were updated in the same breath.
 
-**L-45. The vintage reader's `published_at` compared equal in CI but not on SQLite,
-because one backend returned the column aware and the other naive.** `vintage_log_001`
+**L-51. The multi-scale dataset builder silently trained on 11 of 71 series:
+the value-column choice read the schema, not the data.** The joined collection
+panel carries `Close` (populated by the OHLC series) on every row, so the
+frame-wide rule `'Close' if 'Close' in frame.columns else 'Value'` was always
+true and every series read `Close`. The 60 value-only series (all FRED rates,
+macro, banking, credit, oil, SEC, BIS, World Bank) read all-NaN and were
+dropped as "no observed values": job 17 trained on 5 FX, 5 equities and gold
+only, while the certified job-16 package carried 26 years of the rest. The
+defect was not confined to training: the same rule in the prediction and
+backtest paths fed degenerate all-zero input, which the model scored as a
+constant equal to its own risk score (e.g. IR_US_10Y `prediction ==
+risk_score == -0.1151`, regime `None`) — garbage that presented as a signal.
+Detected by: the 2026-09-24 production review (`REVIEW-2026-09-24.md` F9),
+cross-checked against the job-16 parquet per series. Mitigation:
+`backend/modules/engine/value_columns.py` (`select_value_column` — the first
+candidate column with at least one non-null value, checking the data), used
+by all six read sites (trainer dataset builder, baseline comparison, risk
+series, prediction, and both backtest metric blocks). Verified on the real
+package: all 67 scalar series enter training (was 11), 145,715 sequences
+(was 14,511). Status: **OPEN** — mitigation in branch `fix/610-data-training-fidelity`,
+retrain + re-backtest to follow.
+
+**L-52. The rich `ScenarioParameters` were inert on the API simulate path,
+and the engine transforms that were reachable were miscalibrated.** The
+simulate route applied only legacy `adjustments` (last-N-days on a value
+column list) and never called `engine.apply_scenario`, so `rate_cut_bps`,
+`failed_bank_id`, `stock_drop_pct`, `interbank_lending_reduction`, … — the
+parameters the schema advertises — did nothing; a `type` without parameters
+fell through to `custom` and applied nothing either. Even the reachable
+transforms were wrong in four ways: rate shocks used `/10000` on percent-scaled
+series (under-scaled by 100×) with the sign inverted against the schema
+("negative for hikes"); every transform touched only the `Value` column,
+missing the OHLC series (`Close`) the market model actually watches; the
+`market_crash` price mask matched `STOCK_VIX`, so volatility took a price
+drop and a spike in the same run; and `bank_failure`/`liquidity_freeze`
+gated on columns (`bank_id`, whole-frame `Value`) the AI4Risk edge frames
+do not carry (`source_bank`/`target_bank`). Detected by: the 2026-09-24
+review (F6) plus a read of `apply_scenario` against the schema and the real
+edge frame. Mitigation: the route now passes `scenario.scenario
+.model_dump(exclude_none=True)` through `apply_scenario`; the type is
+inferred from the parameters present when absent; `_transform_values`
+applies every candidate value column; rate units/sign corrected; edge
+frames handled; `regional_shock` without a `region` column logs a declared
+no-op instead of failing silently; `combined` recurses into every applicable
+subtype. Status: **OPEN** — mitigation in branch `fix/610-data-training-fidelity`,
+unit tests in `backend/tests/test_scenario_transforms.py`.
+
+**L-53. The brief report displayed anomaly findings as failed checks.**
+`/api/v2/reports/brief/{id}` rendered `anomalies_detected` under the `failed`
+key: job 16 showed "failed: 18197" while 71/71 sources were collected and no
+quality check failed — 18,197 validator warnings read at a glance as 18,197
+failures. Mitigation: `failed` now carries the collection report's failed
+count and `anomalies_detected`/`anomalies_fixed` are their own fields.
+Status: **OPEN** — mitigation in branch `fix/610-data-training-fidelity`.
+
+**L-54. The backtest reported metrics with no ground truth to compare them
+against.** The collection package carries no target column, so the backtest
+fell through to a "No ground truth column in the test window" note and
+reported only prediction statistics — the numbers that decide "is the model
+useful" were never compared to anything. Mitigation: `derive_standardized_targets`
+pairs each score with the standardized next-step actual of the same series,
+standardized on the pre-test window only (standardizing on the test window
+would leak the evaluated split into the target; series without pre-test
+history get NaN targets and are excluded rather than scored on statistics
+they never saw). The derivation is declared in the job result
+(`target_derivation`). Status: **OPEN** — mitigation in branch
+`fix/610-data-training-fidelity`, unit tests in
+`backend/tests/test_backtest_target_derivation.py`.
+
+**L-55. The multi-scale trainer's walk-forward baseline comparison was
+permanently `null`.** The trainer honestly reported "not measured" instead of
+lifting the model against persistence/AR(1) baselines — so the complexity of
+the multi-scale architecture went unpriced while the single-scale trainer
+had reported the same metric since round two. The failure mode was the
+same value-column defect as L-51: the denormalized baseline series were read
+from the wrong column and the comparison blew up. Status: **OPEN** —
+mitigated by the L-51 fix (baseline comparison now selects the value column
+per series); the retrain after the fix must show a non-null
+`baseline_comparison` to close.
+
+**L-56. The simulate endpoint could not run a network scenario at all.**
+`engine.predict` accepts `bank_exposures`/`bank_endowments` for the
+Eisenberg-Noe clearing, but nothing in the API path built them: a
+`bank_failure` or `liquidity_freeze` scenario transformed the frame but
+propagated nothing through the interbank network, so the systemic part of
+the scenario catalogue was unreachable from the API. Two further facts make
+a naive wiring dishonest, and the wiring declares them instead: the AI4Risk
+edge orientation is not documented upstream (the wiring reads
+`sourceid → targetid` as "sourceid holds a claim on targetid" and says so in
+the output), and the dataset carries no balance sheets, so endowments are a
+declared fraction of gross total exposure (parameter `endowment_fraction`,
+default 1.0; a failed bank's endowment is zeroed — that is the default
+event). Mitigation: `_run_network_clearing` in the simulate route clears the
+latest quarter of the edge rows through `clearing.clear_multiplex` and
+attaches the result with its `declared_assumptions` block. Status: **OPEN**
+— mitigation in branch `fix/610-data-training-fidelity`, unit tests in
+`backend/tests/test_network_scenario_clearing.py`.
+
+## D. Test and CI infrastructure that lied
 writes `published_at` as `DateTime(timezone=True)`. PostgreSQL hands those values back
 aware; SQLite's `DATETIME` has no timezone support and hands back a naive one. So the
 assertion that pins the backfill's point-in-time contract — `row.published_at == the

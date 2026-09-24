@@ -6,6 +6,7 @@ from datetime import datetime
 import requests
 import logging
 from .base import DataSourcePlugin, register_plugin
+from backend.exceptions import DataSourceUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -17,15 +18,18 @@ class IMFPlugin(DataSourcePlugin):
     """
     International Monetary Fund (IMF) Data API plugin.
 
-    Data from: IMF Data API
-    Documentation: https://datahelp.imf.org/knowledgebase/articles/667681-using-json-restful-web-service
+    Data from: IMF DataMapper (current public JSON API)
+    Documentation: https://www.imf.org/external/datamapper/api/v1
 
-    Features:
-    - International Financial Statistics (IFS)
-    - Balance of Payments (BOP)
-    - Government Finance Statistics (GFS)
-    - World Economic Outlook (WEO)
-    - No API key required
+    Indicator identifiers use the DataMapper form ``INDICATOR/COUNTRY``
+    (e.g. ``NGDP_RPCH/USA``, ``BRASS_MI/USA``). The DataMapper catalogue is
+    available at ``{base}/indicators``. The legacy SDMX form
+    ``Database.Frequency.Country.Indicator`` is retained only as a
+    compatibility path for an operator-provided IMF gateway: the SDMX
+    endpoint (dataservices.imf.org) is retired, so identifiers in that
+    form will not resolve against the public API.
+
+    No API key required.
     """
 
     def validate_config(self) -> None:
@@ -147,23 +151,42 @@ class IMFPlugin(DataSourcePlugin):
         """
         try:
             # DataMapper identifiers can be passed as ``INDICATOR/COUNTRY``
-            # when an operator selects a current IMF DataMapper series.
+            # when an operator selects a current IMF DataMapper series. The
+            # API ignores the country path segment and the ``periods``
+            # parameter (it returns every country and every year), so the
+            # country key and the date window are applied locally below.
             if "/" in indicator_id:
                 indicator, country = indicator_id.split("/", 1)
-                response = requests.get(
-                    f"{DATAMAPPER_BASE_URL}/{indicator}/{country}",
-                    params={
-                        "periods": ",".join(
-                            str(year) for year in range(start_date.year, end_date.year + 1)
+                try:
+                    response = requests.get(
+                        f"{DATAMAPPER_BASE_URL}/{indicator}/{country}",
+                        headers={"Accept": "application/json", "User-Agent": DEFAULT_IMF_USER_AGENT},
+                        timeout=float(self.config.get("timeout", 30)),
+                    )
+                    if 400 <= response.status_code < 500:
+                        # The indicator or country is not in the DataMapper
+                        # catalogue: a decision, not a blip.
+                        logger.error(
+                            "IMF DataMapper returned %s for %s "
+                            "(indicator or country not in catalogue)",
+                            response.status_code, indicator_id,
                         )
-                    },
-                    headers={"Accept": "application/json", "User-Agent": DEFAULT_IMF_USER_AGENT},
-                    timeout=float(self.config.get("timeout", 30)),
-                )
-                response.raise_for_status()
+                        return None
+                    response.raise_for_status()
+                except requests.RequestException as e:
+                    # Transient provider outage: retryable by the collector.
+                    raise DataSourceUnavailableError(
+                        f"IMF DataMapper unavailable for '{indicator_id}'",
+                        context={"indicator": indicator_id, "provider": "imf"},
+                        cause=e,
+                    )
                 payload = response.json()
                 country_values = payload.get("values", {}).get(indicator, {}).get(country, {})
                 if not country_values:
+                    logger.warning(
+                        "No DataMapper data for %s (indicator or country missing from catalogue)",
+                        indicator_id,
+                    )
                     return None
                 result = pd.DataFrame(
                     {
@@ -224,6 +247,10 @@ class IMFPlugin(DataSourcePlugin):
                 logger.warning(f"No data returned for {indicator_id} from IMF")
                 return None
 
+        except DataSourceUnavailableError:
+            # Transient provider outage: let the collector's bounded retry
+            # decide (mirrors the World Bank and SEC plugins).
+            raise
         except Exception as e:
             logger.error(f"Error fetching indicator {indicator_id} from IMF: {e}")
             return None
@@ -325,7 +352,7 @@ class IMFPlugin(DataSourcePlugin):
             "note": {
                 "type": "info",
                 "label": "Indicator Format",
-                "description": "Use format: Database.Frequency.Country.Indicator (e.g., IFS.M.US.PMP_IX)"
+                "description": "Use DataMapper format: INDICATOR/COUNTRY (e.g., NGDP_RPCH/USA). The legacy SDMX form Database.Frequency.Country.Indicator only resolves against an operator-provided gateway."
             }
         }
 
@@ -335,7 +362,7 @@ class IMFPlugin(DataSourcePlugin):
         return {
             "name": "International Monetary Fund (IMF)",
             "description": "Free access to IMF Data - International Financial Statistics (IFS), Balance of Payments, Government Finance Statistics, World Economic Outlook. No API key required.",
-            "version": "1.0.0",
+            "version": "1.1.0",
             "author": "BEACON",
             "free": True,
             "registration_required": False,

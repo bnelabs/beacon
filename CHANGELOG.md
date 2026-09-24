@@ -9,6 +9,14 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Changed
+- **Test-suite audit cleanup (PR #141).** The backend test suite no longer
+  falls back to the live stack implicitly: tests that needed the running
+  docker stack now fail loudly instead of reading production state, the
+  docker-scope test that had never run was deleted, and stale numbers in
+  test fixtures were corrected. Test-only change; deployed behaviour is
+  unchanged.
+
 ## [6.0.5] - 2026-09-23
 
 ### Added

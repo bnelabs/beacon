@@ -27,7 +27,12 @@ class BriefReportResponse(BaseModel):
     job_id: int
     status: str
     downloaded: int
+    #: Number of data sources that FAILED TO COLLECT. This is not the number
+    #: of unresolved data-quality anomalies; those are reported under
+    #: ``anomalies_detected`` / ``anomalies_fixed``.
     failed: int
+    anomalies_detected: Optional[int] = None
+    anomalies_fixed: Optional[int] = None
     fit_for_purpose_score: Optional[float]
     quality_metrics: BriefQualityMetrics
     coverage_start: Optional[datetime]

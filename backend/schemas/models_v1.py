@@ -90,6 +90,11 @@ class ScenarioParameters(BaseModel):
     # Bank failure parameters
     failed_bank_id: Optional[str] = Field(None, description="ID of bank that fails")
     exposure_haircut: Optional[float] = Field(None, description="Haircut on exposures to failed bank (0.50 = 50% loss)")
+    #: Declared endowment assumption for the Eisenberg-Noe clearing: each
+    #: bank's endowment is this fraction of its gross total exposure. The
+    #: interbank dataset carries no balance sheets, so the clearing is
+    #: conditional on this declaration (reported in the result).
+    endowment_fraction: Optional[float] = Field(None, description="Endowment as fraction of gross total exposure for the clearing (default 1.0)")
 
     # Regional shocks
     regional_shocks: List[RegionalShock] = Field(default_factory=list, description="List of regional shocks to apply")
@@ -133,6 +138,13 @@ class ScenarioResponse(BaseModel):
     summary: Dict[str, Any]
     predictions: List[Dict[str, Any]]
     adjustments: List[ScenarioAdjustment] = Field(default_factory=list)
+    #: The rich scenario parameters as applied ({} when only legacy
+    #: adjustments were supplied).
+    scenario_parameters: Dict[str, Any] = Field(default_factory=dict)
+    #: Eisenberg-Noe clearing of the interbank network for network-type
+    #: scenarios, with its declared assumptions; None when the scenario
+    #: carries no network parameters.
+    network_analysis: Optional[Dict[str, Any]] = None
     executive_summary: Optional[str] = None
     feature_importances: Dict[str, float] = Field(default_factory=dict)
     storage_path: Optional[str] = None
