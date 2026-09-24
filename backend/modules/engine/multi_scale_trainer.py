@@ -753,11 +753,70 @@ class MultiScaleTrainer:
         per_source: Dict[str, Any] = {}
         lifts = []
 
+        series_col = test_dataset.series_column
+        # Series key -> feed code. Panel feeds key their statistics by entity
+        # (for example 'AI4RISK_NETWORK_TOPOLOGY::1::2'), and single-series
+        # feeds can carry a compound entity id ('EXR_EUR_USD::USD/EUR').
+        # Neither key is a source code, so the plain source_to_id lookup
+        # misses them: a silent continue here is how the 12 FX/equity/gold
+        # feeds -- the model's strongest series -- dropped out of the report
+        # without a trace (job 23 measured 19/53 candidates that did not
+        # include any of them).
+        if series_col == 'source_code':
+            # Non-panel frame: the grouping key is the feed code itself.
+            resolved = {str(k): str(k) for k in test_dataset.source_stats}
+        else:
+            observed = (
+                test_dataset.data[[series_col, 'source_code']]
+                .drop_duplicates(subset=series_col)
+                .set_index(series_col)['source_code']
+                .astype(str)
+                .to_dict()
+            )
+            # Entity keys from the training stats that carry no test-window
+            # rows resolve through the feed prefix before the '::' separator
+            # the data formatter uses for compound ids.
+            resolved = {
+                str(k): (
+                    observed.get(k)
+                    or (str(k).split('::')[0] if '::' in str(k) else str(k))
+                )
+                for k in test_dataset.source_stats
+            }
+        # Count entities per feed at the statistics grain, not the test
+        # window: an entity with no test rows still belongs to its feed, and
+        # judging panel-ness from the test window alone misclassifies a feed
+        # whose other entities happen to end before the test start.
+        series_per_source = {src: 0 for src in resolved.values()}
+        for src in resolved.values():
+            series_per_source[src] += 1
+        panel_skipped: set = set()
+
         for source, stats in test_dataset.source_stats.items():
             source_id = test_dataset.source_to_id.get(source)
+            source_code = resolved.get(str(source)) or str(source)
             if source_id is None:
-                continue
-            frame = test_dataset.data[test_dataset.data['source_code'] == source].sort_values('Date')
+                if int(series_per_source.get(source_code, 0)) > 1:
+                    # A panel feed's per-entity walk-forward is not affordable
+                    # (thousands of entities); record one honest skip per
+                    # feed instead of silently dropping it from the report.
+                    if source_code not in panel_skipped:
+                        panel_skipped.add(source_code)
+                        per_source[source_code] = {
+                            "skipped": "panel feed; per-entity walk-forward not measured"
+                        }
+                    continue
+                # Single-series feed with a compound entity id: still
+                # measurable on its own window, under the feed's source id
+                # (the one the model was trained with).
+                source_id = test_dataset.source_to_id.get(source_code)
+                if source_id is None:
+                    per_source[str(source)] = {"skipped": "no source id mapping"}
+                    continue
+                series_key = source
+            else:
+                series_key = source
+            frame = test_dataset.data[test_dataset.data[series_col] == series_key].sort_values('Date')
             value_col = select_value_column(frame)
             if value_col is None:
                 per_source[source] = {"skipped": "no usable value column"}
