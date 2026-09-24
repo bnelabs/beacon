@@ -53,11 +53,12 @@ EXPECTED_SERVICES = {
     "backend",
     "celery-worker",
     "celery-beat",
+    "scenario-worker",
     "frontend",
 }
 
 #: Services that run the backend image and therefore must not build their own.
-BACKEND_SERVICES = ("migrate", "backend", "celery-worker", "celery-beat")
+BACKEND_SERVICES = ("migrate", "backend", "celery-worker", "celery-beat", "scenario-worker")
 
 VALID_CONDITIONS = {
     "service_started",
@@ -124,7 +125,7 @@ def check_stack(name: str, merged: Dict[str, Any], report: Report) -> None:
     images = {n: services.get(n, {}).get("image") for n in BACKEND_SERVICES}
     report.check(
         len(set(images.values())) == 1 and None not in images.values(),
-        f"migrate/backend/celery-worker share one image (got {sorted(set(map(str, images.values())))})",
+        f"all backend services share one image (got {sorted(set(map(str, images.values())))})",
         name,
     )
     builders = [n for n in BACKEND_SERVICES if "build" in services.get(n, {})]
@@ -169,7 +170,7 @@ def check_stack(name: str, merged: Dict[str, Any], report: Report) -> None:
         )
 
     # -- ordering ------------------------------------------------------------
-    for svc in ("backend", "celery-worker"):
+    for svc in ("backend", "celery-worker", "scenario-worker"):
         deps = _depends_on(services.get(svc, {}))
         report.check(
             deps.get("migrate", {}).get("condition") == "service_completed_successfully",

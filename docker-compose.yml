@@ -210,6 +210,46 @@ services:
     restart: unless-stopped
     command: celery -A backend.tasks.celery_app worker --loglevel=info --concurrency=2
 
+  # Scenario queue: scenario jobs are long inference runs (per-source model
+  # scoring plus regime fits), so they run off the default queue on this
+  # dedicated worker. Concurrency is deliberately 2: two scenarios at a time
+  # is the hard cap, scenario work never competes with collection/training/
+  # prediction/backtest on the main worker, and each scenario's failure stays
+  # inside its own job. Same image, same boot order, same mounts.
+  scenario-worker:
+    image: *backend-image
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-beacon_user}:${POSTGRES_PASSWORD:-beacon_password}@postgres:5432/${POSTGRES_DB:-beacon_db}?client_encoding=utf8
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      PYTHONPATH: /app
+      BEACON_RUN_MIGRATIONS: "0"
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      PYTHONIOENCODING: utf-8
+      FRED_API_KEY: ${FRED_API_KEY:-}
+      ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
+      SEC_API_KEY: ${SEC_API_KEY:-}
+      FMP_API_KEY: ${FMP_API_KEY:-}
+    volumes:
+      - ./configs:/app/configs
+      - ./data:/app/data
+      - ./models:/app/saved_models
+      - ./logs:/app/logs
+      - ./results:/app/results
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - beacon-network
+    restart: unless-stopped
+    command: celery -A backend.tasks.celery_app worker --loglevel=info --concurrency=2 -Q scenarios
+
   # The clock. Celery beat ticks every five minutes and enqueues whichever
   # per-source collections are due (data_sources.sync_interval_minutes, with
   # backoff while a feed fails and stable per-source jitter). Same image and

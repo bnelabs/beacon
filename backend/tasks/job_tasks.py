@@ -1843,3 +1843,134 @@ def run_pipeline(
         end_date,
         config or {},
     )
+
+
+@celery_app.task(base=JobTask, bind=True, name="run_scenario")
+def run_scenario(self, job_id: int, parameters: dict):
+    """
+    Run a scenario simulation in the background.
+
+    **For non-technical users:** This applies a "what-if" scenario (market
+    crash, rate shock, liquidity freeze, bank failure, regional shock or
+    legacy adjustments) to the data a model was trained on and scores every
+    series with that model.
+
+    Parameters:
+        model_id: training job id of the model to run the scenario against.
+        scenario: ScenarioParameters object (type, rate_cut_bps, ...).
+        name: scenario display name (optional).
+        horizon_days: legacy-adjustment horizon in days (default 30).
+        adjustments: legacy adjustments list (default empty).
+
+    The result is the ScenarioResponse payload of the synchronous
+    ``POST /api/v1/models/{model_id}/simulate`` endpoint -- same numbers,
+    same storage layout under /app/results/scenarios/{model_id}/{scenario_id}/
+    -- so the two paths are interchangeable and this job type adds queue
+    visibility and concurrency without changing what a scenario computes.
+    """
+    db = SessionLocal()
+    process = psutil.Process(os.getpid())
+    start_memory = process.memory_info().rss / (1024 ** 2)
+
+    try:
+        service = JobService(db)
+        service.update_job_status(job_id, status="running", progress=0.0)
+        logger.info(f"Starting scenario for job {job_id}")
+
+        model_id = parameters.get("model_id")
+        if not model_id:
+            raise ValueError("model_id parameter is required for scenario jobs")
+        model_id = int(model_id)
+
+        scenario_params = parameters.get("scenario")
+        if scenario_params is None:
+            scenario_params = {}
+        if not isinstance(scenario_params, dict):
+            raise ValueError("scenario parameter must be an object")
+
+        # Validate the payload exactly the API does, before the worker burns
+        # a long run on input the route would have rejected with a 422.
+        from pydantic import ValidationError
+        from backend.schemas.models_v1 import ScenarioAdjustment, ScenarioRequest, ScenarioParameters
+        from backend.services.scenario_service import ScenarioError, execute_scenario
+
+        try:
+            request = ScenarioRequest(
+                name=parameters.get("name"),
+                scenario=ScenarioParameters(**scenario_params),
+                horizon_days=int(parameters.get("horizon_days", 30)),
+                adjustments=[
+                    ScenarioAdjustment(**adjustment)
+                    for adjustment in (parameters.get("adjustments") or [])
+                ],
+            )
+        except (ValidationError, TypeError) as exc:
+            raise ValueError(f"Invalid scenario payload: {exc}")
+
+        self.update_progress(job_id, 10.0)
+
+        response = execute_scenario(db, model_id, request)
+
+        self.update_progress(job_id, 90.0)
+
+        # The synchronous endpoint returns this model as JSON; the job result
+        # carries the same fields (datetimes as ISO strings, numpy-free).
+        def json_ready(obj):
+            if isinstance(obj, dict):
+                return {k: json_ready(v) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple)):
+                return [json_ready(v) for v in obj]
+            if isinstance(obj, (np.bool_,)):
+                return bool(obj)
+            if isinstance(obj, np.integer):
+                return int(obj)
+            if isinstance(obj, np.floating):
+                return float(obj)
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            return obj
+
+        result = json_ready(response.model_dump())
+        result["scenario_id"] = response.scenario_id
+
+        service.update_job_status(
+            job_id,
+            status="completed",
+            progress=100.0,
+            result=result
+        )
+
+        db_job = service.get_job(job_id)
+        if db_job:
+            end_memory = process.memory_info().rss / (1024 ** 2)
+            db_job.peak_memory_mb = end_memory - start_memory
+            db.commit()
+
+        logger.info(f"Scenario completed for job {job_id} (scenario_id {response.scenario_id})")
+        return result
+
+    except ScenarioError as exc:
+        # Same rejection the synchronous endpoint answers 404/400 with.
+        logger.error(f"Scenario rejected for job {job_id}: {exc}")
+        user_friendly = translate_error(exc, context="running scenario")
+        service.update_job_status(
+            job_id,
+            status="failed",
+            error_message=str(exc),
+            user_friendly_error=error_details_to_json(user_friendly)
+        )
+        raise
+    except Exception as e:
+        logger.error(f"Scenario failed for job {job_id}: {e}\n{traceback.format_exc()}")
+        user_friendly = translate_error(e, context="running scenario")
+        service.update_job_status(
+            job_id,
+            status="failed",
+            error_message=str(e),
+            user_friendly_error=error_details_to_json(user_friendly)
+        )
+        raise
+    finally:
+        db.close()

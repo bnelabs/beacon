@@ -58,7 +58,8 @@ def dispatch_job(self, job_id: int, job_type: str, parameters: dict = None):
         run_data_collection,
         run_training,
         run_prediction,
-        run_backtest
+        run_backtest,
+        run_scenario,
     )
 
     # Map job types to task functions
@@ -66,14 +67,21 @@ def dispatch_job(self, job_id: int, job_type: str, parameters: dict = None):
         "data_collection": run_data_collection,
         "training": run_training,
         "prediction": run_prediction,
-        "backtest": run_backtest
+        "backtest": run_backtest,
+        "scenario": run_scenario,
     }
 
     task_func = task_map.get(job_type)
     if not task_func:
         raise ValueError(f"Unknown job type: {job_type}")
 
-    # Execute the appropriate task
+    # Scenario jobs run on their own queue, consumed by the dedicated
+    # scenario-worker (concurrency 2): a scenario is a long inference run,
+    # and two concurrent scenarios must never starve collection, training,
+    # prediction or backtest work on the main worker, nor each other beyond
+    # the declared cap. Every other job type keeps the default queue.
+    if job_type == "scenario":
+        return task_func.apply_async(args=[job_id, parameters or {}], queue="scenarios")
     return task_func.apply_async(args=[job_id, parameters or {}])
 
 
