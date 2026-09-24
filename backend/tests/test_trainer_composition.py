@@ -31,6 +31,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from backend.modules.engine.multi_scale_trainer import (  # noqa: E402
+    MultiScaleTemporalAttentionModel,
     MultiScaleTrainer,
     MultiSourceDataset,
     is_degenerate_standardization,
@@ -471,3 +472,99 @@ class TestDegenerateStandardization:
         assert unclipped > 1000, "fixture no longer reproduces the blowup"
         assert np.abs(eval_dataset.sequences).max() <= 10.0 + 1e-6
         assert np.abs(eval_dataset.targets).max() <= 10.0 + 1e-6
+
+
+class TestBaselineComparison:
+    """The walk-forward baseline comparison must actually measure a source
+    that has enough windows, instead of skipping everything.
+
+    Two latent defects hid in this path and were only reachable once a series
+    survived the window-count guard:
+    1. sliding_window_view yields n - seq_len + 1 windows while targets_raw
+       has n - seq_len entries, so the size guard fired for EVERY long series
+       and every source was skipped ("not enough windows"), leaving
+       mean_lift null.
+    2. the frozen-model adapter reshaped features to (batch, seq_len, 1) but
+       the model's forward takes (batch, seq_len); the resulting RuntimeError
+       is not caught by the (TypeError, ValueError) guard and would have
+       crashed the training job.
+    """
+
+    SEQ = 30
+    N_TRAIN = 200
+    N_TEST = 100  # -> 70 windows after the off-by-one drop; 61 would be <30? no: 100-30=70 >= 30
+
+    def _trainer_with_test_dataset(self):
+        dates = pd.date_range("2024-01-01", periods=self.N_TRAIN + self.N_TEST, freq="D")
+        rng = np.random.default_rng(7)
+        values = 100.0 + rng.normal(0.0, 1.0, self.N_TRAIN + self.N_TEST).cumsum()
+        frame = pd.DataFrame({
+            "Date": dates, "date": dates, "Value": values,
+            "source_code": "SRC_RATES",
+        })
+        train_df = frame.iloc[: self.N_TRAIN].reset_index(drop=True)
+        test_df = frame.iloc[self.N_TRAIN :].reset_index(drop=True)
+        train_dataset = MultiSourceDataset(train_df, sequence_length=self.SEQ)
+        test_dataset = MultiSourceDataset(
+            test_df,
+            sequence_length=self.SEQ,
+            source_to_id=train_dataset.source_to_id,
+            source_stats=train_dataset.source_stats,
+        )
+        trainer = MultiScaleTrainer(
+            model_type="temporal_attention",
+            device=torch.device("cpu"),
+            config={
+                "sequence_length": self.SEQ,
+                "d_model": 16,
+                "nhead": 2,
+                "num_layers": 1,
+                "dropout": 0.1,
+            },
+        )
+        trainer.model = MultiScaleTemporalAttentionModel(
+            num_sources=len(train_dataset.sources),
+            sequence_length=self.SEQ,
+            d_model=16,
+            nhead=2,
+            num_layers=1,
+            dropout=0.1,
+        )
+        return trainer, test_dataset
+
+    def test_long_series_is_measured_not_skipped(self):
+        trainer, test_dataset = self._trainer_with_test_dataset()
+        result = trainer._baseline_comparison(test_dataset)
+        assert result is not None
+        entry = result["per_source"]["SRC_RATES"]
+        assert "skipped" not in entry, (
+            f"100-point series has {self.N_TEST - self.SEQ} windows and must be "
+            f"measured, got: {entry}"
+        )
+        assert "primary_metrics" in entry and "lift" in entry
+        # The aggregate must be a real number, not the null that the
+        # dict-valued lift used to produce through an isinstance filter.
+        assert isinstance(result["mean_lift"], float) and np.isfinite(result["mean_lift"])
+
+    def test_short_series_is_skipped_honestly(self):
+        trainer, _ = self._trainer_with_test_dataset()
+        dates = pd.date_range("2024-01-01", periods=30, freq="D")
+        rng = np.random.default_rng(8)
+        short = pd.DataFrame({
+            "Date": dates, "date": dates,
+            "Value": 50.0 + rng.normal(0.0, 1.0, 30).cumsum(),
+            "source_code": "SRC_SHORT",
+        })
+        train_df = short.iloc[:20].reset_index(drop=True)
+        test_df = short.iloc[20:].reset_index(drop=True)
+        train_dataset = MultiSourceDataset(train_df, sequence_length=self.SEQ)
+        test_dataset = MultiSourceDataset(
+            test_df,
+            sequence_length=self.SEQ,
+            source_to_id=train_dataset.source_to_id,
+            source_stats=train_dataset.source_stats,
+        )
+        # 10 test points < seq_len + 10: an honest skip, not a silent drop.
+        result = trainer._baseline_comparison(test_dataset)
+        entry = result["per_source"]["SRC_SHORT"]
+        assert "skipped" in entry

@@ -735,7 +735,12 @@ class MultiScaleTrainer:
 
             def predict(self, X):
                 flat = np.asarray(X, dtype=np.float32)
-                windows = flat.reshape(-1, self.seq_len, 1)
+                # The model's forward takes (batch, sequence_length); the old
+                # (batch, seq_len, 1) reshape raised a RuntimeError inside
+                # walk-forward folds, which the (TypeError, ValueError) guard
+                # below does not catch and which would have crashed the whole
+                # training job the first time a series reached measurement.
+                windows = flat.reshape(-1, self.seq_len)
                 model = self.trainer.model
                 model.eval()
                 with torch.no_grad():
@@ -765,6 +770,14 @@ class MultiScaleTrainer:
             normalized = (values - stats['mean']) / stats['std']
             windows = np.lib.stride_tricks.sliding_window_view(normalized, seq_len)
             targets_raw = values[seq_len:]
+            # The sliding view yields n - seq_len + 1 windows; the last one ends
+            # on the final observation and has no next value to predict, while
+            # targets_raw has n - seq_len entries. Dropping the trailing window
+            # is what makes features and targets align 1:1 -- before that fix
+            # the size guard below was true for EVERY long series, so the
+            # whole baseline comparison silently skipped every source and
+            # reported mean_lift null even on series with thousands of windows.
+            windows = windows[: targets_raw.shape[0]]
             if windows.shape[0] < 30 or targets_raw.size != windows.shape[0]:
                 per_source[source] = {"skipped": "not enough windows"}
                 continue
@@ -783,9 +796,15 @@ class MultiScaleTrainer:
                 "baseline_metrics": {name: res["metrics"] for name, res in payload["baselines"].items()},
                 "lift": payload["lift"],
             }
-            for lift in payload["lift"].values():
-                if isinstance(lift, (int, float)) and np.isfinite(lift):
-                    lifts.append(float(lift))
+            # Scalar lift for the aggregate: the r2 lift per baseline
+            # (positive = the model beats that baseline on out-of-sample R^2).
+            # payload["lift"] is {baseline: {metric: value|None}} -- iterating
+            # its values sees dicts, so an isinstance(…, (int, float)) filter
+            # appends nothing and mean_lift was null even with measured sources.
+            for per_metric in payload["lift"].values():
+                value = per_metric.get("r2")
+                if value is not None and isinstance(value, (int, float)) and np.isfinite(value):
+                    lifts.append(float(value))
 
         if not per_source:
             return None
