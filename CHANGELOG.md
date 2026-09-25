@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.2.2] - 2026-09-25
+
 ### Fixed
 - **Source-embedding fallbacks are now recorded, not silent (PR #157).**
   Feeds the checkpoint never saw are scored with source embedding id 0 —
