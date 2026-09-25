@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.2.1] - 2026-09-25
+
 ### Fixed
 - **Scenario job results no longer fail to persist (PR #153).** A completed
   scenario's result carries the full `ScenarioResponse`, whose refused
