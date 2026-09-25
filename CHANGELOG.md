@@ -10,6 +10,19 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Fixed
+- **Source-embedding fallbacks are now recorded, not silent (PR #157).**
+  Feeds the checkpoint never saw are scored with source embedding id 0 —
+  which, with the enumerate()-built source map, is also the embedding of
+  the FIRST trained source, so their scores carry the wrong per-source
+  component. The prediction job's `score_semantics` now carries
+  `embedding_fallback` per source, `RiskSeriesResult` gains
+  `embedding_provenance` ("trained" | "fallback_id_0" per feed, in the
+  result and in `to_dict()`), and the backtest result records
+  `source_embedding_provenance` when the risk series is built. No scoring
+  behaviour changes: the same ids are passed to the model; only the
+  provenance is recorded. Pairs with the PR #156 coordinate fix — together
+  they make both silent-fallback classes the 2026-09-25 audit measured
+  explicit in the results.
 - **Backtest targets are now scored in the model's own coordinate (PR #156).**
   The backtest paired each prediction against a standardized next-step
   actual, but the target's standardization statistics were re-fit on the
