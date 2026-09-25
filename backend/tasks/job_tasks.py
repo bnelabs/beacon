@@ -1410,6 +1410,15 @@ def run_backtest(self, job_id: int, parameters: dict):
                 "prediction_count": int(pred_values.size),
             }
 
+            # Which source embedding each feed's scores used. A "fallback_id_0"
+            # entry names a feed the checkpoint never saw: its scores carry
+            # the first trained feed's embedding, not its own.
+            embedding_prov = dict(
+                getattr(risk_series, "embedding_provenance", {}) or {}
+            )
+            if embedding_prov:
+                backtest_metrics["source_embedding_provenance"] = embedding_prov
+
             target_col = (
                 'actual_risk' if 'actual_risk' in test_data.columns
                 else 'target' if 'target' in test_data.columns

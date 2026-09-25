@@ -175,6 +175,8 @@ class TestPredictNormalizesPerSource:
         assert predictions["stats_provenance"] == {
             source: "checkpoint" for source in SOURCES
         }
+        # Every feed in this payload was trained: no embedding fallback.
+        assert predictions["embedding_fallback"] == {}
 
     def test_sources_without_checkpoint_stats_are_flagged_as_optimistic(
         self, orchestrator, caplog
@@ -193,6 +195,9 @@ class TestPredictNormalizesPerSource:
         )
         assert predictions["stats_provenance"]["SRC_UNSEEN"] == "payload"
         assert predictions["scores"].size == 3 * (12 - SEQUENCE_LENGTH + 1)
+        # The unseen feed is scored with the fallback embedding id 0, which
+        # is also the first trained feed's embedding -- recorded, not silent.
+        assert predictions["embedding_fallback"] == {"SRC_UNSEEN": "fallback_id_0"}
 
     def test_insufficient_history_yields_no_scores(self, orchestrator):
         tiny = _payload(rows=SEQUENCE_LENGTH)  # no source can fill a window+1
@@ -212,6 +217,8 @@ class TestRiskScoreSemantics:
         assert result.overall_score == pytest.approx(np.mean([0.1, -0.2, 0.3]))
         assert result.score_semantics["calibrated"] is False
         assert "standardized" in result.score_semantics["units"]
+        # Older prediction payloads without the new fields degrade to empty.
+        assert result.score_semantics["embedding_fallback"] == {}
         # Operational risk stays a real measurement from the DATA stage.
         assert result.operational_risk["data_quality_score"] == 90.0
         assert result.operational_risk["process_risk"] == pytest.approx(10.0)
