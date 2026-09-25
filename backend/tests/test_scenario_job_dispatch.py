@@ -176,3 +176,67 @@ def test_failed_scenario_job_fails_itself_with_its_own_error(
     session.refresh(job)
     assert job.status == "failed"
     assert "Model job 999 not found" in (job.error_message or "")
+
+
+class TestJsonReady:
+    """The job ``result`` column is Postgres ``json`` (strict JSON).
+
+    Scenario responses carry refused conformal intervals as NaN bounds;
+    ``json_ready`` must turn every non-finite value into ``null`` or the
+    completed-job write dies with ``invalid input syntax for type json``
+    (Token "NaN" is invalid) — which is exactly what the first live
+    6.2.0 deployment run hit.
+    """
+
+    @staticmethod
+    def _ready():
+        from backend.tasks.job_tasks import json_ready
+
+        return json_ready
+
+    def test_non_finite_floats_become_null(self):
+        ready = self._ready()
+        assert ready(float("nan")) is None
+        assert ready(float("inf")) is None
+        assert ready(float("-inf")) is None
+
+    def test_finite_values_pass_through(self):
+        ready = self._ready()
+        assert ready(1.5) == 1.5
+        assert ready(0.0) == 0.0
+        assert ready(3) == 3
+        assert ready("scenario") == "scenario"
+        assert ready(None) is None
+
+    def test_numpy_and_datetime_conversions(self):
+        import numpy as np
+        from datetime import datetime, timezone
+
+        ready = self._ready()
+        assert ready(np.float64("nan")) is None
+        assert ready(np.float64(1.25)) == 1.25
+        assert ready(np.array([1.0, float("nan"), 3.0])) == [1.0, None, 3.0]
+        assert ready(np.bool_(True)) is True
+        assert ready(datetime(2026, 9, 24, tzinfo=timezone.utc)) == "2026-09-24T00:00:00+00:00"
+
+    def test_nested_scenario_shaped_payload_is_strict_json(self):
+        import json as jsonlib
+
+        import numpy as np
+
+        ready = self._ready()
+        payload = ready(
+            {
+                "summary": {"avg_risk_score": 0.259, "num_series": 71},
+                "predictions": [
+                    {"source": "A", "confidence_lower": float("nan"), "risk_score": 0.1},
+                    {"source": "B", "confidence_lower": -1.2, "risk_score": np.float64(2.4)},
+                ],
+                "network_analysis": None,
+            }
+        )
+        text = jsonlib.dumps(payload)
+        assert "NaN" not in text and "Infinity" not in text
+        parsed = jsonlib.loads(text)
+        assert parsed["predictions"][0]["confidence_lower"] is None
+        assert parsed["predictions"][1]["risk_score"] == 2.4

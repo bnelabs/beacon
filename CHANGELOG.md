@@ -9,6 +9,17 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Fixed
+- **Scenario job results no longer fail to persist (PR #153).** A completed
+  scenario's result carries the full `ScenarioResponse`, whose refused
+  conformal intervals use NaN confidence bounds. `json_ready` now maps every
+  non-finite float (NaN, ±inf) to `null` before persistence — the job
+  `result` column is Postgres `json`, which only accepts strict JSON and
+  rejected the `NaN` token (the first live 6.2.0 deployment run failed at
+  progress 90 for exactly this reason). The stored `null` carries the same
+  "no interval" meaning the response already conveys; the synchronous
+  endpoint's response shape is unchanged.
+
 ## [6.2.0] - 2026-09-24
 
 ### Added

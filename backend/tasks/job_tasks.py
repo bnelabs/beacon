@@ -17,6 +17,7 @@ from backend.modules.engine.value_columns import select_value_column
 from backend.services.job_service import JobService
 from backend.services.enhanced_error_translator import translate_error_enhanced as translate_error
 import json
+import math
 from dataclasses import asdict
 import numpy as np
 import pandas as pd
@@ -38,6 +39,34 @@ def convert_numpy_types(obj):
         return {k: convert_numpy_types(v) for k, v in obj.items()}
     elif isinstance(obj, (list, tuple)):
         return [convert_numpy_types(item) for item in obj]
+    return obj
+
+
+def json_ready(obj):
+    """Make a value safe to persist in the job ``result`` column.
+
+    The column is Postgres ``json``, which accepts only strict JSON — and
+    strict JSON has no representation for NaN or ±inf. Refused conformal
+    intervals (NaN bounds) and similar non-finite values are therefore
+    stored as ``null``, which carries exactly the "no value / no interval"
+    meaning the response already conveys. numpy types become native,
+    datetimes become ISO strings.
+    """
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: json_ready(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [json_ready(v) for v in obj]
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.ndarray):
+        return json_ready(obj.tolist())
+    if isinstance(obj, (float, np.floating)):
+        value = float(obj)
+        return value if math.isfinite(value) else None
     return obj
 
 
@@ -1914,24 +1943,8 @@ def run_scenario(self, job_id: int, parameters: dict):
         self.update_progress(job_id, 90.0)
 
         # The synchronous endpoint returns this model as JSON; the job result
-        # carries the same fields (datetimes as ISO strings, numpy-free).
-        def json_ready(obj):
-            if isinstance(obj, dict):
-                return {k: json_ready(v) for k, v in obj.items()}
-            if isinstance(obj, (list, tuple)):
-                return [json_ready(v) for v in obj]
-            if isinstance(obj, (np.bool_,)):
-                return bool(obj)
-            if isinstance(obj, np.integer):
-                return int(obj)
-            if isinstance(obj, np.floating):
-                return float(obj)
-            if isinstance(obj, np.ndarray):
-                return obj.tolist()
-            if isinstance(obj, datetime):
-                return obj.isoformat()
-            return obj
-
+        # carries the same fields (datetimes as ISO strings, numpy-free, and
+        # non-finite floats as null for the strict-json result column).
         result = json_ready(response.model_dump())
         result["scenario_id"] = response.scenario_id
 
