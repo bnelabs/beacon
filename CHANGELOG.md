@@ -10,7 +10,7 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Fixed
-- **Scenario job results no longer fail to persist (PR #TBD).** A completed
+- **Scenario job results no longer fail to persist (PR #153).** A completed
   scenario's result carries the full `ScenarioResponse`, whose refused
   conformal intervals use NaN confidence bounds. `json_ready` now maps every
   non-finite float (NaN, ±inf) to `null` before persistence — the job
