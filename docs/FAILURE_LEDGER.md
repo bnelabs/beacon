@@ -243,6 +243,61 @@ correct and typed, verified live on `NGDP_RPCH/USA` (27 points 2000–2026).
 Catalogue items 41/42 remain disabled with the reason (no DataMapper
 equivalent) written into their descriptions — a declared, not silent, gap.
 
+**L-64. The BIS plugin silently merges three different BIS series into one
+"credit-to-GDP" column, and the stored values are an arbitrary per-date mix
+of them.** `https://stats.bis.org/api/v1/data/WS_CREDIT_GAP/Q.JP` (and the
+`Q.US` / `Q.XM` siblings used for `BIS_CREDIT_TO_GDP_{US,EU,JP}`) returns one
+CSV containing **three overlapping series** distinguished only by the
+`CG_DTYPE` dimension: two credit-to-GDP *level* series (246q / 206q,
+~110–218) and one credit-to-GDP *gap* series (206q, −30…+27).
+`_parse_bis_csv` (backend/plugins/bis_plugin.py) keeps only `TIME_PERIOD` and
+`OBS_VALUE` — dropping every dimension column — then runs
+`sort_values("date")` (unstable quicksort) + `drop_duplicates("date",
+keep="first")`, so exactly one of the three series survives **per date,
+chosen by whatever order the unstable sort happens to leave the duplicate
+rows in**. Result in the store (DB + training snapshot, identical across
+jobs 15/16/20): a Frankenstein series that flips between level and gap
+quarter to quarter (e.g. JP 2000-Q1 −23.11 [gap], 2000-Q2 213.48 [level-B],
+2000-Q3 186.45 [level-A], 2000-Q4 184.75 [level-A], 2001-Q1 210.51
+[level-B]…). Reproduced offline 2026-09-25: running the shipped parser on the
+current API response reproduces the stored values exactly, while a stable
+sort on the same file would give a pure level series — proof that the stored
+mix is a sort-order artifact, not data. The `WS_CREDIT_GAP` family itself is
+the appropriate BIS source for credit-to-GDP gap data; the defect is in the
+parser (dropping the dimension columns, then collapsing distinct
+observations by date), not in the endpoint choice. The quality gate passed
+it: row counts and missingness are fine, and KPSS — warning-only by design —
+finds an oscillating level/gap mix "stationary". Consequence: three of the 71
+training series are semantically corrupt, trained and scored as if they were
+credit-to-GDP ratios; their holdout R² is meaningless. Detected by: live
+re-fetch + block decomposition of the BIS response, vintage-log cross-check,
+and offline parser replay. Status: **OPEN** — fix is to (1) retain the
+dimension columns, select an explicit `CG_DTYPE` per catalogue item, and
+reject (fail loudly) any unresolved duplicate left after deduping on the full
+dimension key — a stable sort alone does not fix the semantic defect, (2)
+add a schema/unit assertion to the quality gate (observed magnitude vs
+declared unit) so a level/gap mix cannot pass silently. Then re-collect and
+retrain.
+
+**L-65. `FRED_REPO_RATE` stores the Fed's Overnight Reverse Repo Facility
+dollar *volume* (`RRPONTSYD`), not a repo *rate*.** Catalogue endpoint
+`RRPONTSYD` is "Overnight RRP Facility: Volume of Residual Collateral" in
+billions of USD, daily. The series is stored under the code/unit
+"repo rate / percentage" and trained as such. Values 0–2,553.7 (2022 peak ≈
+$2.55T; 2026-09-24 = 0.63, matching live FRED) — the data is *genuinely* the
+upstream series, so every numeric check passes; only the semantics are
+wrong. The live backtest ranks it at r²_z = −1.01 (its job-26 holdout R²
+−0.84 is the same artifact), and a live prediction moves it +1,117% in one
+step (0.46 → 5.61) with risk score −1.39 — meaningless as a "rate".
+Detected by: unit/magnitude cross-check against the live FRED endpoint
+description during the 2026-09-25 data audit. Status: **OPEN** — preserve the
+historical identity (no silent re-point of the stored series): either keep
+the existing identity and relabel the catalogue item as Fed overnight RRP
+dollar *volume* (billions USD, daily), excluding it from rate-family
+features, or deliberately assess a separately identified repo-rate series —
+its meaning, unit, and (shorter) coverage — before training on it.
+Re-collect under whichever choice is made.
+
 ## C. API and engine honesty bugs
 
 **L-11. The v2 predictions API fabricated scores.** `_extract_nodes` coerced
