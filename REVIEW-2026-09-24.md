@@ -5,9 +5,9 @@ Author: BEACON agent (goal `goal-f858d7b6`), server `komedi`, all real data, no 
 
 ## 1. Executive summary
 
-- Stack updated v4.0.0 → **v6.2.0** (five official releases cut and published on this run: 6.1.0, 6.1.1, 6.1.2, 6.1.3, 6.2.0; CPU builds), rebuilt healthy at each step; DB pre-dumped before each mutation (`backups/beacon-pre-6.1.0-…sql`, `backups/beacon-pre-6.1.1-…sql`).
+- Stack updated v4.0.0 → **v6.2.1** (six official releases cut and published on this run: 6.1.0, 6.1.1, 6.1.2, 6.1.3, 6.2.0, 6.2.1; CPU builds), rebuilt healthy at each step; DB pre-dumped before each mutation (`backups/beacon-pre-6.1.0-…sql`, `backups/beacon-pre-6.1.1-…sql`).
 - Final certified data package: **job 20**, 71/71 sources, 2000-01-01 → 2026-09-24, **quality 93.96**, 517,625 rows.
-- **Eleven code defects plus one design limitation found; every code-level defect is fixed and shipped** — 6.1.0 (PR #143: value-column selection, scenario parameters, network scenarios, backtest ground truth, brief-report label, WB/IMF retryability, SEC CIK), 6.1.1 (PR #145: degenerate standardization + bounded objective), 6.1.2 (PR #147), 6.1.3 (PR #149: walk-forward baseline comparison complete), 6.2.0 (PR #151: background scenario jobs + batched inference). The failure ledger (`docs/FAILURE_LEDGER.md`, L-43…L-62) records each finding with status and evidence; L-62 (scenario scores invariant under uniform affine shocks) is the one recorded design limitation, with the evidence in §7.3.
+- **Twelve code defects plus one design limitation found; every code-level defect is fixed and shipped** — 6.1.0 (PR #143: value-column selection, scenario parameters, network scenarios, backtest ground truth, brief-report label, WB/IMF retryability, SEC CIK), 6.1.1 (PR #145: degenerate standardization + bounded objective), 6.1.2 (PR #147), 6.1.3 (PR #149: walk-forward baseline comparison complete), 6.2.0 (PR #151: background scenario jobs + batched inference), 6.2.1 (PR #153: strict-JSON-safe scenario job results). The failure ledger (`docs/FAILURE_LEDGER.md`, L-43…L-63) records each finding with status and evidence; L-62 (scenario scores invariant under uniform affine shocks) is the one recorded design limitation, with the evidence in §7.3.
 - Model retrained on the fixed stack (**job 26 on 6.1.3**, temporal_attention multi-scale, 2000→2026 panel, the final artefact): training objective is O(1) from epoch 1 (was 4.23e18 before the 6.1.1 fix), the walk-forward baseline comparison now measures all 30 measurable sources against persistence/AR(1) (11 beat both), and the backtest scores against leakage-free derived ground truth.
 - **Final verdict on model usefulness:** the model is useful **within its designed role** — predicting the next standardized step of each series (relative move, risk ranking, regime input) — with genuine out-of-sample skill on low-drift, mean-reverting series (rates, FX, VIX) and an honest, documented failure on trending equity-index levels. It is not a level forecaster for trending assets, and the report says so wherever the numbers appear. Details: §6–§7.
 
@@ -15,7 +15,7 @@ Author: BEACON agent (goal `goal-f858d7b6`), server `komedi`, all real data, no 
 
 | Item | Before | After |
 |---|---|---|
-| Image | beacon-backend v4.0.0 (local) | v6.2.0 (tag `v6.2.0`), CPU torch build; 6.1.0/6.1.1/6.1.2/6.1.3 also deployed and verified during the run |
+| Image | beacon-backend v4.0.0 (local) | v6.2.1 (tag `v6.2.1`), CPU torch build; 6.1.0/6.1.1/6.1.2/6.1.3/6.2.0 also deployed and verified during the run |
 | Schema | `data_frequency_contract_001` | `vintage_provenance_001` (3 migrations applied by migrate service) |
 | GPU | NVML driver/library mismatch (unusable) | CPU deployment (matches previous `Devices=[]`) |
 | Ownership | models/, logs/, results/ root-owned → container user (uid 1000) could not write | `chown 1000:1000` |
@@ -175,6 +175,8 @@ Every response carries `scenario_parameters` (verifying the F6 fix end-to-end) a
 2. **Systemic propagation is now measurable.** The Eisenberg–Noe clearing responds as designed and is honest about its assumptions: the 70% interbank lending freeze is fully absorbed (0 defaults, shortfall 0.0 — under the declared endowment = 1.0×gross-exposure assumption every bank's endowment covers its liabilities), while zeroing bank "0"'s endowment cascades to 1 default, total shortfall 4.83M across 717 contagion edges, converging in 2 iterations. Edge orientation and endowment construction are declared in the output, never silently assumed.
 3. **Outputs are honestly calibrated.** Scores are "standardized units, uncalibrated — not a probability"; intervals are conformal where calibratable and refused where not; provenance is disclosed per series.
 
+**Deployment verification (6.2.0 → 6.2.1).** The table above is the 6.1.3 synchronous run. After the 6.2.0 release, the same scenarios were re-run through the new background path — `POST /api/v1/jobs {"job_type": "scenario", ...}` — four jobs (market crash ×2, bank failure, rate shock) executed on the dedicated scenario worker, exactly two at a time: while the first pair ran, the other two waited in the queue (the strict two-concurrency cap, observed live). Each simulation completed in ~19 minutes and its `predictions.json`/`meta.json` were written to disk — identical in shape to the synchronous path. All four jobs nonetheless ended `failed` at progress 90: the job `result` payload carries the full scenario response, whose refused conformal intervals hold NaN confidence bounds, and the Postgres `json` result column rejected the `NaN` token that `json.dumps` emitted (L-63). 6.2.1 (PR #153) stores non-finite values as `null`; after redeploying, the same four scenarios re-ran (jobs 33–36) and all four reached `completed` with their results persisted and parsing as strict JSON — the 27 refused intervals are exactly the 27 `null` bounds in the stored result. Synchronous-endpoint compatibility was re-verified on 6.2.0: a baseline `simulate` call ran 19m19s and returned the identical summary (avg 0.259, max 2.402, min −1.408, 71 series).
+
 ## 8. Final state
 
 **Done and shipped (this run):**
@@ -186,6 +188,7 @@ Every response carries `scenario_parameters` (verifying the F6 fix end-to-end) a
 | 6.1.2 | #147 | L-61 walk-forward baseline measurement (F11) |
 | 6.1.3 | #149 | L-61 defect 4: compound-id feeds vanished from the baseline report |
 | 6.2.0 | #151 | background scenario jobs (2-concurrency `scenario-worker` on a dedicated queue), batched cross-source inference, naive/aware `started_at` fix on the job failure path |
+| 6.2.1 | #153 | scenario job results persist: non-finite floats (NaN confidence bounds from refused intervals) stored as null — the `result` column is Postgres `json` (strict JSON); caught by the first live 6.2.0 deployment run (L-63) |
 
 **Final verdict — is the model useful?**
 
@@ -199,7 +202,7 @@ The model is a per-series *standardized one-step-ahead* forecaster, and measured
 * **Backtest is below coin-flip direction and we say so.** Aligned holdout R² 0.188, directional accuracy 0.449 (standardized score space). Useful for *ranking* and *regime* (24 stress / 21 calm / 26 none, stable across 6.1.2→6.1.3 reruns), not for sign-picking.
 * **The scenario layer is mechanically sound, with one declared limitation.** End-to-end wiring works (parameters echoed, network clearing computed and converged, storage layout stable, 2-concurrency background jobs on a dedicated queue in 6.2.0). But the rich scenario parameters are uniform affine transforms that the per-series standardisation absorbs, so uniform shocks do not move the ML scores (L-62); only non-uniform shocks (a failed bank) do. The network-clearing block, computed independently of the model, responds correctly and is where systemic propagation is measurable today.
 
-**Bottom line:** deploy it as a standardized risk-ranking and regime monitor for mean-reverting macro series, with the conformal intervals and refusal flags as shipped. Do not deploy it as a directional trading signal, and do not read the scenario ML scores as a response to uniform macro shocks until L-62 is addressed. Every limitation above is named, bounded, and reproduced in the artefacts (jobs 26/27/28, six scenario responses, this report).
+**Bottom line:** deploy it as a standardized risk-ranking and regime monitor for mean-reverting macro series, with the conformal intervals and refusal flags as shipped. Do not deploy it as a directional trading signal, and do not read the scenario ML scores as a response to uniform macro shocks until L-62 is addressed. Every limitation above is named, bounded, and reproduced in the artefacts (jobs 26/27/28, the six synchronous scenario responses and the four background scenario jobs, this report).
 
 **Remaining (named, bounded, not silent):**
 

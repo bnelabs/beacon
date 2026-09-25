@@ -740,6 +740,30 @@ shock shapes that change the variance structure rather than the level),
 which changes the statistical meaning of the scores; it is recorded here and
 in the review report (§7.3, Remaining #6) rather than papered over.
 
+**L-63. The 6.2.0 background scenario jobs completed their simulations but
+failed to persist their results — NaN confidence bounds in the strict-JSON
+job result column.** The `run_scenario` task stores the full
+`ScenarioResponse` as the job `result`; sources without a fitted conformal
+interval carry `confidence_lower`/`confidence_upper` as NaN. `json_ready`,
+which converts numpy types to native, left non-finite floats alone, and
+`json.dumps` (default `allow_nan=True`) emitted the non-standard `NaN`
+token, which the Postgres `json` result column rejects: `invalid input
+syntax for type json: Token "NaN" is invalid`. All four scenario jobs of
+the first live 6.2.0 deployment run (jobs 29–32) failed at progress 90
+this way, although every simulation ran to completion (~19 minutes each,
+two at a time on the dedicated worker) and its `predictions.json` +
+`meta.json` were written to disk. The other job types never store
+per-series intervals, which is why the defect surfaced only on the new
+scenario path. Status: **CLOSED** — fixed in 6.2.1 (PR #153): `json_ready`
+is now module-level and maps every non-finite float (NaN, ±inf) to `null`
+before persistence — the same "no interval" meaning the response already
+conveys — with unit tests pinning the strict-JSON property
+(`backend/tests/test_scenario_job_dispatch.py::TestJsonReady`). Verified:
+redeployed 6.2.1 and re-ran the same four scenarios as background jobs
+(33–36); all four reached `completed` with their results persisted, each
+stored result parses as strict JSON, and the 27 refused intervals are
+exactly the 27 `null` bounds in the stored result.
+
 ## D. Test and CI infrastructure that lied
 
 **L-16. The deep backend suite could not start at all.** The sharded rewrite
