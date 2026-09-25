@@ -134,6 +134,13 @@ class RiskSeriesResult:
     #: is skipped rather than standardised to a degenerate all-zero input,
     #: which would score as a plausible-looking value.
     n_dropped_no_values: int = 0
+    #: Per-feed provenance of the source embedding used: "trained" for feeds
+    #: the checkpoint learned an embedding for, "fallback_id_0" for feeds it
+    #: did not. The fallback id is not an untrained slot -- with an
+    #: enumerate()-built source map, id 0 is also the first trained feed's
+    #: embedding, so a fallback feed's scores carry the wrong per-source
+    #: component.
+    embedding_provenance: Dict[str, str] = field(default_factory=dict)
 
     @property
     def n_steps(self) -> int:
@@ -159,6 +166,7 @@ class RiskSeriesResult:
             "series_ids": list(self.series_ids),
             "truncated": dict(self.truncated),
             "stats_provenance": dict(self.stats_provenance),
+            "embedding_provenance": dict(self.embedding_provenance),
             "batch_size": int(self.batch_size),
             "max_steps": None if self.max_steps is None else int(self.max_steps),
             "n_dropped_no_values": int(self.n_dropped_no_values),
@@ -804,6 +812,7 @@ class RealPredictionEngine:
         group_sizes: List[int] = []
         truncated: Dict[str, int] = {}
         stats_provenance: Dict[str, str] = {}
+        embedding_provenance: Dict[str, str] = {}
         dropped_for_history = 0
         dropped_no_values = 0
 
@@ -887,9 +896,17 @@ class RealPredictionEngine:
             windows = np.lib.stride_tricks.sliding_window_view(normalized, sequence_length)
             # The model's per-source embedding is keyed by the feed, not the
             # entity; the entity's scale is carried by the normalisation above.
-            scores = self._score_windows(
-                windows, self._map_source_id(source_code), window_batch
-            )
+            # The fallback id is not an untrained slot: with an
+            # enumerate()-built source map, id 0 is also the first trained
+            # feed's embedding, so a fallback feed's scores carry the wrong
+            # per-source component. Record that next to the stats provenance
+            # instead of leaving it to the log.
+            source_id = self._map_source_id(source_code)
+            if not self.source_to_id or source_code not in self.source_to_id:
+                embedding_provenance[source_code] = "fallback_id_0"
+            else:
+                embedding_provenance[source_code] = "trained"
+            scores = self._score_windows(windows, source_id, window_batch)
 
             # Row i of `windows` ends at index i + sequence_length - 1, and the
             # model was trained to predict the row AFTER the window end
@@ -956,6 +973,7 @@ class RealPredictionEngine:
             n_dropped_for_history=int(dropped_for_history),
             truncated=truncated,
             stats_provenance=stats_provenance,
+            embedding_provenance=embedding_provenance,
             batch_size=window_batch,
             max_steps=step_cap,
             n_dropped_no_values=int(dropped_no_values),

@@ -452,6 +452,12 @@ class EngineOrchestrator:
         series_parts = []
         endpos_parts = []
         stats_provenance: Dict[str, str] = {}
+        # Feeds scored with the fallback source embedding (id 0). With an
+        # enumerate()-built source map, id 0 is also the embedding of the
+        # FIRST trained source, so a feed never seen during training is
+        # scored with the wrong per-source component; record that instead of
+        # leaving it to the log.
+        embedding_fallback: Dict[str, str] = {}
         dropped_for_history = 0
 
         for raw_series, group in groups:
@@ -536,6 +542,7 @@ class EngineOrchestrator:
                         self.job_id, source,
                     )
                 source_id = 0
+                embedding_fallback[source] = "fallback_id_0"
 
             batch_size = max(1, int(self.config.get('batch_size', 32)))
             chunk_scores = []
@@ -582,6 +589,7 @@ class EngineOrchestrator:
                 "score_end_positions": np.asarray([], dtype=int),
                 "insufficient_history": True,
                 "stats_provenance": stats_provenance,
+                "embedding_fallback": embedding_fallback,
                 "n_dropped_for_history": int(dropped_for_history),
             }
 
@@ -602,6 +610,7 @@ class EngineOrchestrator:
             "score_end_positions": np.concatenate(endpos_parts),
             "insufficient_history": False,
             "stats_provenance": stats_provenance,
+            "embedding_fallback": embedding_fallback,
             "n_dropped_for_history": int(dropped_for_history),
         }
 
@@ -668,6 +677,11 @@ class EngineOrchestrator:
                     "(README.md, Scoring and validation)"
                 ),
                 "stats_provenance": dict(predictions.get("stats_provenance") or {}),
+                # Feeds whose scores carry the fallback source embedding (id 0,
+                # which is also the first trained feed's embedding, not an
+                # untrained slot): their per-source component is not the one
+                # trained for them.
+                "embedding_fallback": dict(predictions.get("embedding_fallback") or {}),
             },
         )
 

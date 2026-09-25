@@ -234,6 +234,31 @@ class TestRiskSeries:
 
         assert set(result.stats_provenance.values()) == {"payload_window"}
 
+    def test_embedding_fallback_is_recorded_per_feed(self, tmp_path):
+        """A feed the checkpoint never saw is scored with the fallback source
+        embedding id 0 -- which is NOT an untrained slot: with an
+        enumerate()-built source map it is the first trained feed's embedding.
+        The substitution is recorded per feed, next to the stats provenance."""
+        path = _checkpoint(tmp_path / "one_source.pt", sources=("SRC_A",))
+        engine = RealPredictionEngine(
+            model_path=str(path),
+            device=torch.device("cpu"),
+            config={},
+            quality_attestation=_attestation(),
+        )
+
+        result = engine.predict_risk_series(_frame(), attestation=_attestation())
+
+        assert result.embedding_provenance == {
+            "SRC_A": "trained",
+            "SRC_B": "fallback_id_0",
+        }
+        decoded = json.loads(json.dumps(result.to_dict(), allow_nan=False))
+        assert decoded["embedding_provenance"] == {
+            "SRC_A": "trained",
+            "SRC_B": "fallback_id_0",
+        }
+
     def test_rolling_inference_is_blocked_without_an_attestation(self, tmp_path):
         blocked = RealPredictionEngine(
             model_path=str(_checkpoint(tmp_path / "blocked.pt")),
@@ -256,6 +281,7 @@ class TestRiskSeries:
         assert decoded["n_series"] == 2
         assert decoded["series_ids"] == list(SOURCES)
         assert decoded["stats_provenance"] == {source: "checkpoint" for source in SOURCES}
+        assert decoded["embedding_provenance"] == {source: "trained" for source in SOURCES}
 
 
 class TestRiskSeriesValidation:
