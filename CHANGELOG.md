@@ -9,6 +9,26 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Fixed
+- **Backtest targets are now scored in the model's own coordinate (PR #).**
+  The backtest paired each prediction against a standardized next-step
+  actual, but the target's standardization statistics were re-fit on the
+  full pre-test window while the model's predictions live in the trained
+  checkpoint's `source_stats` (fit on the train subset). The two unit
+  systems made the pooled R^2/MSE measure the coordinate mismatch, not the
+  model (measured: pooled R^2 0.188 mixed vs 0.361 consistent, n=25,264).
+  `derive_standardized_targets` now resolves each series' target statistics
+  in the same order the engine resolves its input statistics — the
+  checkpoint's `source_stats` where present (series-grain checkpoints),
+  else pre-test window statistics — and records the per-series
+  provenance (`target_stats_provenance`) plus the target coordinate in the
+  result. Series whose input windows had no checkpoint statistics
+  (payload-window in-sample fallback, and fallback source embedding) are
+  excluded from the pooled metrics and named in
+  `non_comparable_series`/`non_comparable_rows_excluded` instead of being
+  silently averaged in. Both paths keep the training clip law and the
+  degenerate-standardization guard.
+
 ## [6.2.1] - 2026-09-25
 
 ### Fixed

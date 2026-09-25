@@ -8,7 +8,7 @@ import psutil
 import os
 from pathlib import Path
 
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 from .celery_app import celery_app
 from backend.database import SessionLocal
@@ -1124,24 +1124,45 @@ def run_prediction(self, job_id: int, parameters: dict):
 def derive_standardized_targets(
     test_data: pd.DataFrame,
     train_data: pd.DataFrame,
-) -> Optional[np.ndarray]:
-    """Derive the backtest ground-truth target the way the model was trained.
+    checkpoint_stats: Optional[Dict[str, Dict[str, float]]] = None,
+    stats_grain: str = "series",
+) -> Tuple[Optional[np.ndarray], Dict[str, str]]:
+    """Derive the backtest ground-truth target in the model's own coordinate.
 
-    The model's training target is the standardized next-step value of each
-    series (normalized[i + window]), so the backtest pairs each score with
-    the standardized actual of the row it predicts. The standardization
-    statistics come from the pre-test window (``train_data``) only:
-    standardizing on the test window would leak the evaluated split into the
-    target, and a series with no pre-test history gets NaN targets and is
-    excluded from the aligned metrics rather than scored on statistics it
-    never saw. The target must follow the SAME law as the training target:
-    the same degenerate-standardization guard (a near-constant pre-test
-    series has no defined scale) and the same +-STANDARDIZED_VALUE_CLIP,
-    so a step change in a tiny-std series contributes a bounded error here
-    exactly as it did in training.
+    The model's prediction is a standardized one-step-ahead value expressed
+    with the trained checkpoint's ``source_stats`` -- the statistics its
+    input windows were standardized with. Scoring that prediction against a
+    target standardized on DIFFERENT statistics compares two different unit
+    systems: the pooled R^2/MSE then measure the coordinate mismatch, not
+    the model (measured 2026-09-25: the deployed checkpoint's statistics
+    were fit on the train subset while the backtest target was standardized
+    on the full pre-test window; pooled R^2 was 0.188 in the mixed
+    coordinate and 0.361 in the consistent one).
 
-    Returns an array aligned positionally to ``test_data``, or ``None`` when
-    no series carries enough pre-test history to standardize on.
+    Resolution order per series:
+
+    1. The checkpoint's ``source_stats`` for the series (series-grain
+       checkpoints only) -- the exact coordinate of the model's output.
+       These statistics were fit on the training split, which precedes the
+       backtest window in the normal case, so using them for the target is
+       leakage-safe.
+    2. Pre-test window statistics (the previous behaviour) for series
+       without checkpoint statistics.
+
+    A series with neither gets NaN targets and is excluded from the aligned
+    metrics rather than scored on statistics it never saw. Both paths follow
+    the SAME law as the training target: the same degenerate-standardization
+    guard (a near-constant series has no defined scale) and the same
+    +-STANDARDIZED_VALUE_CLIP, so a step change in a tiny-std series
+    contributes a bounded error here exactly as it did in training. The
+    pre-test path keeps its ``std + 1e-8`` convention; the checkpoint path
+    divides by the stored ``std``, which already carries that term from the
+    training dataset builder.
+
+    Returns ``(targets, provenance)``: an array aligned positionally to
+    ``test_data`` (or ``None`` when no series can be standardized) and a
+    per-series ``"checkpoint" | "pre_test"`` map of which statistics
+    produced each series' target.
     """
     from backend.modules.engine.multi_scale_trainer import (
         STANDARDIZED_VALUE_CLIP,
@@ -1149,7 +1170,7 @@ def derive_standardized_targets(
     )
 
     if train_data is None or len(train_data) == 0:
-        return None
+        return None, {}
     group_col = 'series_id' if 'series_id' in test_data.columns else 'source_code'
     pre_stats = {}
     for series_name, rows in train_data.groupby(group_col, sort=False):
@@ -1168,27 +1189,46 @@ def derive_standardized_targets(
         if is_degenerate_standardization(mean, std):
             continue
         pre_stats[str(series_name)] = (mean, std)
-    if not pre_stats:
-        return None
+
+    ckpt_stats = checkpoint_stats or {}
+    use_ckpt = stats_grain == 'series' and bool(ckpt_stats)
 
     # Assign by index label, not position: test_data is a date slice of the
     # collection frame, so its index is gapped and a positional assignment
     # into a len(test_data) array would be out of range (and wrong, since
     # the caller reads the target column positionally).
     targets = pd.Series(index=test_data.index, dtype=float)
+    provenance: Dict[str, str] = {}
     for series_name, rows in test_data.groupby(group_col, sort=False):
-        stats = pre_stats.get(str(series_name))
-        if stats is None:
-            continue
+        series = str(series_name)
+        origin = None
+        if use_ckpt and series in ckpt_stats:
+            entry = ckpt_stats[series]
+            mean = float(entry['mean'])
+            std = float(entry['std'])
+            # The stored statistics were already screened by the trainer's
+            # degenerate guard; re-screening guards against hand-edited
+            # checkpoints.
+            if not is_degenerate_standardization(mean, std):
+                origin = "checkpoint"
+        if origin is None:
+            stats = pre_stats.get(series)
+            if stats is None:
+                continue
+            mean, std = stats
+            origin = "pre_test"
         value_col = select_value_column(rows)
         if value_col is None:
             continue
         values = pd.to_numeric(rows[value_col], errors='coerce').to_numpy(dtype=float)
-        z = (values - stats[0]) / stats[1]
+        z = (values - mean) / std
         # Same clipping law as the training target: a step change in a
         # tiny-std series is a bounded error, not a 1e4-1e10 z.
         targets.loc[rows.index] = np.clip(z, -STANDARDIZED_VALUE_CLIP, STANDARDIZED_VALUE_CLIP)
-    return targets.to_numpy()
+        provenance[series] = origin
+    if not provenance:
+        return None, {}
+    return targets.to_numpy(), provenance
 
 
 @celery_app.task(base=JobTask, bind=True, name="run_backtest")
@@ -1377,26 +1417,82 @@ def run_backtest(self, job_id: int, parameters: dict):
             )
 
             # Ground-truth target. The collection package carries no target
-            # column, so derive one the way the model was trained: the
-            # standardized next-step value of each series (the model's target
-            # is normalized[i + window]), standardized on the pre-test window
-            # only (see derive_standardized_targets for the leak argument).
+            # column, so derive one in the coordinate the model's predictions
+            # live in: the standardized next-step value of each series,
+            # standardized with the trained checkpoint's source_stats where
+            # present (the engine's own input coordinate, fit before the
+            # test window), else pre-test window statistics (see
+            # derive_standardized_targets for the coordinate argument).
             target_derivation = None
+            target_provenance: Dict[str, str] = {}
             if target_col is None and 'Date' in test_data.columns:
-                derived = derive_standardized_targets(test_data, train_data)
+                derived, target_provenance = derive_standardized_targets(
+                    test_data,
+                    train_data,
+                    checkpoint_stats=engine.source_stats,
+                    stats_grain=str(getattr(engine, 'stats_grain', 'series')),
+                )
                 if derived is not None:
                     test_data = test_data.copy()
                     test_data['target'] = derived
                     target_col = 'target'
                     target_derivation = (
-                        "derived: standardized next-step value of each series, "
-                        "standardized on the pre-test window only (train_data); "
-                        "series without pre-test history keep NaN targets and are "
-                        "excluded from the aligned metrics"
+                        "derived: standardized next-step value of each series "
+                        "expressed in the model's own output coordinate -- the "
+                        "trained checkpoint's source_stats where present, else "
+                        "pre-test window statistics (train_data); series with "
+                        "neither keep NaN targets and are excluded from the "
+                        "aligned metrics"
                     )
+                    # Series whose input windows had no checkpoint statistics
+                    # were standardized in-sample by the engine (payload-window
+                    # fallback); where the checkpoint has no learned source
+                    # embedding, their source component is the fallback id 0 as
+                    # well. Their predictions do not live in any honest
+                    # out-of-sample coordinate, so their rows are excluded from
+                    # the pooled metrics and named here instead of silently
+                    # averaged in.
+                    pred_provenance = dict(
+                        getattr(risk_series, 'stats_provenance', {}) or {}
+                    )
+                    non_comparable = sorted(
+                        series for series, origin in pred_provenance.items()
+                        if origin == 'payload_window'
+                    )
+                    if non_comparable:
+                        nc_group_col = (
+                            'series_id' if 'series_id' in test_data.columns
+                            else 'source_code'
+                        )
+                        nc_mask = test_data[nc_group_col].isin(non_comparable)
+                        backtest_metrics["non_comparable_series"] = {
+                            series: (
+                                "no checkpoint statistics: the engine standardized "
+                                "its input in-sample (payload-window fallback), so "
+                                "its prediction coordinate is not out-of-sample; "
+                                "excluded from pooled metrics"
+                            )
+                            for series in non_comparable
+                        }
+                        backtest_metrics["non_comparable_rows_excluded"] = int(
+                            nc_mask.sum()
+                        )
+                        test_data.loc[nc_mask, 'target'] = np.nan
+                        logger.warning(
+                            "Backtest job %s: %d series excluded from pooled "
+                            "metrics (no checkpoint statistics): %s",
+                            job_id, len(non_comparable), non_comparable,
+                        )
+                    backtest_metrics["target_coordinate"] = (
+                        "same coordinate as the model's output: the trained "
+                        "checkpoint's source_stats where present, else pre-test "
+                        "window statistics"
+                    )
+                    if target_provenance:
+                        backtest_metrics["target_stats_provenance"] = target_provenance
                     logger.info(
-                        "Backtest job %s: derived targets from pre-test "
-                        "standardization", job_id,
+                        "Backtest job %s: derived targets in the model's output "
+                        "coordinate (checkpoint stats where available)", job_id,
                     )
             if target_col is not None and target_derivation:
                 backtest_metrics["target_derivation"] = target_derivation
@@ -1459,8 +1555,9 @@ def run_backtest(self, job_id: int, parameters: dict):
                     "min_prediction": float(np.min(pred_values)),
                     "max_prediction": float(np.max(pred_values)),
                     "note": "No ground truth column in the test window and no "
-                            "derivable target (no series carries enough "
-                            "pre-test history to standardize on)",
+                            "derivable target (no series carries usable "
+                            "checkpoint statistics or pre-test history to "
+                            "standardize on)",
                 })
         else:
             # No usable series: fall back to the per-source scores so the job still
