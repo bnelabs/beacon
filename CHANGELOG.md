@@ -10,7 +10,7 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 ## [Unreleased]
 
 ### Fixed
-- **Backtest targets are now scored in the model's own coordinate (PR #).**
+- **Backtest targets are now scored in the model's own coordinate (PR #156).**
   The backtest paired each prediction against a standardized next-step
   actual, but the target's standardization statistics were re-fit on the
   full pre-test window while the model's predictions live in the trained
