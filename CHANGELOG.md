@@ -23,6 +23,11 @@ record is the root `VERSION` file; `scripts/release.py` moves the
   provenance is recorded. Pairs with the PR #156 coordinate fix — together
   they make both silent-fallback classes the 2026-09-25 audit measured
   explicit in the results.
+- **`job_type` schema description now includes `scenario` (PR #155).**
+  The final-production-review merge updated the `JobBase.job_type` field
+  description in `backend/schemas/job.py` to enumerate the scenario job
+  type alongside data_collection/training/prediction/backtest.
+  Description-only change; no behaviour change.
 - **Backtest targets are now scored in the model's own coordinate (PR #156).**
   The backtest paired each prediction against a standardized next-step
   actual, but the target's standardization statistics were re-fit on the
