@@ -443,6 +443,21 @@ export default function ModelPerformance() {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader>
+            <CardTitle>Provenance fields to inspect</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="text-xs text-bne-ink-soft list-disc pl-4 space-y-1">
+              <li><code>target_stats_provenance</code>: &quot;checkpoint&quot; | &quot;pre_test&quot; per series — shows which statistics were used to standardize targets.</li>
+              <li><code>source_embedding_provenance</code>: &quot;trained&quot; | &quot;fallback_id_0&quot; per source — indicates trained embedding vs fallback to first source.</li>
+              <li><code>non_comparable_series</code>: series excluded from pooled metrics with reason — e.g., payload-window standardization fallback.</li>
+              <li><code>stats_provenance</code> &amp; <code>embedding_provenance</code> in risk_series block for prediction jobs.</li>
+            </ul>
+            <p className="text-[11px] text-bne-muted mt-2">These fields are now surfaced in backtest and prediction job results after PR #156/#157.</p>
+          </CardContent>
+        </Card>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-2">
             <CardHeader>
