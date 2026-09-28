@@ -435,6 +435,14 @@ export default function ModelPerformance() {
           />
         </div>
 
+        <Card className="border-bne-amber/30 bg-bne-amber/5">
+          <CardContent className="py-4">
+            <p className="text-xs text-bne-ink-soft">
+              <strong>Score semantics:</strong> risk scores are standardized one-step-ahead predictions, unbounded and uncalibrated (risk_level = &quot;uncalibrated&quot;). They are <em>not</em> probabilities. When a backtest or prediction job runs, provenance fields — <code>target_stats_provenance</code>, <code>source_embedding_provenance</code>, and <code>non_comparable_series</code> — are recorded in the job result; inspect the job details for per-series provenance.
+            </p>
+          </CardContent>
+        </Card>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-2">
             <CardHeader>
