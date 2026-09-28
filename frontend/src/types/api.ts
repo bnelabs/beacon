@@ -769,6 +769,10 @@ export interface AnalyticsOverview {
 export interface TimeSeriesPoint {
   date: string
   value: number
+  // Backend may include aggregation metadata; keep optional for forward compatibility
+  count?: number | null
+  min?: number | null
+  max?: number | null
 }
 
 /** `GET /v1/analytics/trends/time-series` envelope. */
