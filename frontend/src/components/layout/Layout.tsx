@@ -12,8 +12,10 @@ export interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const { currentPage } = useRouter()
   return (
-    <div className="flex h-screen bg-bne-paper overflow-hidden">
-      <Sidebar />
+    <div className="flex flex-col md:flex-row h-screen bg-bne-paper overflow-hidden">
+      <div className="hidden md:flex">
+        <Sidebar />
+      </div>
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header />
         <main className="flex-1 overflow-y-auto">
