@@ -98,7 +98,7 @@ function ValidationReportCard({ jobId }: { jobId: string }) {
               Event definition: {data.validation?.definition?.direction === 'down' ? 'falling' : 'rising'} moves
               above the {data.validation?.definition?.quantile} quantile of the {data.validation?.definition?.horizon}-step
               move, sustained {data.validation?.definition?.min_duration}+ steps.
-              Mean ROC AUC across {data.validation?.sources_measured} source(s):{' '}
+              Mean ROC AUC across {data.validation?.series_measured ?? data.validation?.sources_measured} source(s):{' '}
               <span className="bne-figure">{data.validation?.mean_roc_auc == null ? '—' : data.validation.mean_roc_auc.toFixed(3)}</span>
             </p>
             <div className="overflow-x-auto">
@@ -114,7 +114,7 @@ function ValidationReportCard({ jobId }: { jobId: string }) {
                   </tr>
                 </thead>
                 <tbody className="text-bne-ink-soft">
-                  {Object.entries(data.validation?.by_source || {}).map(([source, payload]: [string, ValidationSourceStats | null]) => (
+                  {Object.entries(data.validation?.by_series || data.validation?.by_source || {}).map(([source, payload]: [string, ValidationSourceStats | null]) => (
                     <tr key={source} className="border-t border-bne-line-soft">
                       <td className="py-1.5 pr-4 font-mono text-xs">{source}</td>
                       {payload && payload.roc_auc != null ? (

@@ -326,6 +326,7 @@ function ModelHealthIndicators({ models }: { models: ModelSummary[] }) {
 export default function ModelPerformance() {
   const { data: models, isLoading, error, refetch } = useModels()
   const navigate = useRouter((state) => state.navigate)
+  const [expert, setExpert] = useState(false)
 
   const stats = useMemo(() => {
     if (!models || models.length === 0) {
@@ -396,6 +397,9 @@ export default function ModelPerformance() {
       subtitle="Centralized view of all model metrics, health indicators, and performance trends"
       actions={
         <div className="flex items-center gap-2">
+          <Button variant={expert ? "primary" : "outline"} size="sm" onClick={() => setExpert(v => !v)}>
+            {expert ? 'Expert' : 'Plain'} View
+          </Button>
           <Button variant="outline" size="sm" onClick={() => refetch()}>
             <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -434,6 +438,43 @@ export default function ModelPerformance() {
             subtitle={stats.bestModel ? `R²: ${(stats.bestModel.metrics?.r2 ?? stats.bestModel.metrics?.accuracy ?? 0).toFixed(4)}` : 'No models ready'}
           />
         </div>
+
+        <Card className="border-bne-amber/30 bg-bne-amber/5">
+          <CardContent className="py-4">
+            <p className="text-xs text-bne-ink-soft">
+              <strong>Score semantics:</strong> risk scores are standardized one-step-ahead predictions, unbounded and uncalibrated (risk_level = &quot;uncalibrated&quot;). They are <em>not</em> probabilities. When a backtest or prediction job runs, provenance fields — <code>target_stats_provenance</code>, <code>source_embedding_provenance</code>, and <code>non_comparable_series</code> — are recorded in the job result; inspect the job details for per-series provenance.
+            </p>
+          </CardContent>
+        </Card>
+
+        {expert && (
+          <>
+            <Card>
+              <CardHeader>
+                <CardTitle>Provenance fields to inspect</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ul className="text-xs text-bne-ink-soft list-disc pl-4 space-y-1">
+                  <li><code>target_stats_provenance</code>: &quot;checkpoint&quot; | &quot;pre_test&quot; per series — shows which statistics were used to standardize targets.</li>
+                  <li><code>source_embedding_provenance</code>: &quot;trained&quot; | &quot;fallback_id_0&quot; per source — indicates trained embedding vs fallback to first source.</li>
+                  <li><code>non_comparable_series</code>: series excluded from pooled metrics with reason — e.g., payload-window standardization fallback.</li>
+                  <li><code>stats_provenance</code> &amp; <code>embedding_provenance</code> in risk_series block for prediction jobs.</li>
+                </ul>
+                <p className="text-[11px] text-bne-muted mt-2">These fields are now surfaced in backtest and prediction job results after PR #156/#157.</p>
+              </CardContent>
+            </Card>
+            <Card className="border-bne-moss/30 bg-bne-moss/5">
+              <CardHeader>
+                <CardTitle>Baseline comparisons</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-bne-ink-soft">
+                  Walk-forward baseline comparisons (naive persistence, unconditional volatility) are recorded in backtest results under <code>quant_metrics</code> and <code>volatility_baselines</code>. Expert users should compare model directional accuracy and MSE/MAE against the naive persistence baseline to assess practical value — see job 40 as a verified example after the coordinate fix.
+                </p>
+              </CardContent>
+            </Card>
+          </>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-2">

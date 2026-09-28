@@ -286,9 +286,16 @@ export interface ValidationSourceStats {
 
 export interface ValidationBlock {
   definition?: (Partial<EventDefinitionInput> & Record<string, unknown>) | null
+  // backend returns series_measured; keep sources_measured as alias for compatibility
+  series_measured?: number | null
   sources_measured?: number | null
   mean_roc_auc?: number | null
+  // backend returns by_series; keep by_source as alias
+  by_series?: Record<string, ValidationSourceStats | null> | null
   by_source?: Record<string, ValidationSourceStats | null> | null
+  series_skipped?: Record<string, unknown> | null
+  // additional metrics returned by backend for the validation view
+  quant_metrics?: Record<string, number | null> | null
 }
 
 /** `GET /v2/reports/validation/{jobId}`. Absence of validation is a status
@@ -762,6 +769,10 @@ export interface AnalyticsOverview {
 export interface TimeSeriesPoint {
   date: string
   value: number
+  // Backend may include aggregation metadata; keep optional for forward compatibility
+  count?: number | null
+  min?: number | null
+  max?: number | null
 }
 
 /** `GET /v1/analytics/trends/time-series` envelope. */
