@@ -274,6 +274,8 @@ async def get_scenario(
             summary=summary,
             predictions=predictions,
             adjustments=adjustments,
+            scenario_parameters=meta.get("scenario_parameters") or {},
+            network_analysis=meta.get("network_analysis"),
             executive_summary=meta.get("executive_summary"),
             feature_importances=feature_importances,
             storage_path=str(predictions_path),
