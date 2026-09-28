@@ -285,6 +285,7 @@ function JobDistributionChart({ distribution }: { distribution: Record<string, n
 export default function Analytics() {
   const [timePeriod, setTimePeriod] = useState(30)
   const [selectedMetric, setSelectedMetric] = useState('quality')
+  const [expert, setExpert] = useState(false)
 
   const { data: overview, isLoading: overviewLoading, error: overviewError } = useAnalyticsOverview(timePeriod)
   const { data: trendsData, isLoading: trendsLoading } = useTimeSeriesTrends(selectedMetric, timePeriod)
@@ -324,6 +325,14 @@ export default function Analytics() {
           <p className="text-bne-muted">Comprehensive insights and trends across the platform</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setExpert(v => !v)}
+            className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+              expert ? 'bg-bne-pine text-bne-chalk border-bne-pine' : 'bg-bne-paper text-bne-muted border-bne-line hover:bg-bne-paper-dim'
+            }`}
+          >
+            {expert ? 'Expert' : 'Plain'}
+          </button>
           {[7, 14, 30, 60].map((days) => (
             <button
               key={days}
@@ -339,6 +348,18 @@ export default function Analytics() {
           ))}
         </div>
       </div>
+
+      {expert && (
+        <Card className="border-bne-moss/30 bg-bne-moss/5">
+          <CardContent className="py-4">
+            <p className="text-xs text-bne-ink-soft">
+              <strong>Expert mode:</strong> Time series points now include aggregation metadata
+              (<code>count</code>, <code>min</code>, <code>max</code>) returned by the analytics endpoint.
+              Use this to assess data quality and variance behind the averaged trend line.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Summary Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
