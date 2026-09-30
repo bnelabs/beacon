@@ -24,6 +24,8 @@ absent.
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -219,6 +221,111 @@ class TestNormalizationStatsComeFromTheTrainSplit:
             source_stats=train_ds.source_stats,
         )
         assert len(unseen_ds) == 0
+
+    def test_multi_source_dataset_refuses_series_below_min_observed_points(self):
+        # The measured AI4Risk tail (ledger L-66): 2-5 point panel edges whose
+        # own 2-5 point mean/std standardize them into a shifted z-space,
+        # carrying 96.6% of the validation SSE. A series below the observed-
+        # point floor must not be standardized at all.
+        dates = pd.date_range("2024-01-01", periods=40, freq="D")
+        frame = pd.concat(
+            [
+                pd.DataFrame({
+                    "Date": dates,
+                    "Close": 10.0 + np.arange(40, dtype=float),
+                    "Value": 10.0 + np.arange(40, dtype=float),
+                    "source_code": "PANEL",
+                    "series_id": "PANEL::LONG",
+                }),
+                pd.DataFrame({
+                    "Date": dates[:5],
+                    "Close": np.array([1.0, 1.0, 1.0, 2.0, 1.5]),
+                    "Value": np.array([1.0, 1.0, 1.0, 2.0, 1.5]),
+                    "source_code": "PANEL",
+                    "series_id": "PANEL::SHORT",
+                }),
+            ],
+            ignore_index=True,
+        )
+
+        dataset = MultiSourceDataset(frame, sequence_length=SEQUENCE_LENGTH)
+
+        # Refused: no statistics, therefore no windows.
+        assert "PANEL::SHORT" not in dataset.source_stats
+        assert "PANEL::SHORT" not in dataset.series_labels
+        # The long series is unaffected, and the PANEL source stays in the
+        # map even though a series of its was refused: num_sources must not
+        # move when a feed's entities are all below the floor.
+        assert len(dataset) == 40 - SEQUENCE_LENGTH
+        assert dataset.sources.tolist() == ["PANEL"]
+
+        # An external-stats dataset (val/test, prediction) refuses it too:
+        # no training statistics -> no ad-hoc standardization.
+        val_ds = MultiSourceDataset(
+            frame,
+            sequence_length=SEQUENCE_LENGTH,
+            source_to_id=dataset.source_to_id,
+            source_stats=dataset.source_stats,
+        )
+        assert "PANEL::SHORT" not in val_ds.series_labels
+        assert len(val_ds) == 40 - SEQUENCE_LENGTH
+
+    def test_multi_source_dataset_min_observed_points_is_configurable(self):
+        dates = pd.date_range("2024-01-01", periods=40, freq="D")
+        six = pd.DataFrame({
+            "Date": dates[:6],
+            "Close": np.array([1.0, 1.1, 1.05, 1.2, 1.15, 1.3]),
+            "Value": np.array([1.0, 1.1, 1.05, 1.2, 1.15, 1.3]),
+            "source_code": "PANEL",
+            "series_id": "PANEL::SIX",
+        })
+        # Six observed points are below the default floor (8) ...
+        assert MultiSourceDataset(six, sequence_length=SEQUENCE_LENGTH).source_stats == {}
+        # ... but the floor is a configuration decision, not a hard constant.
+        ds = MultiSourceDataset(six, sequence_length=SEQUENCE_LENGTH, min_observed_points=6)
+        assert "PANEL::SIX" in ds.source_stats
+
+    def test_multi_scale_trainer_gate_reaches_training_history(self, tmp_path):
+        # End-to-end: the config-plumbed floor must exclude the short series
+        # from what is actually trained on and recorded.
+        dates = pd.date_range("2024-01-01", periods=60, freq="D")
+        frame = pd.concat(
+            [
+                pd.DataFrame({
+                    "Date": dates,
+                    "Close": 10.0 + np.arange(60, dtype=float),
+                    "Value": 10.0 + np.arange(60, dtype=float),
+                    "source_code": "PANEL",
+                    "series_id": "PANEL::LONG",
+                }),
+                pd.DataFrame({
+                    "Date": dates[:5],
+                    "Close": np.array([1.0, 1.0, 1.0, 2.0, 1.5]),
+                    "Value": np.array([1.0, 1.0, 1.0, 2.0, 1.5]),
+                    "source_code": "PANEL",
+                    "series_id": "PANEL::SHORT",
+                }),
+            ],
+            ignore_index=True,
+        )
+        train_df, val_df, test_df = _split_by_date(frame)
+        trainer = MultiScaleTrainer(
+            model_type="temporal_attention",
+            device=torch.device("cpu"),
+            config={
+                "epochs": 1,
+                "sequence_length": SEQUENCE_LENGTH,
+                "batch_size": 8,
+                "d_model": 8,
+                "nhead": 2,
+                "num_layers": 1,
+                "dropout": 0.0,
+            },
+        )
+        trainer.train(train_df, val_df, test_df, str(tmp_path))
+        history = json.loads((tmp_path / "training_history.json").read_text())
+        assert "PANEL::SHORT" not in history["series_ids"]
+        assert "PANEL::LONG" in history["series_ids"]
 
     def test_panel_series_do_not_share_temporal_windows(self):
         dates = pd.date_range("2024-01-01", periods=40, freq="D")

@@ -32,6 +32,20 @@ DEGENERATE_STANDARDIZATION_RELATIVE_STD = 1e-6
 #: series, which is exactly the honest prediction for them.
 STANDARDIZED_VALUE_CLIP = 10.0
 
+#: A series with fewer observed points than this in the TRAINING split is not
+#: standardized at all: a mean/std fitted on 2-5 points carries estimation
+#: error comparable to the series' own signal, so its z-targets shift between
+#: splits. Measured on the 2026-09 job-20 panel (ledger L-66): all 25,236
+#: AI4Risk bank-to-bank edge entities carried <=5 training-split points yet
+#: produced 15,115 train windows (17.0% of all) and 96.6% of the validation
+#: SSE (per-window MSE 36.5 vs 0.45 macro), pinning val loss near 10 and
+#: freezing model selection at epoch 0. Every non-panel series in that panel
+#: exceeded this count. Refusing such series generalizes the L-60 refusal of
+#: near-constant series from "no variance" to "too few points for an honest
+#: variance estimate"; a refused series never enters ``source_stats``, so the
+#: val/test datasets and the prediction path skip it too.
+MIN_OBSERVED_POINTS_PER_SERIES = 8
+
 
 def is_degenerate_standardization(mean: float, std: float) -> bool:
     """True when (mean, std) cannot standardize a series honestly.
@@ -82,12 +96,17 @@ class MultiSourceDataset(Dataset):
     """
 
     def __init__(self, data: pd.DataFrame, sequence_length: int = 30, source_to_id: dict = None,
-                 source_stats: dict = None):
+                 source_stats: dict = None, min_observed_points: int = MIN_OBSERVED_POINTS_PER_SERIES):
         """
         Args:
             data: DataFrame with columns: Date, Value, source_code
             sequence_length: Number of time steps
             source_to_id: Optional pre-defined source to ID mapping (for test/val sets)
+            min_observed_points: A series with fewer observed points than this in
+                the split that computes its statistics (the training split) is
+                skipped: its mean/std is not a reliable standardization. Only
+                consulted when ``source_stats`` is omitted (external-stats
+                datasets are already gated by what training admitted).
             source_stats: Optional pre-computed normalization stats
                 ``{series: {'mean': float, 'std': float}}`` from the TRAINING
                 split, keyed at the grain this dataset groups at -- ``series_id``
@@ -192,6 +211,20 @@ class MultiSourceDataset(Dataset):
             observed_values = values[observed]
             if observed_values.size == 0:
                 logger.warning("Skipping series '%s' – no observed values", series)
+                continue
+            if not self.external_stats and observed_values.size < min_observed_points:
+                # A mean/std fitted on fewer than min_observed_points points is
+                # not a reliable standardization (measured: the 2-5-point
+                # AI4Risk panel edges carried 96.6% of the validation SSE).
+                # Skip it exactly as is_degenerate_standardization skips a
+                # near-constant series: it never enters source_stats, so the
+                # external-stats datasets and the prediction path skip it too.
+                logger.warning(
+                    "Skipping series '%s' – only %d observed point(s) in the "
+                    "training split (< %d required); a mean/std fitted on that "
+                    "many points is not a reliable standardization",
+                    series, observed_values.size, min_observed_points,
+                )
                 continue
 
             # Normalization stats: from the training split when provided, else
@@ -497,13 +530,21 @@ class MultiScaleTrainer:
 
         # Create datasets with per-source normalization
         sequence_length = self.config.get('sequence_length', 30)
+        min_observed_points = int(self.config.get('min_observed_points', MIN_OBSERVED_POINTS_PER_SERIES))
 
         # Create train dataset first to get source mapping AND normalization
         # stats. Val/test are built with the training stats and the training
         # source map: each split standardizing itself is a leak (the split's
         # own data informs the reported metric) and a space mismatch (the
         # model's outputs live in the training split's standardized space).
-        train_dataset = MultiSourceDataset(train_df, sequence_length=sequence_length)
+        # The train dataset also applies the min-observed-points refusal: a
+        # series too short for an honest mean/std never enters source_stats,
+        # so val/test and the prediction path skip it as well.
+        train_dataset = MultiSourceDataset(
+            train_df,
+            sequence_length=sequence_length,
+            min_observed_points=min_observed_points,
+        )
 
         val_dataset = MultiSourceDataset(
             val_df,
