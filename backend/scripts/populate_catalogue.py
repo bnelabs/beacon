@@ -1243,19 +1243,26 @@ def populate_catalogue():
             # ============================================
             # ADDITIONAL FRED INDICATORS
             # ============================================
+            # L-65 (docs/FAILURE_LEDGER.md): RRPONTSYD is the NY Fed overnight
+            # reverse-repo facility dollar VOLUME (billions of USD), not a repo
+            # rate. The stored observations under this code are the genuine
+            # RRPONTSYD values, so the historical identity is preserved and only
+            # the semantics are corrected (see migration
+            # fred_repo_rate_relabel_001). Not default-selected: the canonical
+            # entry FRED_RRPONTSYD serves the same upstream series.
             {
                 "code": "FRED_REPO_RATE",
-                "name": "US Overnight Repo Rate",
-                "description": "Overnight repurchase agreement rate",
+                "name": "US Overnight RRP Facility: Volume of Residual Collateral",
+                "description": "FRED RRPONTSYD - dollar volume of residual collateral in the NY Fed overnight reverse-repo facility, in billions of USD, daily. This is a dollar volume, not an interest rate. It was historically catalogued as 'US Overnight Repo Rate' (percentage); the stored observations under this code are the genuine RRPONTSYD values, and the identity is preserved (see L-65 in docs/FAILURE_LEDGER.md). Not default-selected: the same upstream series is available under the canonical code FRED_RRPONTSYD, and a second default collection of the same endpoint would only duplicate data. Do not use as a rate-family feature.",
                 "category": DataCategory.MONEY_MARKET,
                 "region": DataRegion.NORTH_AMERICA,
-                "risk_types": [RiskType.FUNDING_LIQUIDITY.value, RiskType.MARKET_LIQUIDITY.value],
+                "risk_types": [RiskType.FUNDING_LIQUIDITY.value],
                 "data_source_id": sources["FRED"].id,
                 "endpoint": "RRPONTSYD",
                 "frequency": "daily",
                 "granularity": "macro",
-                "unit": "percentage",
-                "default_selected": True,
+                "unit": "billions_usd",
+                "default_selected": False,
                 "priority": 90,
                 "tags": ["repo", "money_market", "funding"]
             },
@@ -1485,7 +1492,7 @@ def populate_catalogue():
             {
                 "code": "FRED_RRPONTSYD",
                 "name": "ON RRP Facility Usage (Total)",
-                "description": "Daily balances in the NY Fed overnight reverse-repo facility; a gauge of system-wide safe-asset demand and cash abundance.",
+                "description": "Daily balances in the NY Fed overnight reverse-repo facility; a gauge of system-wide safe-asset demand and cash abundance. Canonical catalogue identity for FRED RRPONTSYD; the legacy code FRED_REPO_RATE carries the same upstream series under a preserved historical identity (see L-65 in docs/FAILURE_LEDGER.md).",
                 "category": DataCategory.MONEY_MARKET,
                 "region": DataRegion.NORTH_AMERICA,
                 "risk_types": [RiskType.FUNDING_LIQUIDITY.value],
