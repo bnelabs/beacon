@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.2.4] - 2026-09-30
+
 ### Fixed
 - **`FRED_REPO_RATE` relabelled as an RRP dollar volume, not a repo rate (PR #164, ledger L-65).**
   The FRED endpoint `RRPONTSYD` is the NY Fed overnight reverse-repo facility
