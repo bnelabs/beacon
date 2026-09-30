@@ -290,13 +290,19 @@ wrong. The live backtest ranks it at r²_z = −1.01 (its job-26 holdout R²
 −0.84 is the same artifact), and a live prediction moves it +1,117% in one
 step (0.46 → 5.61) with risk score −1.39 — meaningless as a "rate".
 Detected by: unit/magnitude cross-check against the live FRED endpoint
-description during the 2026-09-25 data audit. Status: **OPEN** — preserve the
-historical identity (no silent re-point of the stored series): either keep
-the existing identity and relabel the catalogue item as Fed overnight RRP
-dollar *volume* (billions USD, daily), excluding it from rate-family
-features, or deliberately assess a separately identified repo-rate series —
-its meaning, unit, and (shorter) coverage — before training on it.
-Re-collect under whichever choice is made.
+description during the 2026-09-25 data audit. Status: **FIXED** (PR #164,
+migration `fred_repo_rate_relabel_001`). Ledger option A was applied: the
+historical identity is preserved (no re-point, no value rewrite) and the
+semantics are corrected on the metadata — the catalogue row is relabelled as
+the NY Fed overnight RRP dollar volume (billions of USD, daily), its
+`risk_types` are aligned with the canonical `FRED_RRPONTSYD` entry,
+`default_selected` is off (no future default panel carries it as a rate; no
+collection duplicates the endpoint), and the unit label on the 3,332 stored
+observation rows is corrected `percentage` → `billions_usd` (values and the
+vintage log untouched). The canonical `FRED_RRPONTSYD` entry notes the
+legacy identity, and the seed script mirrors the relabel. Residual: the
+deployed model (job 26) still carries the series trained as a rate; that is
+corrected in the next retrain, not by rewriting history.
 
 ## C. API and engine honesty bugs
 

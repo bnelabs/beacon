@@ -9,6 +9,21 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Fixed
+- **`FRED_REPO_RATE` relabelled as an RRP dollar volume, not a repo rate (PR #164, ledger L-65).**
+  The FRED endpoint `RRPONTSYD` is the NY Fed overnight reverse-repo facility
+  dollar volume (billions of USD, daily). The catalogue item `FRED_REPO_RATE`
+  stored and trained it as "repo rate / percentage", and the 3,332 stored
+  observation rows carried the wrong unit label (the values 0–2,553.7 are the
+  genuine RRPONTSYD balances — the 2022 peak ≈ $2.55T). Historical identity
+  is preserved: a targeted migration corrects the catalogue row
+  (name/description/unit, `risk_types` aligned with the canonical
+  `FRED_RRPONTSYD` entry, `default_selected` off so no future default panel
+  carries a dollar volume presented as a rate and no collection duplicates
+  the endpoint) and the unit label on the stored observation rows. Values
+  and the vintage log are untouched; the seed script mirrors the relabel so a
+  full catalogue re-seed does not revert it.
+
 ### Added
 - **Results page surfaces coordinate provenance and walk-forward fold status (PR #163).**
   Backtest results now render two new cards: per-series target standardization
