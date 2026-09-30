@@ -411,7 +411,12 @@ class TestPaddingMatchesInference:
             "Date": dates[:4], "Close": values[:4], "Value": values[:4],
             "source_code": "SRC_SHORT",
         })
-        short_ds = MultiSourceDataset(short_df, sequence_length=SEQUENCE_LENGTH)
+        # The observed-points floor is a data-quality decision this test does
+        # not exercise: pin it low so the 4-point source survives and the
+        # assertion stays about the padding law, not the refusal.
+        short_ds = MultiSourceDataset(
+            short_df, sequence_length=SEQUENCE_LENGTH, min_observed_points=2
+        )
         assert len(short_ds) > 0
         padded = short_ds.sequences[0]
         pad_width = SEQUENCE_LENGTH - (len(short_df) - 1)
