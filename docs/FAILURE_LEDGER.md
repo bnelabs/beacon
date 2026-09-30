@@ -829,6 +829,36 @@ redeployed 6.2.1 and re-ran the same four scenarios as background jobs
 stored result parses as strict JSON, and the 27 refused intervals are
 exactly the 27 `null` bounds in the stored result.
 
+**L-66. The multi-scale training objective was dominated by a degenerate
+panel tail: 2–5-point series standardized on their own 2–5-point statistics.**
+The job-20 training panel carries the AI4Risk bank-to-bank edge feed as
+25,236 separate entities. In the training split (2000-01-01..2021-05-20,
+80/20-chronological) every one of them has ≤5 observed points
+(histogram 1:10,116 · 2:5,598 · 3:3,741 · 4:2,363 · 5:3,418). Their per-series
+mean/std is fitted on that many points, so the standardized space shifts
+between splits: they produced 15,115 train windows (17.0% of 88,844) and
+6,778 val windows (26.2% of 25,897), and their val SSE was **96.6% of the
+total** — per-window MSE 36.5 vs 0.45 macro, 12.1% of their val targets
+clipped at the ±10 bound, median |z| 3.2 vs 0.93. Consequence on the deployed
+model (job 26): val loss pinned at 9.89→10.98, model selection frozen at
+the epoch-0 checkpoint, test loss 8.99e10 on the raw scale. This is the
+same failure family as L-60 (near-constant series refuse to standardize),
+extended from "no variance" to "too few points for an honest variance
+estimate". Detected by: per-series holdout R² audit of the job-20 panel
+(2026-09-30), which isolated the tail as the only source with R² < 0 while
+every macro series was ≥ −0.5 on its own scale. Status: **FIXED** (PR #167;
+merge pending) — `MultiSourceDataset` refuses to standardize a series with
+fewer than `min_observed_points` (default 8) observed points in the
+training split; a refused series never enters `source_stats`, so val/test
+and the prediction path skip it exactly as an unknown series is skipped,
+and the source map (66 sources) is unchanged when an entire feed is
+refused, so the model shape is unchanged. Every non-panel series in the
+panel exceeds the floor (minimum 8 observed points outside AI4Risk).
+Pre-validation: gated retraining on the job-20 panel with the job-26
+config is running; acceptance is val loss < 1.0 (macro-level). The fix
+also removes the L-65 residual from future default panels in combination
+with the FRED_REPO_RATE relabel.
+
 ## D. Test and CI infrastructure that lied
 
 **L-16. The deep backend suite could not start at all.** The sharded rewrite
