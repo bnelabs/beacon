@@ -163,7 +163,11 @@ function volatilityVerdict(entry: VolatilityBaselineEntry): string {
 
 function VolatilityBaselinesCard({ jobId }: { jobId: string }) {
   const { data, isLoading } = useBacktestReport(jobId)
-  const bySource = data?.metrics?.volatility_baselines?.by_source || {}
+  // backend returns by_series; keep by_source as alias for compatibility
+  const bySource =
+    data?.metrics?.volatility_baselines?.by_series ||
+    data?.metrics?.volatility_baselines?.by_source ||
+    {}
   const sources = Object.entries(bySource)
   const measuredCount = sources.filter(
     ([, entry]) => entry && entry.garch && entry.unconditional && entry.lift
@@ -237,6 +241,189 @@ function VolatilityBaselinesCard({ jobId }: { jobId: string }) {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+/** Per-series provenance for the backtest's standardization coordinates
+ *  (PR #156/#157): which series were standardized on checkpoint statistics
+ *  vs pre-test payload statistics, which sources carry trained vs fallback
+ *  embeddings, and which series are excluded from pooled metrics with the
+ *  plain-language reason. Provenance is a status, never an error. */
+function CoordinateProvenanceCard({ jobId }: { jobId: string }) {
+  const { data, isLoading } = useBacktestReport(jobId)
+  const metrics = data?.metrics
+  const targetStats = metrics?.target_stats_provenance || {}
+  const embedding = metrics?.source_embedding_provenance || {}
+  const nonComparable = metrics?.non_comparable_series || {}
+
+  const targetEntries = Object.entries(targetStats)
+  const embeddingEntries = Object.entries(embedding)
+  const nonComparableEntries = Object.entries(nonComparable)
+
+  const preTestSeries = targetEntries.filter(([, v]) => v === 'pre_test').map(([k]) => k)
+  const fallbackSources = embeddingEntries.filter(([, v]) => v !== 'trained').map(([k]) => k)
+  const hasAnything = targetEntries.length > 0 || embeddingEntries.length > 0 || nonComparableEntries.length > 0
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base">Coordinate provenance — job #{jobId}</CardTitle>
+          {hasAnything ? (
+            <Badge variant="success" size="sm">recorded</Badge>
+          ) : (
+            <Badge size="sm">not recorded</Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-bne-muted">Loading provenance metadata…</p>
+        ) : !hasAnything ? (
+          <EmptyState
+            compact
+            title="No provenance metadata for this backtest"
+            hint="Backtests run before the 6.2.2 coordinate fix do not record which statistics standardized each series — the numbers are still trustworthy, just unprovenanced."
+          />
+        ) : (
+          <div className="space-y-4">
+            {nonComparableEntries.length > 0 && (
+              <div>
+                <p className="bne-micro mb-1">
+                  Excluded from pooled metrics ({nonComparableEntries.length} series — not comparable out-of-sample)
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-[13px]">
+                    <thead>
+                      <tr className="bne-micro">
+                        <th className="py-1 pr-4">Series</th>
+                        <th className="py-1">Why excluded</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-bne-ink-soft">
+                      {nonComparableEntries.map(([series, reason]) => (
+                        <tr key={series} className="border-t border-bne-line-soft">
+                          <td className="py-1.5 pr-4 font-mono text-xs whitespace-nowrap">{series}</td>
+                          <td className="py-1.5 text-xs">{reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div>
+                <p className="bne-micro mb-1">
+                  Target standardization: {targetEntries.length - preTestSeries.length} checkpoint / {preTestSeries.length} pre-test
+                </p>
+                {preTestSeries.length > 0 ? (
+                  <p className="text-bne-ink-soft font-mono leading-relaxed">{preTestSeries.join(', ')}</p>
+                ) : (
+                  <p className="text-bne-faint">All series standardized on checkpoint statistics.</p>
+                )}
+              </div>
+              <div>
+                <p className="bne-micro mb-1">
+                  Source embeddings: {embeddingEntries.length - fallbackSources.length} trained / {fallbackSources.length} fallback
+                </p>
+                {fallbackSources.length > 0 ? (
+                  <p className="text-bne-ink-soft font-mono leading-relaxed">{fallbackSources.join(', ')}</p>
+                ) : (
+                  <p className="text-bne-faint">All sources carry trained embeddings.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+/** Walk-forward fold execution status: how many of the declared folds
+ *  actually ran, and why the rest were skipped. Zero executed folds is a
+ *  declared status with per-series reasons, never a silent gap. */
+function WalkForwardCard({ jobId }: { jobId: string }) {
+  const { data, isLoading } = useBacktestReport(jobId)
+  const wf = data?.walk_forward || data?.metrics?.walk_forward
+  const config = wf?.config
+  const folds = wf?.folds || []
+  const skipped = wf?.skipped_series || {}
+  const skippedEntries = Object.entries(skipped)
+
+  const hasSummary = Boolean(config || folds.length > 0 || skippedEntries.length > 0)
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base">Walk-forward folds — job #{jobId}</CardTitle>
+          {folds.length > 0 ? (
+            <Badge variant="success" size="sm">{folds.length} executed</Badge>
+          ) : hasSummary ? (
+            <Badge size="sm">0 executed</Badge>
+          ) : (
+            <Badge size="sm">not run</Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-bne-muted">Loading fold status…</p>
+        ) : !hasSummary ? (
+          <EmptyState
+            compact
+            title="No walk-forward track for this backtest"
+            hint="This job did not carry a walk-forward configuration."
+          />
+        ) : (
+          <div className="space-y-3">
+            {config && (
+              <p className="text-xs text-bne-muted">
+                Declared: {config.n_splits ?? '—'}-fold {config.expanding ? 'expanding' : 'rolling'} · test size {config.test_size ?? '—'} ·
+                min train {config.min_train_size ?? '—'} · aggregation {wf?.aggregation ?? '—'}
+              </p>
+            )}
+            {folds.length > 0 ? (
+              <p className="text-xs text-bne-ink-soft">
+                {folds.length} fold(s) executed and scored.
+              </p>
+            ) : (
+              <p className="text-xs text-bne-ink-soft">
+                No fold could run: every series was skipped
+                {skippedEntries.length > 0 ? ` (${skippedEntries.length} series)` : ''}.
+                {skippedEntries.length > 0 && (
+                  <span className="text-bne-faint"> Representative reason: {skippedEntries[0][1]}</span>
+                )}
+                {' '}
+                {wf?.skipped && <span className="text-bne-faint">({wf.skipped})</span>}
+              </p>
+            )}
+            {skippedEntries.length > 0 && (
+              <div className="max-h-56 overflow-y-auto">
+                <table className="w-full text-left text-[13px]">
+                  <thead>
+                    <tr className="bne-micro">
+                      <th className="py-1 pr-4">Series</th>
+                      <th className="py-1">Skip reason</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-bne-ink-soft">
+                    {skippedEntries.map(([series, reason]) => (
+                      <tr key={series} className="border-t border-bne-line-soft">
+                        <td className="py-1.5 pr-4 font-mono text-xs whitespace-nowrap">{series}</td>
+                        <td className="py-1.5 text-xs">{reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </CardContent>
@@ -757,6 +944,8 @@ export default function Results({ params = {} }: ResultsProps) {
       <div className="space-y-6">
         {validationJobId && <ValidationReportCard jobId={validationJobId} />}
         {validationJobId && <VolatilityBaselinesCard jobId={validationJobId} />}
+        {validationJobId && <CoordinateProvenanceCard jobId={validationJobId} />}
+        {validationJobId && <WalkForwardCard jobId={validationJobId} />}
         {scenarioError && (
           <ErrorMessage
             title="Unable to load scenario"

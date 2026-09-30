@@ -335,6 +335,24 @@ export interface VolatilityBaselineEntry {
   [key: string]: unknown
 }
 
+/** Walk-forward fold summary (top level of the backtest report, mirrored
+ *  under metrics): the declared fold configuration, the folds actually
+ *  executed (empty = none ran), and the per-series skip reasons. */
+export interface WalkForwardSummary {
+  config?: {
+    n_splits?: number | null
+    test_size?: number | null
+    expanding?: boolean | null
+    gap?: number | null
+    min_train_size?: number | null
+  } | null
+  folds?: unknown[] | null
+  aggregation?: string | null
+  skipped_series?: Record<string, string> | null
+  skipped?: string | null
+  [key: string]: unknown
+}
+
 /** GET /api/v2/reports/backtest/{job_id} — the full backtest report
  *  (backend/schemas/predictions_v2.BacktestReport). Jobs that are not
  *  completed answer the progress payload instead: status + progress, no
@@ -345,11 +363,19 @@ export interface BacktestReport {
   progress?: number | null
   current_step?: string | null
   metrics?: (Record<string, unknown> & {
-    volatility_baselines?: { by_source?: Record<string, VolatilityBaselineEntry | null> | null } | null
+    // backend returns by_series; keep by_source as alias for compatibility
+    volatility_baselines?: {
+      by_series?: Record<string, VolatilityBaselineEntry | null> | null
+      by_source?: Record<string, VolatilityBaselineEntry | null> | null
+    } | null
+    target_stats_provenance?: Record<string, string> | null
+    source_embedding_provenance?: Record<string, string> | null
+    non_comparable_series?: Record<string, string> | null
+    walk_forward?: WalkForwardSummary | null
   }) | null
   metadata?: Record<string, unknown> | null
   quant_metrics?: Record<string, unknown> | null
-  walk_forward?: Record<string, unknown> | null
+  walk_forward?: WalkForwardSummary | null
   [key: string]: unknown
 }
 
