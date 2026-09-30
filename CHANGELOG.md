@@ -9,6 +9,23 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Added
+- **Results page surfaces coordinate provenance and walk-forward fold status (PR #163).**
+  Backtest results now render two new cards: per-series target standardization
+  provenance (checkpoint vs pre-test), source embedding provenance
+  (trained vs fallback_id_0) and the non-comparable series excluded from pooled
+  metrics with plain-language reasons; plus the declared walk-forward fold
+  configuration, the number of folds actually executed, and per-series skip
+  reasons. Zero executed folds is shown as a declared status with reasons,
+  never a silent gap.
+
+### Fixed
+- **Volatility baselines no longer render as "not measured" (PR #163).**
+  The v2 backtest report returns `volatility_baselines.by_series`, but the
+  Results card only read `by_source`, so measured volatility baselines were
+  invisible in production. The card now prefers `by_series` and falls back to
+  `by_source`, matching the ValidationBlock alias pattern from PR #161.
+
 ## [6.2.3] - 2026-09-28
 
 ### Fixed

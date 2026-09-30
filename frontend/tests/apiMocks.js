@@ -125,7 +125,7 @@ const jobsList = [
           }
         },
         volatility_baselines: {
-          by_source: {
+          by_series: {
             fdic: {
               n_folds: 4,
               n_scored_folds: 4,
@@ -148,8 +148,29 @@ const jobsList = [
         mse: 0.19,
         mae: 0.31,
         rmse: 0.44,
-        r2: 0.83
+        r2: 0.83,
+        target_stats_provenance: {
+          fdic: 'checkpoint',
+          ecb: 'pre_test'
+        },
+        source_embedding_provenance: {
+          fdic: 'trained',
+          ecb: 'fallback_id_0'
+        },
+        non_comparable_series: {
+          ecb: 'no checkpoint statistics: the engine standardized its input in-sample (payload-window fallback), so its prediction coordinate is not out-of-sample; excluded from pooled metrics'
+        },
+        non_comparable_rows_excluded: 412
       }
+    },
+    walk_forward: {
+      config: { n_splits: 5, test_size: 0.2, expanding: true, gap: 0, min_train_size: 30 },
+      folds: [],
+      aggregation: 'per_series',
+      skipped_series: {
+        ecb: 'Not enough training samples for the requested folds: the first fold would have 3 train samples, below min_train_size=30 (n_samples=33, n_splits=5, test_size=0.2)'
+      },
+      skipped: 'no series had enough timesteps for the fold configuration'
     },
     error_message: null,
     user_friendly_error: null,
