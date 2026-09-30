@@ -9,6 +9,8 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+## [6.2.3] - 2026-09-28
+
 ### Fixed
 - **Frontend validation view now matches backend report shape (PR #161).**
   Backend `/reports/validation/{jobId}` returns `series_measured`/`by_series`/`quant_metrics`; frontend previously expected `sources_measured`/`by_source`. Types now accept both names and Results.tsx falls back to the new fields, so the validation table renders correctly and the measured source count is displayed. Also fixes Scenario GET/POST contract parity: GET `/models/{id}/scenarios/{scenario_id}` now returns `scenario_parameters` and `network_analysis` from meta, matching the POST response.
