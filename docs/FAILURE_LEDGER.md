@@ -300,9 +300,13 @@ the NY Fed overnight RRP dollar volume (billions of USD, daily), its
 collection duplicates the endpoint), and the unit label on the 3,332 stored
 observation rows is corrected `percentage` → `billions_usd` (values and the
 vintage log untouched). The canonical `FRED_RRPONTSYD` entry notes the
-legacy identity, and the seed script mirrors the relabel. Residual: the
-deployed model (job 26) still carries the series trained as a rate; that is
-corrected in the next retrain, not by rewriting history.
+legacy identity, and the seed script mirrors the relabel. The targeted
+re-collect prescribed by the fix was run (job 41, 2026-09-29): 1,245 rows
+persisted under the corrected metadata (quality 100, tail 2026-09-29 =
+11.446 billions USD, matching live FRED), so every stored row now carries
+the true unit. Residual: the deployed model (job 26) still carries the
+series trained as a rate; that is corrected in the next retrain, not by
+rewriting history.
 
 ## C. API and engine honesty bugs
 
