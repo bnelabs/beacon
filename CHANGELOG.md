@@ -9,6 +9,21 @@ record is the root `VERSION` file; `scripts/release.py` moves the
 
 ## [Unreleased]
 
+### Fixed
+- **Training refuses to standardize series below a min-observed-points floor (PR #167, ledger L-66).**
+  A mean/std fitted on 2–5 points is not a reliable standardization: the
+  estimate's own error is comparable to the series' signal, so its z-targets
+  shift between splits and dominate the pooled validation loss. Measured on
+  the job-20 training panel: all 25,236 AI4Risk bank-to-bank edge entities
+  carried ≤5 training-split points yet produced 15,115 train windows (17.0%)
+  and 96.6% of the validation SSE (per-window MSE 36.5 vs 0.45 macro),
+  pinning val loss near 10 and freezing model selection at the epoch-0
+  checkpoint. `MultiSourceDataset` now skips such series when computing
+  training-split statistics (configurable `min_observed_points`, default 8).
+  A refused series never enters `source_stats`, so val/test and the
+  prediction path skip it too, and the source count is unchanged when an
+  entire feed is refused, so the model shape is unchanged.
+
 ## [6.2.4] - 2026-09-30
 
 ### Fixed
